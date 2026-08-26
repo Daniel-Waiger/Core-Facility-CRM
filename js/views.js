@@ -1,4 +1,4 @@
-/* views.js — all screens */
+/* views.js — all screens & renderers */
 (function (global) {
   'use strict';
   const C = global.CONST;
@@ -9,93 +9,173 @@
 
   /* ---------------- Dashboard ---------------- */
   function dashboard() {
-    const now = new Date().toISOString().slice(0, 10);
+    const now = today();
     const counts = {};
     for (const s of C.STATUS) counts[s] = 0;
-    const rows = global.DB.q('SELECT status, COUNT(*) FROM projects GROUP BY status');
-    for (const [st, n] of rows) counts[st] = n;
+    const stRows = global.DB.rows('SELECT status, COUNT(*) as n FROM projects GROUP BY status');
+    for (const r of stRows) counts[r.status] = r.n;
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     const active = counts['Active'] || 0;
 
     const win = new Date(); win.setDate(win.getDate() + 30);
     const winStr = win.toISOString().slice(0, 10);
-    const upcoming = global.DB.q(`
-      SELECT m.name, m.due_date, m.status, p.title
+    const upcoming = global.DB.rows(`
+      SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
       WHERE m.due_date IS NOT NULL AND m.due_date <= ? AND m.status != 'done'
-      ORDER BY m.due_date ASC LIMIT 8`, [winStr]);
-    const overdue = global.DB.q(`
-      SELECT m.name, m.due_date, p.title
+      ORDER BY m.due_date ASC LIMIT 10`, [winStr]);
+
+    const overdue = global.DB.rows(`
+      SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
-      WHERE m.due_date < ? AND m.status != 'done'
-      ORDER BY m.due_date ASC`, [now]);
+      WHERE m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
+      ORDER BY m.due_date ASC LIMIT 10`, [now]);
 
     return `
     <div class="grid cols-4">
       <div class="card stat"><span class="n">${total}</span><span class="l">Total projects</span></div>
-      <div class="card stat"><span class="n">${active}</span><span class="l">Active</span></div>
-      <div class="card stat"><span class="n">${overdue.length}</span><span class="l">Overdue milestones</span></div>
-      <div class="card stat"><span class="n">${counts['Completed'] || 0}</span><span class="l">Completed</span></div>
+      <div class="card stat"><span class="n" style="color:var(--primary)">${active}</span><span class="l">Active</span></div>
+      <div class="card stat"><span class="n" style="color:var(--danger)">${overdue.length}</span><span class="l">Overdue milestones</span></div>
+      <div class="card stat"><span class="n" style="color:var(--success)">${counts['Completed'] || 0}</span><span class="l">Completed</span></div>
     </div>
     <div class="grid cols-2">
       <div class="card">
-        <div class="card-title">${ic('target')} Upcoming milestones</div>
+        <div class="card-title">${ic('target')} Upcoming milestones (Next 30 days)</div>
         <div class="card-body">
-          ${upcoming.length ? upcoming.map((r) => `
-            <div class="row" style="padding:8px 0;border-bottom:1px solid var(--border)">
-              <span class="grow" style="font-weight:500">${esc(r[0])}</span>
-              <span class="faint small">${esc(r[3])}</span>
-              <span class="badge ${r[2] === 'in-progress' ? 'primary' : 'neutral'}">${r[2]}</span>
-              <span class="mono small">${fmt(r[1])}</span>
-            </div>`).join('') : `<div class="empty"><div class="ic">${ic('calendar')}</div><div class="t">Nothing due</div><div class="s">No milestones in the next 30 days.</div></div>`}
+          ${upcoming.length ? upcoming.map((m) => `
+            <div class="row milestone-quick-row">
+              <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
+              <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
+              <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status">${m.status}</span>
+              <span class="mono small">${fmt(m.due_date)}</span>
+            </div>`).join('') : emptyState('calendar', 'Nothing due soon', 'No pending milestones in the next 30 days.')}
         </div>
       </div>
       <div class="card">
-        <div class="card-title">${ic('alert')} Overdue</div>
+        <div class="card-title" style="color:var(--danger)">${ic('alert')} Overdue milestones</div>
         <div class="card-body">
-          ${overdue.length ? overdue.map((r) => `
-            <div class="row" style="padding:8px 0;border-bottom:1px solid var(--border)">
-              <span class="grow" style="font-weight:500">${esc(r[0])}</span>
-              <span class="faint small">${esc(r[1])}</span>
-              <span class="badge danger">overdue</span>
-            </div>`).join('') : `<div class="empty"><div class="ic">${ic('check')}</div><div class="t">All clear</div><div class="s">No overdue milestones.</div></div>`}
+          ${overdue.length ? overdue.map((m) => `
+            <div class="row milestone-quick-row">
+              <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
+              <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
+              <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to mark done">overdue</span>
+              <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
+            </div>`).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
         </div>
       </div>
     </div>`;
   }
 
   /* ---------------- Projects list ---------------- */
+  let projectFilter = { query: '', status: '', priority: '', modality: '' };
+  function setProjectFilter(f) {
+    projectFilter = Object.assign(projectFilter, f);
+    global.App.refresh();
+  }
+
   function projects() {
-    const rows = global.DB.q(`
-      SELECT p.id, p.title, p.status, p.priority, p.pi_id, p.start_date, p.end_date,
-             (SELECT COUNT(*) FROM milestones m WHERE m.project_id = p.id),
-             (SELECT COALESCE(SUM(CASE WHEN m.status='done' THEN 1 ELSE 0 END),0) FROM milestones m WHERE m.project_id = p.id)
-      FROM projects p ORDER BY p.updated_at DESC`);
-    const piNames = global.DB.q('SELECT id, name FROM people');
-    const piMap = Object.fromEntries(piNames.map((r) => [r[0], r[1]]));
-    if (!rows.length) return emptyState('folder', 'No projects yet', 'Create your first project to start tracking.');
+    const allProjects = global.DB.rows(`
+      SELECT p.*,
+             (SELECT COUNT(*) FROM milestones m WHERE m.project_id = p.id) as ms_total,
+             (SELECT COALESCE(SUM(CASE WHEN m.status='done' THEN 1 ELSE 0 END),0) FROM milestones m WHERE m.project_id = p.id) as ms_done,
+             pe.name as pi_name
+      FROM projects p
+      LEFT JOIN people pe ON pe.id = p.pi_id
+      ORDER BY p.updated_at DESC`);
+
+    // Apply client-side filters
+    const qLower = (projectFilter.query || '').trim().toLowerCase();
+    const rows = allProjects.filter((p) => {
+      if (projectFilter.status && p.status !== projectFilter.status) return false;
+      if (projectFilter.priority && p.priority !== projectFilter.priority) return false;
+      if (projectFilter.modality && !(p.modality || '').includes(projectFilter.modality)) return false;
+      if (qLower) {
+        const textToSearch = `${p.title} ${p.code} ${p.pi_name || ''} ${p.funding || ''} ${p.modality || ''} ${p.sample || ''} ${p.tags || ''} ${p.notes || ''}`.toLowerCase();
+        if (!textToSearch.includes(qLower)) return false;
+      }
+      return true;
+    });
+
     return `
+    <div class="card mb-16">
+      <div class="filter-bar">
+        <div class="search-input-wrap grow">
+          <span class="search-icon">${ic('search')}</span>
+          <input type="text" class="input search-input" id="proj-search" placeholder="Search by title, code, PI, tags, modality, funding..." value="${esc(projectFilter.query)}" />
+        </div>
+        <select class="input select-filter" id="proj-status-filter" style="width:140px">
+          <option value="">All Statuses</option>
+          ${C.STATUS.map((s) => `<option value="${s}" ${projectFilter.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+        <select class="input select-filter" id="proj-priority-filter" style="width:130px">
+          <option value="">All Priorities</option>
+          ${C.PRIORITY.map((pr) => `<option value="${pr}" ${projectFilter.priority === pr ? 'selected' : ''}>${pr}</option>`).join('')}
+        </select>
+        <select class="input select-filter" id="proj-modality-filter" style="width:140px">
+          <option value="">All Modalities</option>
+          ${C.MODALITY.map((m) => `<option value="${m}" ${projectFilter.modality === m ? 'selected' : ''}>${m}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary" data-act="new-project">${ic('plus')} New Project</button>
+      </div>
+    </div>
+
+    ${!rows.length ? emptyState('folder', 'No matching projects', projectFilter.query || projectFilter.status ? 'Try changing your search or filters.' : 'Create your first project to start tracking.') : `
     <div class="card">
       <table class="tbl">
-        <thead><tr><th>Title</th><th>Status</th><th>Priority</th><th>PI</th><th>Progress</th><th>Start</th><th>End</th><th></th></tr></thead>
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>PI</th>
+            <th>Modality / Tags</th>
+            <th>Progress</th>
+            <th>Timeline</th>
+            <th style="text-align:right">Actions</th>
+          </tr>
+        </thead>
         <tbody>
-          ${rows.map((r) => {
-            const [id, title, status, priority, piId, start, end, total, done] = r;
+          ${rows.map((p) => {
+            const total = p.ms_total || 0;
+            const done = p.ms_done || 0;
             const pct = total ? Math.round((done / total) * 100) : 0;
-            return `<tr class="row-link" data-goto="project" data-id="${id}">
-              <td><span style="font-weight:600">${esc(title)}</span></td>
-              <td>${statusBadge(status)}</td>
-              <td><span class="badge neutral">${esc(priority)}</span></td>
-              <td class="muted small">${esc(piMap[piId] || '—')}</td>
-              <td><div class="row"><div class="progress seg" style="width:90px"><i style="width:${pct}%"></i></div><span class="faint small">${pct}%</span></div></td>
-              <td class="mono small">${fmt(start)}</td>
-              <td class="mono small">${fmt(end)}</td>
-              <td class="faint">${ic('chevron')}</td>
+            const flags = (p.flags || '').split(',').filter(Boolean);
+            return `
+            <tr class="row-link" data-goto="project" data-id="${p.id}">
+              <td>
+                <div style="font-weight:600;font-size:14px;color:var(--text)">${esc(p.title)}</div>
+                <div class="faint mono small">Code: ${esc(p.code)}</div>
+              </td>
+              <td>${statusBadge(p.status)}</td>
+              <td><span class="badge ${p.priority === 'High' ? 'danger' : p.priority === 'Low' ? 'neutral' : 'warning'}">${esc(p.priority || 'Medium')}</span></td>
+              <td class="muted small">${esc(p.pi_name || '—')}</td>
+              <td>
+                <div class="chips">
+                  ${p.modality ? `<span class="chip-sm">${esc(p.modality)}</span>` : ''}
+                  ${p.sample ? `<span class="chip-sm">${esc(p.sample)}</span>` : ''}
+                  ${flags.map((f) => `<span class="badge danger" style="padding:1px 6px;font-size:10px">${esc(f)}</span>`).join('')}
+                </div>
+              </td>
+              <td>
+                <div class="row" style="gap:6px">
+                  <div class="progress seg" style="width:80px"><i style="width:${pct}%"></i></div>
+                  <span class="mono small faint">${pct}%</span>
+                </div>
+                <div class="faint small">${done}/${total} done</div>
+              </td>
+              <td class="mono small">
+                <div>${fmt(p.start_date)}</div>
+                <div class="faint">to ${fmt(p.end_date)}</div>
+              </td>
+              <td style="text-align:right" onclick="event.stopPropagation()">
+                <button class="btn btn-ghost btn-sm" data-act="edit-project" data-id="${p.id}" title="Edit Project">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-goto="project" data-id="${p.id}" title="Open Details">${ic('chevron')}</button>
+              </td>
             </tr>`;
           }).join('')}
         </tbody>
       </table>
-    </div>`;
+    </div>`}`;
   }
 
   function statusBadge(s) {
@@ -105,164 +185,328 @@
 
   /* ---------------- Project detail ---------------- */
   function projectDetail(id) {
-    const p = global.DB.q1('SELECT * FROM projects WHERE id=?', [id]);
-    if (!p) return `<div class="empty"><div class="t">Project not found</div></div>`;
-    const [pid, title, code, status, priority, funding, modality, tags, piId, start, end, notes, createdAt, updatedAt] = p;
+    const p = global.DB.row('SELECT p.*, pe.name as pi_name FROM projects p LEFT JOIN people pe ON pe.id = p.pi_id WHERE p.id=?', [id]);
+    if (!p) return emptyState('folder', 'Project not found', 'This project may have been deleted.');
 
-    const ppl = global.DB.q(`
-      SELECT pp.role, pe.id, pe.name, pe.type FROM project_people pp
+    const ppl = global.DB.rows(`
+      SELECT pp.role, pe.id, pe.name, pe.type, pe.email
+      FROM project_people pp
       JOIN people pe ON pe.id = pp.person_id
       WHERE pp.project_id=?`, [id]);
-    const inst = global.DB.q(`
-      SELECT pi.instrument_id, i.name, i.kind, i.status FROM project_instruments pi
+
+    const inst = global.DB.rows(`
+      SELECT pi.instrument_id, i.name, i.kind, i.status
+      FROM project_instruments pi
       JOIN instruments i ON i.id = pi.instrument_id
       WHERE pi.project_id=?`, [id]);
-    const ms = global.DB.q('SELECT * FROM milestones WHERE project_id=? ORDER BY rowid', [id]);
-    const kv = global.DB.q('SELECT * FROM kv WHERE project_id=? ORDER BY rowid', [id]);
-    const mtgs = global.DB.q('SELECT * FROM meetings WHERE project_id=? ORDER BY date DESC', [id]);
-    const files = global.DB.q('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
-    const prog = global.DB.projectProgress(pid);
+
+    const ms = global.DB.rows(`
+      SELECT m.*,
+             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+      FROM milestones m
+      WHERE m.project_id=?
+      ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
+
+    const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
+    const mtgs = global.DB.rows('SELECT * FROM meetings WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
+    const files = global.DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
+    const prog = global.DB.projectProgress(p.id);
+    const flags = (p.flags || '').split(',').filter(Boolean);
 
     return `
-    <div class="row mb-8" style="align-items:flex-start">
-      <div class="grow">
-        <div class="row"><span class="t" style="font-size:20px;font-weight:700">${esc(title)}</span> ${statusBadge(status)}</div>
-        <div class="faint small mt-8">Code ${esc(code)} · created ${fmt(createdAt)}</div>
+    <div class="card mb-16 project-header-card">
+      <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div class="grow">
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <span class="project-title">${esc(p.title)}</span>
+            ${statusBadge(p.status)}
+            <span class="badge ${p.priority === 'High' ? 'danger' : p.priority === 'Low' ? 'neutral' : 'warning'}">${esc(p.priority || 'Medium')} Priority</span>
+          </div>
+          <div class="faint small mt-8" style="display:flex;gap:16px;flex-wrap:wrap">
+            <span><strong>Code:</strong> <span class="mono">${esc(p.code)}</span></span>
+            <span><strong>PI:</strong> ${esc(p.pi_name || 'None')}</span>
+            <span><strong>Created:</strong> ${fmt(p.created_at)}</span>
+            <span><strong>Timeline:</strong> ${fmt(p.start_date)} → ${fmt(p.end_date)}</span>
+          </div>
+        </div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" data-act="edit-project" data-id="${p.id}">${ic('edit')} Edit Project</button>
+          <button class="btn btn-secondary btn-sm" data-act="export-xlsx" title="Export Spreadsheet">${ic('file')} XLSX</button>
+          <button class="btn btn-secondary btn-sm" data-act="export-docx" title="Export Word Document">${ic('file')} DOCX</button>
+          <button class="btn btn-secondary btn-sm" data-act="export-pdf" title="Export Formatted PDF">${ic('file')} PDF</button>
+          <button class="btn btn-danger btn-sm" data-act="delete-project" title="Delete Project">${ic('trash')} Delete</button>
+        </div>
       </div>
-      <div class="row">
-        <button class="btn btn-secondary btn-sm" data-act="export-xlsx">XLSX</button>
-        <button class="btn btn-secondary btn-sm" data-act="export-docx">DOCX</button>
-        <button class="btn btn-secondary btn-sm" data-act="export-pdf">PDF</button>
-        <button class="btn btn-danger btn-sm" data-act="delete-project">Delete</button>
+
+      <!-- Quick Status Lifecycle Bar -->
+      <div class="lifecycle-bar mt-16">
+        <span class="faint small font-medium">Quick Status:</span>
+        <div class="row" style="gap:6px;flex-wrap:wrap">
+          ${C.STATUS.map((st) => `
+            <button class="btn btn-sm ${p.status === st ? 'btn-primary' : 'btn-ghost'}" data-act="set-project-status" data-status="${st}">
+              ${st}
+            </button>
+          `).join('')}
+        </div>
       </div>
     </div>
 
-    <div class="card">
+    <!-- Progress Card -->
+    <div class="card mb-16">
       <div class="row mb-8">
-        <div class="grow"><span class="card-title">${ic('target')} Progress</span></div>
-        <span class="faint small">${prog.done}/${prog.total} milestones</span>
+        <div class="grow"><span class="card-title">${ic('target')} Overall Progress</span></div>
+        <span class="mono font-medium">${prog.pct}% (${prog.done} of ${prog.total} milestones done)</span>
       </div>
-      <div class="progress seg"><i style="width:${prog.pct}%"></i></div>
-      <div class="row mt-8">
-        <span class="mono small">${prog.pct}%</span>
-        <span class="faint small">computed from milestones</span>
-      </div>
+      <div class="progress seg" style="height:12px"><i style="width:${prog.pct}%"></i></div>
     </div>
 
-    <div class="grid cols-2">
+    <div class="grid cols-2 mb-16">
+      <!-- Project Metadata & Tags Card -->
       <div class="card">
-        <div class="card-title">${ic('folder')} Details</div>
+        <div class="row mb-8">
+          <div class="grow"><span class="card-title">${ic('tag')} Metadata &amp; Tags</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="kv-add">${ic('plus')} Add Field</button>
+        </div>
         <div class="card-body">
+          <div class="metadata-grid">
+            <div class="meta-item"><span class="meta-label">Funding:</span> <span class="meta-val">${esc(p.funding || '—')}</span></div>
+            <div class="meta-item"><span class="meta-label">Modality:</span> <span class="meta-val">${esc(p.modality || '—')}</span></div>
+            <div class="meta-item"><span class="meta-label">Sample Type:</span> <span class="meta-val">${esc(p.sample || '—')}</span></div>
+            <div class="meta-item"><span class="meta-label">Flags:</span> <span class="meta-val">${flags.length ? flags.map((f) => `<span class="badge danger">${esc(f)}</span>`).join(' ') : '—'}</span></div>
+            <div class="meta-item" style="grid-column: span 2"><span class="meta-label">Tags:</span> <span class="meta-val">${esc(p.tags || '—')}</span></div>
+            ${p.notes ? `<div class="meta-item" style="grid-column: span 2"><span class="meta-label">Notes:</span> <span class="meta-val">${esc(p.notes)}</span></div>` : ''}
+          </div>
+
+          ${kv.length ? `
+          <div class="divider"></div>
           <div class="kv">
-            ${kv.map((r) => `<div class="kv-row"><span class="k">${esc(r[1])}</span><span class="v">${esc(r[2])}</span><span class="del" data-act="kv-del" data-id="${r[0]}">${ic('x')}</span></div>`).join('')}
-          </div>
-          <div class="row mt-8">
-            <button class="btn btn-ghost btn-sm" data-act="kv-add">${ic('plus')} Add field</button>
-          </div>
+            ${kv.map((r) => `
+              <div class="kv-row">
+                <span class="k">${esc(r.key)}</span>
+                <span class="v">${esc(r.value)}</span>
+                <div class="row" style="gap:4px">
+                  <span class="del" data-act="kv-edit" data-id="${r.id}" title="Edit field">${ic('edit')}</span>
+                  <span class="del" data-act="kv-del" data-id="${r.id}" title="Delete field">${ic('x')}</span>
+                </div>
+              </div>`).join('')}
+          </div>` : ''}
         </div>
       </div>
+
+      <!-- Team Card -->
       <div class="card">
-        <div class="card-title">${ic('users')} Team</div>
+        <div class="row mb-8">
+          <div class="grow"><span class="card-title">${ic('users')} Team &amp; Collaborators</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="add-project-person">${ic('plus')} Add Member</button>
+        </div>
         <div class="card-body">
-          ${ppl.length ? ppl.map((r) => `<div class="person-card"><div class="avatar">${esc(r[2][0] || '?')}</div><div class="grow"><div style="font-weight:500">${esc(r[2])}</div><div class="faint small">${esc(r[3])}${r[0] ? ' · ' + esc(r[0]) : ''}</div></div></div>`).join('') : `<div class="empty"><div class="t">No team</div><div class="s">Add people to this project.</div></div>`}
-          <div class="row mt-8"><button class="btn btn-ghost btn-sm" data-act="add-person">${ic('plus')} Add person</button></div>
+          ${ppl.length ? ppl.map((r) => `
+            <div class="person-card">
+              <div class="avatar">${esc((r.name || '?')[0])}</div>
+              <div class="grow">
+                <div style="font-weight:600">${esc(r.name)} <span class="badge neutral" style="font-size:10.5px">${esc(r.type)}</span></div>
+                <div class="faint small">${r.role ? 'Role: ' + esc(r.role) + ' · ' : ''}${esc(r.email || '')}</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" data-act="remove-project-person" data-id="${r.id}" title="Remove member">${ic('trash')}</button>
+            </div>`).join('') : emptyState('users', 'No team members', 'Add collaborators, PIs, or technicians to this project.')}
         </div>
       </div>
     </div>
 
-    <div class="card">
+    <!-- Instruments Card -->
+    <div class="card mb-16">
       <div class="row mb-8">
-        <div class="grow"><span class="card-title">${ic('cpu')} Instruments</span></div>
-        <button class="btn btn-ghost btn-sm" data-act="add-instrument">${ic('plus')} Add</button>
+        <div class="grow"><span class="card-title">${ic('cpu')} Assigned Instruments</span></div>
+        <button class="btn btn-ghost btn-sm" data-act="add-project-instrument">${ic('plus')} Assign Instrument</button>
       </div>
       <div class="card-body">
-        ${inst.length ? inst.map((r) => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--border)"><span class="grow" style="font-weight:500">${esc(r[1])}</span><span class="faint small">${esc(r[2] || '')}</span><span class="badge neutral">${esc(r[3])}</span></div>`).join('') : `<div class="empty"><div class="t">No instruments</div><div class="s">Link the instruments this project uses.</div></div>`}
+        ${inst.length ? `
+        <div class="grid cols-3">
+          ${inst.map((i) => `
+            <div class="instrument-box">
+              <div class="row">
+                <span class="font-medium grow">${esc(i.name)}</span>
+                <span class="badge neutral">${esc(i.status)}</span>
+                <button class="btn btn-ghost btn-sm" data-act="remove-project-instrument" data-id="${i.instrument_id}" title="Remove instrument">${ic('trash')}</button>
+              </div>
+              <div class="faint small mt-8">${esc(i.kind || 'Facility Instrument')}</div>
+            </div>`).join('')}
+        </div>` : emptyState('cpu', 'No instruments linked', 'Link instruments used by this project.')}
       </div>
     </div>
 
-    <div class="card">
+    <!-- Milestones Timeline Card -->
+    <div class="card mb-16">
       <div class="row mb-8">
-        <div class="grow"><span class="card-title">${ic('target')} Milestones</span></div>
-        <button class="btn btn-primary btn-sm" data-act="add-milestone">${ic('plus')} Add milestone</button>
+        <div class="grow"><span class="card-title">${ic('target')} Milestones &amp; Deliverables</span></div>
+        <button class="btn btn-primary btn-sm" data-act="add-milestone">${ic('plus')} Add Milestone</button>
       </div>
       <div class="card-body">
-        ${ms.length ? ms.map((r) => milestoneRow(r, id)).join('') : `<div class="empty"><div class="t">No milestones</div><div class="s">Add the first milestone to start tracking progress.</div></div>`}
+        ${ms.length ? ms.map((r) => milestoneRow(r, p.id)).join('') : emptyState('target', 'No milestones yet', 'Add deliverables and track due dates and progress.')}
       </div>
     </div>
 
     <div class="grid cols-2">
+      <!-- Files Card -->
       <div class="card">
-        <div class="row mb-8"><div class="grow"><span class="card-title">${ic('file')} Files</span></div><button class="btn btn-ghost btn-sm" data-act="add-file">${ic('plus')} Add</button></div>
+        <div class="row mb-8">
+          <div class="grow"><span class="card-title">${ic('file')} Files &amp; Attachments</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="add-file">${ic('plus')} Add File</button>
+        </div>
         <div class="card-body">
-          ${files.length ? files.map((r) => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--border)"><span class="faint">${ic('file')}</span><span class="grow" style="font-weight:500">${esc(r[2])}</span><span class="faint small">${esc(r[3])}</span></div>`).join('') : `<div class="empty"><div class="t">No files</div><div class="s">Upload or link files.</div></div>`}
+          ${files.length ? files.map((f) => `
+            <div class="row file-row" style="padding:8px 0;border-bottom:1px solid var(--border)">
+              <span class="faint">${ic('file')}</span>
+              <div class="grow">
+                <div class="font-medium">${esc(f.name)}</div>
+                <div class="faint small">${f.kind === 'link' ? `<a href="${esc(f.path)}" target="_blank" class="link-btn">${esc(f.path)} ${ic('external')}</a>` : 'Uploaded File'} · ${fmt(f.created_at)}</div>
+              </div>
+              ${f.kind === 'upload' ? `<button class="btn btn-secondary btn-sm" data-act="download-file" data-id="${f.id}" data-name="${esc(f.name)}">Download</button>` : ''}
+              <button class="btn btn-ghost btn-sm" data-act="file-del" data-id="${f.id}" title="Delete file">${ic('trash')}</button>
+            </div>`).join('') : emptyState('file', 'No files linked', 'Attach data files, scripts, or external links.')}
         </div>
       </div>
+
+      <!-- Meetings Card -->
       <div class="card">
-        <div class="row mb-8"><div class="grow"><span class="card-title">${ic('calendar')} Meetings</span></div><button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Add</button></div>
+        <div class="row mb-8">
+          <div class="grow"><span class="card-title">${ic('calendar')} Meetings &amp; Syncs</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Add Meeting</button>
+        </div>
         <div class="card-body">
-          ${mtgs.length ? mtgs.map((r) => `<div style="padding:8px 0;border-bottom:1px solid var(--border)"><div class="row"><span style="font-weight:500">${esc(r[2])}</span><span class="faint small">${fmt(r[3])}</span></div><div class="small muted mt-8">${esc(r[5] || '')}</div></div>`).join('') : `<div class="empty"><div class="t">No meetings</div><div class="s">Add meeting notes.</div></div>`}
+          ${mtgs.length ? mtgs.map((m) => `
+            <div class="meeting-box mb-8">
+              <div class="row">
+                <span class="font-medium grow">${esc(m.title)}</span>
+                <span class="faint mono small">${fmt(m.date)}</span>
+                <button class="btn btn-ghost btn-sm" data-act="edit-meeting" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="meeting-del" data-id="${m.id}" title="Delete meeting">${ic('trash')}</button>
+              </div>
+              ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
+              ${m.note ? `<div class="small muted mt-8 whitespace-pre">${esc(m.note)}</div>` : ''}
+              ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
+            </div>`).join('') : emptyState('calendar', 'No meetings recorded', 'Log sync meetings, consultation notes, and action items.')}
         </div>
       </div>
     </div>`;
   }
 
-  function milestoneRow(r, pid) {
-    const [mid, projectId, name, due, status, note, ca, ua] = r;
+  function milestoneRow(m, pid) {
     const now = today();
-    const isOverdue = due && due < now && status !== 'done';
+    const isOverdue = m.due_date && m.due_date < now && m.status !== 'done';
     return `
-    <div class="ms" data-ms-id="${mid}">
+    <div class="ms" data-ms-id="${m.id}">
       <div class="rail">
-        <div class="node ${status === 'done' ? 'done' : isOverdue ? 'overdue' : ''}"></div>
+        <div class="node ${m.status === 'done' ? 'done' : isOverdue ? 'overdue' : m.status === 'in-progress' ? 'next' : ''} clickable"
+             data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status"></div>
         <div class="line"></div>
       </div>
       <div class="body">
-        <div class="row">
-          <span class="ttl">${esc(name)}</span>
-          <span class="grow"></span>
-          <span class="badge ${status === 'done' ? 'success' : status === 'in-progress' ? 'primary' : 'neutral'}">${status}</span>
+        <div class="row" style="flex-wrap:wrap;gap:8px">
+          <span class="ttl">${esc(m.name)}</span>
+          <div class="grow"></div>
+          <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable"
+                data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status">${m.status}</span>
           ${isOverdue ? '<span class="badge danger">overdue</span>' : ''}
-          <button class="btn btn-ghost btn-sm" data-act="ms-del" data-id="${mid}">${ic('trash')}</button>
+          <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}" title="Edit milestone">${ic('edit')}</button>
+          <button class="btn btn-ghost btn-sm" data-act="ms-del" data-id="${m.id}" title="Delete milestone">${ic('trash')}</button>
         </div>
         <div class="meta mt-8">
-          <span class="mono">${fmt(due)}</span>
-          ${note ? ' · ' + esc(note) : ''}
+          <span class="mono">${fmt(m.due_date)}</span>
+          ${m.note ? ' · ' + esc(m.note) : ''}
         </div>
+        ${(m.owners || m.instruments) ? `
+        <div class="chips mt-8">
+          ${m.owners ? `<span class="chip-sm">${ic('users')} ${esc(m.owners)}</span>` : ''}
+          ${m.instruments ? `<span class="chip-sm">${ic('cpu')} ${esc(m.instruments)}</span>` : ''}
+        </div>` : ''}
       </div>
     </div>`;
   }
 
   /* ---------------- People ---------------- */
   function people() {
-    const rows = global.DB.q('SELECT * FROM people ORDER BY type, name');
-    if (!rows.length) return emptyState('users', 'No people yet', 'Add PIs, lab members, and technicians.');
+    const rows = global.DB.rows(`
+      SELECT pe.*,
+             (SELECT COUNT(*) FROM project_people pp WHERE pp.person_id = pe.id) as proj_count
+      FROM people pe
+      ORDER BY pe.type, pe.name`);
+
     return `
     <div class="card">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('users')} People</span></div><button class="btn btn-primary btn-sm" data-act="add-person">${ic('plus')} Add</button></div>
-      <table class="tbl"><thead><tr><th>Name</th><th>Type</th><th>Email</th><th>Projects</th></tr></thead><tbody>
-        ${rows.map((r) => {
-          const [id, name, type, email, note] = r;
-          const pids = global.DB.q('SELECT COUNT(*) FROM project_people WHERE person_id=?', [id]);
-          return `<tr><td style="font-weight:500">${esc(name)}</td><td><span class="badge neutral">${esc(type)}</span></td><td class="muted small">${esc(email || '—')}</td><td class="faint small">${pids[0][0]} projects</td></tr>`;
-        }).join('')}
-      </tbody></table>
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('users')} People, Labs &amp; Researchers</span></div>
+        <button class="btn btn-primary btn-sm" data-act="add-person" data-tooltip="Register a new researcher or staff">${ic('plus')} Add Person</button>
+      </div>
+      ${!rows.length ? emptyState('users', 'No people added yet', 'Add Principal Investigators, lab members, and facility technicians.') : `
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role / Position</th>
+            <th>Lab / Group / Company</th>
+            <th>Email</th>
+            <th>Notes</th>
+            <th>Active Projects</th>
+            <th style="text-align:right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r) => `
+            <tr>
+              <td style="font-weight:600">${esc(r.name)}</td>
+              <td><span class="badge neutral">${esc(r.type)}</span></td>
+              <td><span class="chip-sm" style="font-weight:600">${esc(r.organization || '—')}</span></td>
+              <td class="muted small">${esc(r.email || '—')}</td>
+              <td class="faint small">${esc(r.note || '—')}</td>
+              <td><span class="badge primary">${r.proj_count} projects</span></td>
+              <td style="text-align:right">
+                <button class="btn btn-ghost btn-sm" data-act="edit-person" data-id="${r.id}" title="Edit Person" data-tooltip="Edit profile">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="delete-person" data-id="${r.id}" title="Delete Person" data-tooltip="Delete person">${ic('trash')}</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`}
     </div>`;
   }
 
   /* ---------------- Instruments ---------------- */
   function instruments() {
-    const rows = global.DB.q('SELECT * FROM instruments ORDER BY name');
-    if (!rows.length) return emptyState('cpu', 'No instruments yet', 'Add the instruments in your facility.');
+    const rows = global.DB.rows(`
+      SELECT i.*,
+             (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count
+      FROM instruments i
+      ORDER BY i.name`);
+
     return `
     <div class="card">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Instruments</span></div><button class="btn btn-primary btn-sm" data-act="add-instrument">${ic('plus')} Add</button></div>
-      <table class="tbl"><thead><tr><th>Name</th><th>Type</th><th>Status</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td style="font-weight:500">${esc(r[1])}</td><td class="muted small">${esc(r[2] || '—')}</td><td><span class="badge neutral">${esc(r[3])}</span></td></tr>`).join('')}
-      </tbody></table>
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('cpu')} Core Instruments</span></div>
+        <button class="btn btn-primary btn-sm" data-act="add-instrument">${ic('plus')} Add Instrument</button>
+      </div>
+      ${!rows.length ? emptyState('cpu', 'No instruments added', 'Add microscopes, cytometers, or analysis workstations.') : `
+      <table class="tbl">
+        <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Notes</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody>
+          ${rows.map((r) => `
+            <tr>
+              <td style="font-weight:600">${esc(r.name)}</td>
+              <td class="muted small">${esc(r.kind || '—')}</td>
+              <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
+              <td class="faint small">${esc(r.note || '—')}</td>
+              <td><span class="badge neutral">${r.proj_count} projects</span></td>
+              <td style="text-align:right">
+                <button class="btn btn-ghost btn-sm" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="delete-instrument" data-id="${r.id}" title="Delete Instrument">${ic('trash')}</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`}
     </div>`;
   }
 
-  /* ---------------- Calendar ---------------- */
+  /* ---------------- Calendar (Fixed 7-Day Grid) ---------------- */
   let calOffset = 0;
   function navCalendar(delta) { calOffset += delta; global.App.refresh(); }
   function calendar() {
@@ -270,31 +514,84 @@
     const shifted = new Date(base.getFullYear(), base.getMonth() + calOffset, 1);
     const sy = shifted.getFullYear(), sm = shifted.getMonth();
     const monthLabel = shifted.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-    const start = new Date(sy, sm, 1);
-    start.setDate(start.getDate() - (start.getDay() + 6) % 7);
-    const endStr = new Date(sy, sm + 1, 0).toISOString().slice(0, 10);
-    const startStr = start.toISOString().slice(0, 10);
 
-    const ms = global.DB.q(`
-      SELECT m.due_date, m.name, m.status, p.title FROM milestones m
+    const firstDayOfMonth = new Date(sy, sm, 1);
+    const lastDayOfMonth = new Date(sy, sm + 1, 0);
+
+    // Calculate first Monday on or before the 1st
+    const start = new Date(firstDayOfMonth);
+    const dayOfWeek = (start.getDay() + 6) % 7;
+    start.setDate(start.getDate() - dayOfWeek);
+
+    // Calculate last Sunday on or after last day
+    const end = new Date(lastDayOfMonth);
+    const endDayOfWeek = (end.getDay() + 6) % 7;
+    end.setDate(end.getDate() + (6 - endDayOfWeek));
+
+    const startStr = start.toISOString().slice(0, 10);
+    const endStr = end.toISOString().slice(0, 10);
+
+    const ms = global.DB.rows(`
+      SELECT m.id, m.due_date, m.name, m.status, p.id as project_id, p.title as project_title
+      FROM milestones m
       JOIN projects p ON p.id = m.project_id
-      WHERE m.due_date >= ? AND m.due_date <= ? AND m.status != 'done'`, [startStr, endStr]);
-    const mtgs = global.DB.q(`
-      SELECT m.date, m.title, p.title FROM meetings m
+      WHERE m.due_date >= ? AND m.due_date <= ?`, [startStr, endStr]);
+
+    const mtgs = global.DB.rows(`
+      SELECT m.id, m.date, m.title, p.id as project_id, p.title as project_title
+      FROM meetings m
       JOIN projects p ON p.id = m.project_id
       WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
+
     const byDay = {};
-    for (const [d, name, st, ptitle] of ms) (byDay[d] = byDay[d] || []).push({ name, kind: 'ms', st });
-    for (const [d, title] of mtgs) (byDay[d] = byDay[d] || []).push({ name: title, kind: 'mt' });
+    for (const m of ms) {
+      (byDay[m.due_date] = byDay[m.due_date] || []).push({
+        id: m.id,
+        name: m.name,
+        kind: 'ms',
+        status: m.status,
+        project_id: m.project_id,
+        project_title: m.project_title
+      });
+    }
+    for (const mt of mtgs) {
+      (byDay[mt.date] = byDay[mt.date] || []).push({
+        id: mt.id,
+        name: mt.title,
+        kind: 'mt',
+        project_id: mt.project_id,
+        project_title: mt.project_title
+      });
+    }
 
     const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    let cells = dow.map((d) => `<div class="dow">${d}</div>`).join('');
+    let headerCells = dow.map((d) => `<div class="dow">${d}</div>`).join('');
+    let cells = '';
+
     const cur = new Date(start);
-    while (cur.getMonth() === sm) {
+    const todayStr = today();
+
+    while (cur <= end) {
       const ds = cur.toISOString().slice(0, 10);
-      const isToday = ds === today();
+      const isToday = ds === todayStr;
+      const inMonth = cur.getMonth() === sm;
       const evs = byDay[ds] || [];
-      cells += `<div class="cal-cell ${isToday ? 'today' : ''}"><div class="num">${cur.getDate()}</div>${evs.map((e) => `<div class="ev ${e.kind === 'mt' ? 'mt' : ''}" title="${esc(e.name)}">${esc(e.name)}</div>`).join('')}</div>`;
+
+      cells += `
+      <div class="cal-cell ${isToday ? 'today' : ''} ${!inMonth ? 'other-month' : ''}">
+        <div class="cal-cell-head">
+          <span class="num">${cur.getDate()}</span>
+          ${isToday ? '<span class="today-tag">Today</span>' : ''}
+        </div>
+        <div class="cal-events">
+          ${evs.map((e) => `
+            <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''}"
+                 data-goto="project" data-id="${e.project_id}"
+                 title="${esc(e.name)} (${esc(e.project_title)})">
+              ${e.kind === 'mt' ? '📅 ' : '🎯 '}${esc(e.name)}
+            </div>`).join('')}
+        </div>
+      </div>`;
       cur.setDate(cur.getDate() + 1);
     }
 
@@ -304,9 +601,11 @@
         <div class="grow"><span class="card-title">${ic('calendar')} ${monthLabel}</span></div>
         <div class="row">
           <button class="btn btn-secondary btn-sm" data-act="cal-prev">${ic('chevron')} Prev</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-today">Today</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-next">Next ${ic('chevron')}</button>
         </div>
       </div>
+      <div class="cal-grid-header">${headerCells}</div>
       <div class="cal-grid">${cells}</div>
     </div>`;
   }
@@ -314,33 +613,43 @@
   /* ---------------- Settings ---------------- */
   function settings() {
     return `
-    <div class="card">
-      <div class="card-title">${ic('settings')} Settings</div>
+    <div class="card mb-16">
+      <div class="card-title">${ic('settings')} Preferences &amp; Theme</div>
       <div class="card-body">
         <div class="row mb-8">
-          <div class="grow"><span class="muted">Theme</span></div>
-          <div class="theme-toggle" data-act="theme-toggle"><div class="knob"></div></div>
-        </div>
-        <div class="divider"></div>
-        <div class="row mb-8">
           <div class="grow">
-            <div style="font-weight:600">Backup &amp; restore</div>
-            <div class="faint small">Your data lives in a single SQLite file. Export it to a file to back up or move machines; load a backup to recover.</div>
+            <div style="font-weight:600">Appearance Theme</div>
+            <div class="faint small">Switch between clean Light mode and high-contrast Dark mode.</div>
           </div>
-        </div>
-        <div class="row">
-          <button class="btn btn-secondary btn-sm" data-act="backup">Export backup</button>
-          <button class="btn btn-secondary btn-sm" data-act="restore">Load backup</button>
+          <div class="theme-toggle" data-act="theme-toggle"><div class="knob"></div></div>
         </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">${ic('folder')} About</div>
+
+    <div class="card mb-16">
+      <div class="card-title">${ic('folder')} Portable Data &amp; Backups</div>
       <div class="card-body">
-        <div class="faint small">
-          <p class="mt-0 mb-8">Core Facility Project Tracker — v1 pilot.</p>
-          <p class="mb-8">Data: single SQLite file (sql.js, in-browser) + IndexedDB.</p>
-          <p class="mb-0">Stack: vanilla JS, sql.js, SheetJS, docx, jsPDF.</p>
+        <div class="row mb-8">
+          <div class="grow">
+            <div style="font-weight:600">Single-File Backup &amp; Recovery</div>
+            <div class="faint small">Your entire facility database and files live in your browser's persistent storage. Export a JSON backup anytime for safekeeping or to migrate to another PC.</div>
+          </div>
+        </div>
+        <div class="row mt-8" style="gap:10px">
+          <button class="btn btn-primary btn-sm" data-act="backup">${ic('file')} Export Backup (.json)</button>
+          <button class="btn btn-secondary btn-sm" data-act="restore">${ic('external')} Restore from Backup</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">${ic('cpu')} Core Facility Project Tracker</div>
+      <div class="card-body">
+        <div class="faint small" style="line-height:1.7">
+          <p class="mt-0 mb-8"><strong>Platform:</strong> Standalone Portable Web App (Zero Install / Zero Server).</p>
+          <p class="mb-8"><strong>Database:</strong> SQLite Engine via WebAssembly/asm.js + IndexedDB persistent storage.</p>
+          <p class="mb-8"><strong>Export Engines:</strong> SheetJS (.xlsx), docx (.docx), jsPDF (.pdf).</p>
+          <p class="mb-0">Designed for advanced microscopy, bioimaging, and scientific core facilities.</p>
         </div>
       </div>
     </div>`;
@@ -351,6 +660,18 @@
     return `<div class="empty"><div class="ic">${ic(icName)}</div><div class="t">${esc(t)}</div><div class="s">${esc(s)}</div></div>`;
   }
 
-  global.Views = { dashboard, projects, projectDetail, people, instruments, calendar, settings, emptyState, navCalendar };
+  global.Views = {
+    dashboard,
+    projects,
+    setProjectFilter,
+    projectDetail,
+    people,
+    instruments,
+    calendar,
+    settings,
+    emptyState,
+    navCalendar,
+    statusBadge
+  };
 
 })(window);
