@@ -109,25 +109,28 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 ```text
 Core-Facility-CRM/
-├── index.html          # Application entry point
-├── favicon.svg         # Brand logo favicon
+├── index.html            # Application entry point
+├── favicon.svg           # Brand logo favicon
 ├── css/
-│   └── app.css         # Modern SaaS Minimalist design system
+│   └── app.css           # Modern SaaS Minimalist design system
 ├── js/
-│   ├── consts.js       # Shared vocabularies (modalities, statuses, priorities)
-│   ├── db.js           # sql.js engine, schema, IndexedDB persistence, sample dataset & clear
-│   ├── ui.js           # Toasts, modals, theme switcher, icons, interactive tour engine
-│   ├── views.js        # Screen renderers (Dashboard, Projects, Detail, People, Instruments, Calendar, Settings)
-│   ├── exports.js      # Multi-page PDF, DOCX, and XLSX export engines
-│   └── app.js          # Routing, startup welcome modal, action dispatcher, CRUD modal logic
+│   ├── consts.js         # Shared vocabularies (modalities, statuses, priorities)
+│   ├── db.js             # sql.js engine, schema, IndexedDB persistence, sample dataset & clear
+│   ├── ui.js             # Toasts, modals, theme switcher, icons, interactive tour engine
+│   ├── views.js          # Screen renderers (Dashboard, Projects, Detail, People, Instruments, Calendar, Settings)
+│   ├── exports.js        # Multi-page PDF, DOCX, and XLSX export engines
+│   └── app.js            # Routing, startup welcome modal, action dispatcher, CRUD modal logic
 ├── libs/
-│   ├── sql-asm.js      # SQLite engine compiled to JS (asm.js, file:// compatible)
-│   ├── xlsx.full.min.js# SheetJS spreadsheet export engine
-│   ├── jspdf.umd.min.js# Client-side PDF generation engine
-│   └── docx.iife.js    # Client-side DOCX document generator
-├── LICENSE             # MIT License
-└── README.md           # Documentation
+│   ├── sql-asm.js        # SQLite engine compiled to JS (asm.js, file:// compatible)
+│   ├── xlsx.full.min.js  # SheetJS spreadsheet export engine
+│   ├── jspdf.umd.min.js  # Client-side PDF generation engine
+│   └── docx.iife.js      # Client-side DOCX document generator
+├── docs/screenshots/     # README screenshots (not required to run the app)
+├── LICENSE               # MIT License
+└── README.md             # Documentation
 ```
+
+> **`index.html`, `favicon.svg`, `css/`, `js/`, and `libs/` are the entire runtime app** — that's what needs to travel together (see [Sharing With Colleagues](#sharing-the-app-with-colleagues)). Everything else (`docs/`, `LICENSE`, `README.md`) is documentation only.
 
 ---
 
@@ -137,6 +140,31 @@ Core-Facility-CRM/
 2. Double-click `index.html` to open it in your browser.
 3. Choose **Load Demo & Start Tour** to explore with sample data or **Start Fresh** to begin with an empty database.
 4. Click **"New Project"** in the sidebar to start tracking projects!
+
+---
+
+## Sharing the App with Colleagues
+
+`index.html` on its own is **not** enough — it loads its stylesheet, scripts, and the SQLite engine from relative paths (`css/`, `js/`, `libs/`), so the folder structure has to travel together.
+
+**What to send:** the whole project folder (or a zip of it) containing at minimum:
+
+```text
+index.html
+favicon.svg
+css/
+js/
+libs/
+```
+
+`LICENSE`, `README.md`, and `docs/` are documentation only and can be left out.
+
+**How to share it:**
+
+- **Zip the folder** and send it directly — the recipient unzips it and double-clicks `index.html`.
+- **Share the GitHub repo** (clone or "Download ZIP") so everyone always gets the latest version.
+
+Either way, no installation, server, or account is required — each person's data is saved locally in their own browser's IndexedDB, so colleagues won't see or share each other's data unless they exchange a backup file (**Settings → Export Backup**).
 
 ---
 
