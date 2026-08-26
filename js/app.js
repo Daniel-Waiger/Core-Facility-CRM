@@ -1,9 +1,11 @@
-/* app.js — router, modals with inline person creation, collapsible sidebar & action dispatcher */
+/* app.js — router, modals with inline person creation, organization reuse, collapsible sidebar & action dispatcher */
 (function (global) {
   'use strict';
   const Views = global.Views, UI = global.UI, DB = global.DB, Exports = global.Exports;
   const C = global.CONST, esc = UI.esc, ic = UI.icon;
   const ctx = { route: 'dashboard', project: null };
+
+  let _personSavedCallback = null;
 
   global.App = {
     boot: boot,
@@ -24,6 +26,12 @@
     settings: 'Settings &amp; Portable Data'
   };
 
+  /* ---------------- Helper: Organization Datalist ---------------- */
+  function getOrgDatalist() {
+    const orgs = DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization");
+    return `<datalist id="org-list">${orgs.map((r) => `<option value="${esc(r.organization)}"></option>`).join('')}</datalist>`;
+  }
+
   /* ---------------- Shell ---------------- */
   function renderShell() {
     const isCollapsed = localStorage.getItem('sidebar-collapsed') === '1';
@@ -38,7 +46,7 @@
               <div class="sub">Bioimaging Facility</div>
             </div>
             <button class="sidebar-collapse-btn" data-act="toggle-sidebar" data-tooltip="Toggle Sidebar Width">
-              ${ic('collapse')}
+              ${ic(isCollapsed ? 'expand' : 'collapse')}
             </button>
           </div>
           <nav class="nav">
@@ -52,7 +60,7 @@
           <div class="nav-spacer"></div>
           <div class="sidebar-foot">
             <button class="btn btn-primary btn-sm" data-act="new-project" data-tooltip="Initiate Project">${ic('plus')}<span class="lbl">New Project</span></button>
-            <button class="btn btn-ghost btn-sm" data-act="tour" data-tooltip="Interactive Tour">${ic('play')}<span class="lbl">Tour</span></button>
+            <button class="btn btn-tour btn-sm" data-act="tour" data-tooltip="Interactive Guided Tour">${ic('play')}<span class="lbl">Tour</span></button>
             <button class="btn btn-secondary btn-sm sidebar-theme-btn" data-act="theme-toggle" data-tooltip="Switch Appearance"></button>
           </div>
         </aside>
@@ -115,6 +123,89 @@
 
   function refresh() { renderView(); }
 
+  /* ---------------- Startup Welcome Modal ---------------- */
+  function openStartupModal() {
+    const isChecked = localStorage.getItem('crm-hide-startup-modal') === '1';
+
+    UI.openModal(`
+      <div class="startup-modal-inner">
+        <div class="startup-modal-header">
+          <div class="startup-brand-icon">${ic('cpu')}</div>
+          <div class="startup-modal-title">Welcome to Core Facility Tracker</div>
+          <div class="startup-modal-sub">Choose how you’d like to get started with your research project workspace.</div>
+        </div>
+
+        <div class="startup-cards-grid">
+          <!-- Option 1: Seeded Example & Walkthrough -->
+          <div class="startup-card startup-card-featured" data-act="startup-demo">
+            <div class="startup-card-badge"><span class="badge primary">${ic('sparkles')} Explore Sample Data</span></div>
+            <div class="startup-card-icon">${ic('compass')}</div>
+            <div class="startup-card-title">Seeded Example &amp; Walkthrough</div>
+            <div class="startup-card-body">
+              Load realistic facility imaging projects (Multiphoton, STED, Lightsheet), instruments, PIs, milestones, and meeting notes — paired with an interactive guided tour explaining every field.
+            </div>
+            <button class="btn btn-tour startup-card-btn" data-act="startup-demo">
+              ${ic('play')} Load Demo &amp; Start Tour
+            </button>
+          </div>
+
+          <!-- Option 2: Start Fresh -->
+          <div class="startup-card" data-act="startup-fresh">
+            <div class="startup-card-badge"><span class="badge neutral">${ic('rocket')} Clean Slate</span></div>
+            <div class="startup-card-icon">${ic('file-plus')}</div>
+            <div class="startup-card-title">Start Fresh (Empty Workspace)</div>
+            <div class="startup-card-body">
+              Begin immediately with a clean, empty workspace ready for your own facility's projects, microscope equipment, and researcher registry. Best if you already know the app.
+            </div>
+            <button class="btn btn-secondary startup-card-btn" data-act="startup-fresh">
+              ${ic('check')} Start with Clean Database
+            </button>
+          </div>
+        </div>
+
+        <div class="startup-modal-footer">
+          <label class="startup-checkbox-label">
+            <input type="checkbox" id="startup-never-show" ${isChecked ? 'checked' : ''} />
+            <span>Never show this welcome screen again on startup</span>
+          </label>
+        </div>
+      </div>
+    `, (m, modalDim) => {
+      const neverShowCheck = modalDim.querySelector('#startup-never-show');
+
+      const savePref = () => {
+        if (neverShowCheck && neverShowCheck.checked) {
+          localStorage.setItem('crm-hide-startup-modal', '1');
+        } else {
+          localStorage.setItem('crm-hide-startup-modal', '0');
+        }
+      };
+
+      const handleDemo = () => {
+        savePref();
+        DB.seedSampleData();
+        UI.closeDim(modalDim);
+        route('dashboard');
+        UI.toast('Sample facility dataset loaded!');
+        startTour();
+      };
+
+      const handleFresh = () => {
+        savePref();
+        UI.closeDim(modalDim);
+        route('dashboard');
+        UI.toast('Clean workspace ready!');
+      };
+
+      modalDim.querySelectorAll('[data-act="startup-demo"]').forEach(el => {
+        el.onclick = (e) => { e.stopPropagation(); handleDemo(); };
+      });
+      modalDim.querySelectorAll('[data-act="startup-fresh"]').forEach(el => {
+        el.onclick = (e) => { e.stopPropagation(); handleFresh(); };
+      });
+    });
+  }
+
   /* ---------------- Boot ---------------- */
   async function boot() {
     await DB.boot();
@@ -122,9 +213,10 @@
     renderShell();
     route('dashboard');
     wireGlobal();
-    if (!localStorage.getItem('seen-tour')) {
-      localStorage.setItem('seen-tour', '1');
-      startTour();
+
+    const hideStartup = localStorage.getItem('crm-hide-startup-modal') === '1';
+    if (!hideStartup) {
+      openStartupModal();
     }
   }
 
@@ -133,6 +225,9 @@
     document.addEventListener('click', (e) => {
       const goto = e.target.closest('[data-goto]');
       if (goto && !e.target.closest('[data-act]')) {
+        // If inside a modal, close modal when navigating to a project
+        const openModalDim = document.querySelector('.modal-dim');
+        if (openModalDim) UI.closeDim(openModalDim);
         route(goto.dataset.goto, goto.dataset.id);
         return;
       }
@@ -146,11 +241,29 @@
       case 'toggle-sidebar': return toggleSidebar();
       case 'theme-toggle': return UI.toggleTheme();
       case 'tour': return startTour();
+      case 'open-startup-modal': return openStartupModal();
+      case 'load-sample-data': {
+        DB.seedSampleData();
+        refresh();
+        UI.toast('Sample facility dataset loaded!');
+        return;
+      }
+      case 'clear-data': {
+        UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and meetings? This cannot be undone.', { danger: true }).then((yes) => {
+          if (yes) {
+            DB.clearAllData();
+            refresh();
+            UI.toast('All facility data cleared.');
+          }
+        });
+        return;
+      }
       case 'backup': return doBackup();
       case 'restore': return doRestore();
       case 'cal-prev': return Views.navCalendar(-1);
       case 'cal-next': return Views.navCalendar(1);
       case 'cal-today': return Views.navCalendar(0);
+      case 'open-today-modal': return openTodayModal();
       case 'close': {
         const m = document.querySelector('.modal');
         if (m) UI.closeDim(m.closest('.modal-dim'));
@@ -162,6 +275,7 @@
       case 'np-save': return npSave();
       case 'edit-project': return editProject(el.dataset.id || ctx.project);
       case 'ep-save': return epSave(el.dataset.id);
+      case 'ep-add-person': return editProjectAddPerson(el.dataset.projectId);
       case 'set-project-status': return setProjectStatus(el.dataset.status);
       case 'delete-project': return deleteProject();
 
@@ -265,7 +379,7 @@
         <!-- Inline New Person Section -->
         <div class="card" style="background:var(--surface-2);border-style:dashed;padding:12px">
           <div class="row mb-8">
-            <span style="font-weight:600;font-size:12.5px">${ic('users')} Or Register New Person Now</span>
+            <span style="font-weight:600;font-size:12.5px">${ic('users')} Or Register New Person / PI Now</span>
           </div>
           <div class="grid cols-2">
             <div class="field"><label>First Name</label><input class="input" id="np-p-first" placeholder="e.g. Elena" /></div>
@@ -273,10 +387,12 @@
           </div>
           <div class="grid cols-2 mt-8">
             <div class="field"><label>Position / Role</label><select class="input" id="np-p-type">${C.PERSON_TYPES.map((s) => `<option value="${s}" ${s === 'PI' ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
-            <div class="field"><label>Lab / Group / Company</label><input class="input" id="np-p-org" placeholder="e.g. Molecular Neurobiology Lab" /></div>
+            <div class="field"><label>Lab / Group / Company</label><input class="input" id="np-p-org" list="org-list" placeholder="e.g. Molecular Neurobiology Lab" /></div>
           </div>
           <div class="field mt-8"><label>Email Address</label><input type="email" class="input" id="np-p-email" placeholder="elena.rostova@institute.org" /></div>
         </div>
+
+        ${getOrgDatalist()}
 
         <div class="grid cols-2">
           <div class="field">
@@ -372,11 +488,12 @@
     route('project', inserted ? inserted.id : null);
   }
 
-  function editProject(id) {
+  function editProject(id, selectPersonId = null) {
     const p = DB.row('SELECT * FROM projects WHERE id=?', [id]);
     if (!p) return;
     const pis = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name');
     const currentFlags = (p.flags || '').split(',').filter(Boolean);
+    const activePiId = selectPersonId !== null ? selectPersonId : p.pi_id;
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Project Details</span></div>
@@ -387,12 +504,18 @@
           <div class="field"><label>Status</label><select class="input" id="ep-status">${C.STATUS.map((s) => `<option value="${s}" ${s === p.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
           <div class="field"><label>Priority</label><select class="input" id="ep-priority">${C.PRIORITY.map((pr) => `<option value="${pr}" ${pr === p.priority ? 'selected' : ''}>${pr}</option>`).join('')}</select></div>
         </div>
+        
         <div class="grid cols-2">
           <div class="field">
-            <label>Principal Investigator (PI)</label>
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px">
+              <label style="margin-bottom:0">Principal Investigator (PI)</label>
+              <button type="button" class="btn btn-secondary btn-sm" data-act="ep-add-person" data-project-id="${p.id}" data-tooltip="Register new researcher or PI" style="padding:2px 7px;font-size:11px">
+                ${ic('plus')} New Member
+              </button>
+            </div>
             <select class="input" id="ep-pi">
               <option value="">-- Select or None --</option>
-              ${pis.map((pe) => `<option value="${pe.id}" ${pe.id === p.pi_id ? 'selected' : ''}>${esc(pe.name)} (${pe.type}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
+              ${pis.map((pe) => `<option value="${pe.id}" ${pe.id === activePiId ? 'selected' : ''}>${esc(pe.name)} (${pe.type}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
             </select>
           </div>
           <div class="field">
@@ -425,6 +548,12 @@
         <button class="btn btn-primary" data-act="ep-save" data-id="${p.id}">Save Changes</button>
       </div>`, (m) => {
       m.querySelectorAll('[data-flag]').forEach((c) => (c.onclick = () => c.classList.toggle('on')));
+    });
+  }
+
+  function editProjectAddPerson(projectId) {
+    addPerson((newPersonId) => {
+      editProject(projectId, newPersonId);
     });
   }
 
@@ -596,15 +725,18 @@
   }
 
   /* ---------------- People CRUD with Labs / Organizations ---------------- */
-  function addPerson() {
+  function addPerson(callback = null) {
+    _personSavedCallback = callback;
+
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('users')} Register Researcher / Staff</span></div>
       <div class="body"><div class="stack">
         <div class="field"><label>Full Name *</label><input class="input" id="p-name" placeholder="e.g. Dr. Jane Doe" /></div>
         <div class="grid cols-2">
           <div class="field"><label>Position / Role</label><select class="input" id="p-type">${C.PERSON_TYPES.map((s) => `<option value="${s}">${s}</option>`).join('')}</select></div>
-          <div class="field"><label>Lab / Group / Company</label><input class="input" id="p-org" placeholder="e.g. Chen Lab, Genentech, Pathology" /></div>
+          <div class="field"><label>Lab / Group / Company</label><input class="input" id="p-org" list="org-list" placeholder="e.g. Chen Lab, Genentech, Pathology" /></div>
         </div>
+        ${getOrgDatalist()}
         <div class="field"><label>Email Address</label><input type="email" class="input" id="p-email" placeholder="jane.doe@university.edu" /></div>
         <div class="field"><label>Department &amp; Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
       </div></div>
@@ -624,9 +756,19 @@
     const note = m.querySelector('#p-note').value.trim();
 
     DB.run('INSERT INTO people (name, type, organization, email, note) VALUES (?,?,?,?,?)', [name, type, org, email, note]);
+    const newPerson = DB.row('SELECT last_insert_rowid() as id');
+    const newPersonId = newPerson ? newPerson.id : null;
+
     UI.closeDim(m.closest('.modal-dim'));
-    UI.toast('Person registered');
-    refresh();
+    UI.toast(`Registered ${name}`);
+
+    if (_personSavedCallback) {
+      const cb = _personSavedCallback;
+      _personSavedCallback = null;
+      cb(newPersonId);
+    } else {
+      refresh();
+    }
   }
 
   function editPerson(id) {
@@ -639,8 +781,9 @@
         <div class="field"><label>Full Name *</label><input class="input" id="pe-name" value="${esc(p.name)}" /></div>
         <div class="grid cols-2">
           <div class="field"><label>Position / Role</label><select class="input" id="pe-type">${C.PERSON_TYPES.map((s) => `<option value="${s}" ${s === p.type ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
-          <div class="field"><label>Lab / Group / Company</label><input class="input" id="pe-org" value="${esc(p.organization || '')}" /></div>
+          <div class="field"><label>Lab / Group / Company</label><input class="input" id="pe-org" list="org-list" value="${esc(p.organization || '')}" /></div>
         </div>
+        ${getOrgDatalist()}
         <div class="field"><label>Email Address</label><input type="email" class="input" id="pe-email" value="${esc(p.email || '')}" /></div>
         <div class="field"><label>Department &amp; Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
       </div></div>
@@ -744,18 +887,18 @@
     const assigned = DB.rows('SELECT person_id FROM project_people WHERE project_id=?', [ctx.project]).map((r) => r.person_id);
     const available = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name').filter((p) => !assigned.includes(p.id));
 
-    if (!available.length) {
-      UI.toast('All registered people are already on this team.', 'warning');
-      return;
-    }
-
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('users')} Add Team Member</span></div>
       <div class="body"><div class="stack">
         <div class="field">
-          <label>Select Person *</label>
+          <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px">
+            <label style="margin-bottom:0">Select Person *</label>
+            <button type="button" class="btn btn-secondary btn-sm" data-act="ep-add-person" data-project-id="${ctx.project}" data-tooltip="Register new researcher or staff" style="padding:2px 7px;font-size:11px">
+              ${ic('plus')} New Person
+            </button>
+          </div>
           <select class="input" id="app-person-id">
-            ${available.map((p) => `<option value="${p.id}">${esc(p.name)} (${p.type}${p.organization ? ' • ' + esc(p.organization) : ''})</option>`).join('')}
+            ${available.length ? available.map((p) => `<option value="${p.id}">${esc(p.name)} (${p.type}${p.organization ? ' • ' + esc(p.organization) : ''})</option>`).join('') : '<option value="">-- No available unregistered people --</option>'}
           </select>
         </div>
         <div class="field">
@@ -765,13 +908,14 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="app-person-save">Add Member</button>
+        <button class="btn btn-primary" data-act="app-person-save" ${!available.length ? 'disabled' : ''}>Add Member</button>
       </div>`);
   }
 
   function appPersonSave() {
     const m = document.querySelector('.modal');
     const personId = Number(m.querySelector('#app-person-id').value);
+    if (!personId) { UI.toast('Please select a person', 'error'); return; }
     const role = m.querySelector('#app-person-role').value.trim();
 
     DB.run('INSERT OR REPLACE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [ctx.project, personId, role]);
@@ -853,9 +997,11 @@
           <div class="row mb-8"><span style="font-weight:600;font-size:12.5px">${ic('users')} Or Register New Attendee &amp; Lab</span></div>
           <div class="grid cols-2">
             <div class="field"><label>Name</label><input class="input" id="m-new-name" placeholder="e.g. Alex Rivera" /></div>
-            <div class="field"><label>Lab / Group</label><input class="input" id="m-new-org" placeholder="e.g. Neuroscience Lab" /></div>
+            <div class="field"><label>Lab / Group</label><input class="input" id="m-new-org" list="org-list" placeholder="e.g. Neuroscience Lab" /></div>
           </div>
         </div>
+
+        ${getOrgDatalist()}
 
         <div class="field"><label>Discussion Notes</label><textarea class="input" id="m-note" placeholder="Consultation notes, requirements, experimental design..."></textarea></div>
         <div class="field"><label>Next Steps / Action Items</label><input class="input" id="m-act" placeholder="e.g. Transfer RAW Nikon ND2 files to facility NAS" /></div>
@@ -1107,14 +1253,198 @@
     input.click();
   }
 
-  /* ---------------- Onboarding Tour ---------------- */
+  /* ---------------- Day Focus / Today Agenda Modal ---------------- */
+  function openTodayModal() {
+    const todayStr = UI.today();
+    const dateObj = new Date();
+    const dateFormatted = dateObj.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    // Milestones due today
+    const msToday = DB.rows(`
+      SELECT m.*, p.title as project_title, p.id as project_id,
+             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners
+      FROM milestones m
+      JOIN projects p ON p.id = m.project_id
+      WHERE m.due_date = ?
+      ORDER BY m.status = 'done', m.id ASC`, [todayStr]);
+
+    // Meetings scheduled today
+    const mtgsToday = DB.rows(`
+      SELECT m.*, p.title as project_title, p.id as project_id
+      FROM meetings m
+      JOIN projects p ON p.id = m.project_id
+      WHERE m.date = ?
+      ORDER BY m.id ASC`, [todayStr]);
+
+    // Overdue milestones
+    const msOverdue = DB.rows(`
+      SELECT m.*, p.title as project_title, p.id as project_id
+      FROM milestones m
+      JOIN projects p ON p.id = m.project_id
+      WHERE m.due_date < ? AND m.status != 'done'
+      ORDER BY m.due_date ASC LIMIT 10`, [todayStr]);
+
+    // Active projects snapshot
+    const activeProjects = DB.rows(`
+      SELECT p.*, pe.name as pi_name
+      FROM projects p
+      LEFT JOIN people pe ON pe.id = p.pi_id
+      WHERE p.status = 'Active'
+      ORDER BY p.updated_at DESC LIMIT 6`);
+
+    UI.openModal(`
+      <div class="head">
+        <span class="modal-title">${ic('calendar')} Today's Agenda &amp; Focus — ${esc(dateFormatted)}</span>
+      </div>
+      <div class="body" style="max-height:75vh">
+        <div class="stack">
+          <!-- Milestones Section -->
+          <div class="card" style="margin-top:0">
+            <div class="row mb-8">
+              <span class="card-title grow">${ic('target')} Milestones Due Today (${msToday.length})</span>
+              ${ctx.project ? `<button class="btn btn-ghost btn-sm" data-act="add-milestone">${ic('plus')} Add</button>` : ''}
+            </div>
+            <div class="card-body">
+              ${msToday.length ? msToday.map((m) => `
+                <div class="row milestone-quick-row">
+                  <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable"
+                        data-act="toggle-ms-status" data-id="${m.id}" data-tooltip="Click to toggle status">${m.status}</span>
+                  <div class="grow" style="cursor:pointer" data-goto="project" data-id="${m.project_id}">
+                    <div style="font-weight:600">${esc(m.name)}</div>
+                    <div class="faint small">${esc(m.project_title)}${m.owners ? ' · ' + esc(m.owners) : ''}</div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}" data-tooltip="Edit">${ic('edit')}</button>
+                </div>`).join('') : '<div class="faint small">No deliverables or milestones scheduled to complete today.</div>'}
+            </div>
+          </div>
+
+          <!-- Meetings Section -->
+          <div class="card">
+            <div class="row mb-8">
+              <span class="card-title grow">${ic('calendar')} Consultations &amp; Syncs Today (${mtgsToday.length})</span>
+              ${ctx.project ? `<button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log</button>` : ''}
+            </div>
+            <div class="card-body">
+              ${mtgsToday.length ? mtgsToday.map((m) => `
+                <div class="meeting-box mb-8">
+                  <div class="row">
+                    <span class="font-medium grow" style="cursor:pointer" data-goto="project" data-id="${m.project_id}">${esc(m.title)} (${esc(m.project_title)})</span>
+                    <button class="btn btn-ghost btn-sm" data-act="edit-meeting" data-id="${m.id}">${ic('edit')}</button>
+                  </div>
+                  ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
+                  ${m.note ? `<div class="small muted mt-8 whitespace-pre">${esc(m.note)}</div>` : ''}
+                  ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
+                </div>`).join('') : '<div class="faint small">No consultation meetings scheduled for today.</div>'}
+            </div>
+          </div>
+
+          <!-- Overdue Section -->
+          ${msOverdue.length ? `
+          <div class="card" style="border-left: 4px solid var(--danger)">
+            <div class="card-title mb-8" style="color:var(--danger)">${ic('alert')} Overdue Action Items (${msOverdue.length})</div>
+            <div class="card-body">
+              ${msOverdue.map((m) => `
+                <div class="row milestone-quick-row">
+                  <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" data-tooltip="Mark Done">overdue</span>
+                  <div class="grow" style="cursor:pointer" data-goto="project" data-id="${m.project_id}">
+                    <div style="font-weight:600">${esc(m.name)}</div>
+                    <div class="faint small">${esc(m.project_title)} · Due: <span style="color:var(--danger)">${UI.fmtDate(m.due_date)}</span></div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}">${ic('edit')}</button>
+                </div>`).join('')}
+            </div>
+          </div>` : ''}
+
+          <!-- Active Projects Snapshot -->
+          <div class="card">
+            <div class="card-title mb-8">${ic('folder')} Active Projects (${activeProjects.length})</div>
+            <div class="card-body">
+              <div class="grid cols-2">
+                ${activeProjects.map((p) => `
+                  <div class="instrument-box clickable" data-goto="project" data-id="${p.id}" data-tooltip="Open project">
+                    <div class="font-medium">${esc(p.title)}</div>
+                    <div class="faint small">PI: ${esc(p.pi_name || '—')} · ${esc(p.modality || 'Facility')}</div>
+                  </div>`).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Close</button>
+      </div>`);
+  }
+
+  /* ---------------- Onboarding Tour (Multi-Screen Walkthrough) ---------------- */
   function startTour() {
+    // If no project exists, check first project ID
+    const firstProj = DB.row('SELECT id FROM projects ORDER BY id ASC LIMIT 1');
+    const pid = firstProj ? firstProj.id : 1;
+
     UI.startTour([
-      { sel: '.sidebar', title: 'Navigation & Core Modules', body: 'Access Dashboard, Projects Registry, People & Labs, Core Instruments, Calendar, and Portable Backups.' },
-      { sel: '[data-nav="projects"]', title: 'Projects Registry', body: 'Search, filter, and review ongoing and completed facility research projects.' },
-      { sel: '[data-act="new-project"]', title: 'Initiate Projects & People', body: 'Start a project, register new PIs and lab members on the fly, and set modalities & deadlines.' },
-      { sel: '#saved-state', title: 'Instant SQLite Autosave', body: 'Every action is continuously and automatically saved to your browser’s embedded SQLite storage.' },
-      { sel: '.sidebar-theme-btn', title: 'Adaptive Theme', body: 'Toggle between clean Light and sleek Dark mode anytime.' }
+      {
+        sel: '#view',
+        route: 'dashboard',
+        title: '1. Facility Dashboard',
+        body: 'Welcome to Core Facility Tracker! Your dashboard provides real-time counts for Active Projects, PIs, Core Instruments, and upcoming milestone deliverables at a single glance.'
+      },
+      {
+        sel: '#app-sidebar',
+        title: '2. Sidebar Navigation & Collapse',
+        body: 'Quickly switch between Projects, People & Labs, Core Instruments, Calendar, and Settings. Click the collapse icon at top to expand your working canvas.'
+      },
+      {
+        sel: '#view',
+        route: 'projects',
+        title: '3. Projects Registry & Filters',
+        body: 'Search across titles, PIs, tags, and grant numbers. Filter projects by Modality (Multiphoton, STED, Lightsheet), Lifecycle Status, and Priority level.'
+      },
+      {
+        sel: '#view',
+        route: 'project',
+        projectId: pid,
+        title: '4. Project Details & Grant Metadata',
+        body: 'Each project consolidates Principal Investigator affiliations, funding accounts, optical modalities, tissue/sample conditions, and progress metrics.'
+      },
+      {
+        sel: '.ms',
+        title: '5. Milestones & Timeline Deliverables',
+        body: 'Track project milestones with status indicators (done, in-progress, pending, overdue), due dates, assigned researcher owners, and required microscopes.'
+      },
+      {
+        sel: '.grid.cols-2',
+        title: '6. Collaborators, Hardware & Meetings',
+        body: 'Log team member roles, linked instruments, consultation meeting minutes with action items, protocol links, and custom metadata fields (e.g., Laser Wavelength, BSL level).'
+      },
+      {
+        sel: '.row button[data-act="export-pdf"]',
+        title: '7. One-Click Report Generation',
+        body: 'Export official documentation in 1 click: Multi-page paginated PDF reports (with headers and page numbers), Word (.docx) documents, and Excel (.xlsx) spreadsheets.'
+      },
+      {
+        sel: '#view',
+        route: 'people',
+        title: '8. People, Labs & Researchers Directory',
+        body: 'Centralized registry of Principal Investigators, postdocs, students, and facility staff with organization affiliations, emails, and active project counts.'
+      },
+      {
+        sel: '#view',
+        route: 'instruments',
+        title: '9. Core Instruments Inventory',
+        body: 'Monitor microscope hardware status (Available, In-use, Maintenance, Down), imaging modalities, and active research projects.'
+      },
+      {
+        sel: '#view',
+        route: 'calendar',
+        title: '10. Schedule & Milestone Calendar',
+        body: 'Monthly calendar combining experiment milestone deadlines and scheduled facility consultations for smooth scheduling.'
+      },
+      {
+        sel: '#view',
+        route: 'settings',
+        title: '11. Zero-Cloud SQLite Portability & Theme',
+        body: 'All data is stored directly in your browser with automatic SQLite persistence. Export portable single-file backups (.json) anytime, or toggle between Light & Dark themes!'
+      }
     ]);
   }
 

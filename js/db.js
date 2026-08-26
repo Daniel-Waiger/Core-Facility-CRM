@@ -277,10 +277,205 @@
     for (const m of ms) {
       if (m.due_date && m.due_date < now) {
         flags.push('overdue');
-        break;
       }
     }
     return flags;
+  }
+
+  /* ---------------- Sample Data Seeding & Database Reset ---------------- */
+  function clearAllData() {
+    db.exec(`
+      DELETE FROM project_people;
+      DELETE FROM project_instruments;
+      DELETE FROM milestone_owners;
+      DELETE FROM milestone_instruments;
+      DELETE FROM milestones;
+      DELETE FROM meetings;
+      DELETE FROM files;
+      DELETE FROM kv;
+      DELETE FROM projects;
+      DELETE FROM people;
+      DELETE FROM instruments;
+    `);
+    markDirty();
+  }
+
+  function seedSampleData() {
+    clearAllData();
+
+    // 1. People
+    const peopleData = [
+      ['Dr. Elena Rostova', 'PI', 'Bio-Photonics Lab, Harvard Immunology', 'elena.rostova@harvard.edu', 'Specializes in deep-tissue intravital 2-photon imaging'],
+      ['Prof. Marcus Thorne', 'PI', 'Neural Dynamics Institute, MIT', 'mthorne@mit.edu', 'Synaptic plasticity & optogenetics grant leader'],
+      ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy, Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening'],
+      ['Alex Chen', 'Researcher', 'Bio-Photonics Lab, Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses'],
+      ['Maya Patel', 'Researcher', 'Neural Dynamics Institute, MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays'],
+      ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer']
+    ];
+    for (const p of peopleData) {
+      run('INSERT INTO people (name, type, organization, email, note) VALUES (?,?,?,?,?)', p);
+    }
+
+    // 2. Instruments
+    const instData = [
+      ['Leica SP8 FALCON', 'FLIM / Confocal', 'Available', 'Fluorescence lifetime imaging, White Light Laser 470-670nm + 405nm'],
+      ['Olympus FV3000', 'Multiphoton / Confocal', 'In-use', 'High-sensitivity spectral GaAsP detectors, heated stage chamber'],
+      ['Zeiss Lightsheet Z.1', 'Lightsheet (Volume)', 'Available', 'Dual-side illumination for cleared tissue & whole organ 3D imaging'],
+      ['Nikon AX R Resonant', 'Resonant Confocal', 'Available', '2K x 2K resonant scanning for high-speed calcium dynamics'],
+      ['Glacios Cryo-TEM', 'Cryo-EM', 'Maintenance', '200kV autoloader - undergoing routine monthly beam alignment']
+    ];
+    for (const i of instData) {
+      run('INSERT INTO instruments (name, kind, status, note) VALUES (?,?,?,?)', i);
+    }
+
+    // 3. Projects
+    // Project 1: Active
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      'Intravital Multi-Photon Imaging of CAR-T Cell Infiltration',
+      'PRJ-2026-001',
+      'Active',
+      'High',
+      1, // Dr. Elena Rostova
+      'Multiphoton',
+      'NIH R01-AI154920',
+      'Transgenic murine lymph node (in vivo)',
+      '',
+      'Immunology, Intravital, CAR-T, In-Vivo',
+      '2026-01-10',
+      '2026-10-31',
+      'Real-time tracking of chimeric antigen receptor T-cell kinetics and tumor cell lysis rates across 4D spatial volumes.'
+    ]);
+
+    // Project 2: Initiated
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      'Super-Resolution Mapping of Synaptic Density Compounds',
+      'PRJ-2026-002',
+      'Initiated',
+      'Medium',
+      2, // Prof. Marcus Thorne
+      'Super-Resolution',
+      'Brain Research Grant #8410',
+      'Primary hippocampal cultures (96-well glass bottom)',
+      '',
+      'Neuroscience, Synapse, STED, Screening',
+      '2026-03-01',
+      '2026-11-30',
+      'Targeted STED nanoscopy resolving pre- and post-synaptic scaffold protein cluster colocalization under candidate therapeutics.'
+    ]);
+
+    // Project 3: Completed
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      'Whole-Organ 3D Lightsheet Mapping of Pancreatic Islets',
+      'PRJ-2025-088',
+      'Completed',
+      'Low',
+      3, // Dr. Sarah Lin
+      'Lightsheet',
+      'State Health Initiative #4401',
+      'CUBIC-cleared murine pancreas',
+      '',
+      'Endocrinology, Cleared Tissue, Volume 3D',
+      '2025-08-01',
+      '2026-01-20',
+      'Full organ clearing, refractive index matching, and complete volumetric islet distribution mapping completed successfully.'
+    ]);
+
+    // 4. Project People Mappings
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 1, "Principal Investigator")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 4, "Lead Operator & Image Analyst")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 6, "Core Optical Specialist")');
+
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 2, "Principal Investigator")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 5, "Lead Researcher")');
+
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 3, "Principal Investigator")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 6, "Core Facility Support")');
+
+    // 5. Project Instruments Mappings
+    run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (1, 2)'); // Olympus FV3000
+    run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (1, 1)'); // Leica SP8
+    run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (2, 1)'); // Leica SP8
+    run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (2, 4)'); // Nikon AX R
+    run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (3, 3)'); // Zeiss Lightsheet
+
+    // 6. Milestones
+    // Project 1 Milestones
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (1, 1, "Laser Power Calibration & Biosafety Clearance", "2026-02-15", "done", "Optimized pulse power at 920nm to avoid tissue phototoxicity")');
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (2, 1, "Intravital 4D Time-lapse Acquisition (100h)", "2026-04-25", "in-progress", "72 hours acquired across 6 cohorts; continuous stage tracking active")');
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (3, 1, "Cell Tracking & Velocity Segmentation", "2026-06-30", "pending", "Surface reconstruction and track displacement analysis in Imaris")');
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (4, 1, "Final Report & Publication Figure Rendering", "2026-09-15", "pending", "Render 3D movies and generate statistical figures for manuscript")');
+
+    run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (1, 4)');
+    run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (2, 4)');
+    run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (3, 4)');
+    run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (3, 6)');
+    run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (4, 1)');
+
+    run('INSERT INTO milestone_instruments (milestone_id, instrument_id) VALUES (1, 2)');
+    run('INSERT INTO milestone_instruments (milestone_id, instrument_id) VALUES (2, 2)');
+
+    // Project 2 Milestones
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (5, 2, "Antibody Titration & Depletion Laser Alignment", "2026-03-25", "pending", "Optimize STAR635P / Alexa594 pairs on 775nm depletion line")');
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (6, 2, "High-Content STED Imaging of 120 Wells", "2026-06-10", "pending", "Automated multi-position tile scanning with autofocus")');
+    run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (5, 5)');
+    run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (6, 5)');
+    run('INSERT INTO milestone_instruments (milestone_id, instrument_id) VALUES (5, 1)');
+
+    // Project 3 Milestones (Done)
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (7, 3, "Tissue Clearing & Refractive Index Matching", "2025-09-10", "done", "CUBIC protocol yielded optical transparency with RI=1.520")');
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (8, 3, "Volumetric Lightsheet Stacks (2.4 TB)", "2025-11-20", "done", "Acquired dual-illumination 5µm z-step stacks on Z.1")');
+    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (9, 3, "Final 3D Islet Morphometry Report", "2026-01-15", "done", "Delivered complete volume distribution metrics and data archive")');
+
+    // 7. Meetings
+    run(`INSERT INTO meetings (project_id, title, date, attendees, note, actions) VALUES (?,?,?,?,?,?)`, [
+      1,
+      'Project Kickoff & Laser Alignment Review',
+      '2026-01-12',
+      'Elena Rostova, Alex Chen, David Kim',
+      'Reviewed intravital laser power levels and live-animal heating stage protocol.',
+      'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.'
+    ]);
+    run(`INSERT INTO meetings (project_id, title, date, attendees, note, actions) VALUES (?,?,?,?,?,?)`, [
+      1,
+      'Interim Progress & Channel Bleaching Check',
+      '2026-02-28',
+      'Alex Chen, David Kim',
+      'Observed minor fluorophore quenching in red channel. Switched to resonant line accumulation.',
+      'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.'
+    ]);
+    run(`INSERT INTO meetings (project_id, title, date, attendees, note, actions) VALUES (?,?,?,?,?,?)`, [
+      2,
+      'Screening Protocol Design & STED Parameter Setup',
+      '2026-03-05',
+      'Marcus Thorne, Maya Patel, David Kim',
+      'Discussed depletion laser doughnut alignment and immersion oil selection for 96-well glass plates.',
+      'Maya to prepare test 24-well plate for PSF and resolution calibration next week.'
+    ]);
+
+    // 8. Custom KV Metadata
+    run('INSERT INTO kv (project_id, key, value) VALUES (1, "Biosafety Level", "BSL-2 (Murine Live In-Vivo)")');
+    run('INSERT INTO kv (project_id, key, value) VALUES (1, "Laser Wavelength", "920nm Ti:Sapphire 80MHz")');
+    run('INSERT INTO kv (project_id, key, value) VALUES (1, "Storage Tier", "NAS-Bioimaging-Vol4 / 4.8 TB")');
+    run('INSERT INTO kv (project_id, key, value) VALUES (1, "Grant Account", "HARV-IMM-R01-2026")');
+
+    run('INSERT INTO kv (project_id, key, value) VALUES (2, "Plate Standard", "96-Well Glass Bottom #1.5H")');
+    run('INSERT INTO kv (project_id, key, value) VALUES (2, "Fluorophores", "Bassoon (STAR635P), PSD-95 (Alexa594)")');
+    run('INSERT INTO kv (project_id, key, value) VALUES (2, "Depletion Line", "775nm Pulsed STED Laser")');
+
+    run('INSERT INTO kv (project_id, key, value) VALUES (3, "Clearing Method", "CUBIC Reagent-1 & Reagent-2")');
+    run('INSERT INTO kv (project_id, key, value) VALUES (3, "Refractive Index", "1.520 RI Matching Oil")');
+    run('INSERT INTO kv (project_id, key, value) VALUES (3, "Archive Volume", "2.8 TB Cold Storage")');
+
+    // 9. Files
+    run('INSERT INTO files (project_id, name, kind, path) VALUES (1, "CAR-T_Intravital_Protocol_v3.pdf", "link", "https://core-facility.internal/docs/protocols/cart-v3.pdf")');
+    run('INSERT INTO files (project_id, name, kind, path) VALUES (1, "Olympus_FV3000_Config_Laser920.json", "link", "https://core-facility.internal/configs/fv3000-cart.json")');
+    run('INSERT INTO files (project_id, name, kind, path) VALUES (2, "STED_Resolution_Calibration_Guide.pdf", "link", "https://core-facility.internal/docs/sted-calib.pdf")');
+    run('INSERT INTO files (project_id, name, kind, path) VALUES (3, "Pancreatic_Islets_3D_Summary.xlsx", "link", "https://core-facility.internal/reports/islets-2026.xlsx")');
+
+    markDirty();
   }
 
   global.DB = {
@@ -297,7 +492,9 @@
     q1,
     run,
     projectProgress,
-    projectFlags
+    projectFlags,
+    seedSampleData,
+    clearAllData
   };
 
 })(window);

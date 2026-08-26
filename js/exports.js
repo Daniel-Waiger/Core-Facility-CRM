@@ -248,7 +248,7 @@
   function exportPdf(id) {
     const d = loadProject(id);
     if (!d) { UI.toast('Project not found', 'error'); return; }
-    const jsPDF = global.jsPDF;
+    const jsPDF = (global.jspdf && global.jspdf.jsPDF) || global.jsPDF;
     if (!jsPDF) { UI.toast('jsPDF library not loaded', 'error'); return; }
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4' });

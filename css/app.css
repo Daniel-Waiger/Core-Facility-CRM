@@ -43,7 +43,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; max-width: 100vw; overflow-x: hidden; }
 body {
   font-family: var(--font);
   background: var(--bg);
@@ -54,7 +54,7 @@ body {
 }
 
 /* ---------- Layout shell ---------- */
-.app { display: flex; min-height: 100vh; }
+.app { display: flex; min-height: 100vh; width: 100%; max-width: 100vw; overflow-x: hidden; }
 .sidebar {
   width: 244px; flex-shrink: 0;
   border-right: 1px solid var(--border);
@@ -92,8 +92,9 @@ body {
   width: 100%;
 }
 
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.main-inner { max-width: 1240px; width: 100%; margin: 0 auto; padding: 24px 28px 64px; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; width: 100%; max-width: 100%; overflow-x: hidden; }
+.main-inner { max-width: 1240px; width: 100%; margin: 0 auto; padding: 24px 28px 64px; box-sizing: border-box; }
+.tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* ---------- Sidebar Items ---------- */
 .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
@@ -218,6 +219,49 @@ body {
 .btn-danger:hover { background: #be123c; }
 .btn-sm { padding: 5px 9px; font-size: 12px; }
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+/* ---------- Blood Orange Tour Button (Vibrant & Dark Bold Text) ---------- */
+.btn-tour {
+  background: #ea580c;
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 50%, #dc2626 100%);
+  color: #381207 !important;
+  font-weight: 750 !important;
+  border: 1px solid #c2410c;
+  box-shadow: 0 1px 3px rgba(234, 88, 12, 0.35);
+}
+.btn-tour:hover {
+  background: linear-gradient(135deg, #fb923c 0%, #f97316 50%, #ea580c 100%);
+  color: #200701 !important;
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.45);
+  transform: translateY(-1px);
+}
+.btn-tour svg {
+  stroke: #381207;
+  stroke-width: 2.2;
+}
+[data-theme="dark"] .btn-tour {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 50%, #dc2626 100%);
+  color: #200701 !important;
+  font-weight: 800 !important;
+  border-color: #9a3412;
+}
+[data-theme="dark"] .btn-tour svg {
+  stroke: #200701;
+  stroke-width: 2.2;
+}
+
+/* ---------- Theme Switch Knob ---------- */
+.theme-toggle {
+  width: 44px; height: 24px; border-radius: 999px;
+  background: var(--border-strong); position: relative;
+  cursor: pointer; transition: background 0.2s;
+}
+[data-theme="dark"] .theme-toggle { background: var(--primary); }
+.theme-toggle .knob {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; position: absolute; top: 2px; left: 2px;
+  transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
 
 /* ---------- Forms ---------- */
 .field { display: flex; flex-direction: column; gap: 5px; }
@@ -402,3 +446,214 @@ textarea.input { resize: vertical; min-height: 74px; }
 .empty .ic svg { width: 36px; height: 36px; }
 .empty .t { font-weight: 600; font-size: 14px; }
 .empty .s { font-size: 12.5px; margin-top: 2px; }
+
+/* ---------- Startup Welcome Modal & Cards ---------- */
+.startup-modal-inner {
+  padding: 30px 32px 24px;
+  display: flex; flex-direction: column; gap: 20px;
+  width: 100%; box-sizing: border-box;
+}
+.startup-modal-header {
+  text-align: center;
+  display: flex; flex-direction: column; align-items: center;
+}
+.startup-brand-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--primary), #7c3aed);
+  display: grid; place-items: center; color: #fff;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+}
+.startup-brand-icon svg { width: 26px; height: 26px; }
+.startup-modal-title {
+  font-size: 21px; font-weight: 750; color: var(--text);
+  letter-spacing: -0.3px; line-height: 1.25;
+}
+.startup-modal-sub {
+  font-size: 13.5px; color: var(--text-muted);
+  margin-top: 5px; max-width: 500px; line-height: 1.45;
+}
+.startup-cards-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 4px;
+}
+.startup-card {
+  background: var(--surface); border: 2px solid var(--border);
+  border-radius: 13px; padding: 18px 18px 16px;
+  display: flex; flex-direction: column; align-items: flex-start;
+  cursor: pointer; transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+.startup-card:hover {
+  border-color: var(--primary); transform: translateY(-2px);
+  box-shadow: var(--shadow-lg); background: var(--surface-2);
+}
+.startup-card-featured {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  background: color-mix(in srgb, var(--primary-soft) 28%, var(--surface));
+}
+.startup-card-featured:hover {
+  border-color: var(--primary); background: var(--primary-soft);
+}
+.startup-card-badge { margin-bottom: 10px; }
+.startup-card-icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: var(--surface-2); display: grid; place-items: center;
+  color: var(--primary); margin-bottom: 10px;
+}
+.startup-card-featured .startup-card-icon {
+  background: var(--primary-soft); color: var(--primary);
+}
+.startup-card-icon svg { width: 20px; height: 20px; }
+.startup-card-title {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  margin-bottom: 6px; line-height: 1.3;
+}
+.startup-card-body {
+  font-size: 12.5px; color: var(--text-muted);
+  line-height: 1.5; margin-bottom: 16px; flex: 1;
+}
+.startup-card-btn {
+  width: 100%; justify-content: center;
+}
+.startup-modal-footer {
+  display: flex; align-items: center; justify-content: center;
+  padding-top: 12px; border-top: 1px solid var(--border);
+}
+.startup-checkbox-label {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--text-muted); cursor: pointer; user-select: none;
+}
+.startup-checkbox-label:hover { color: var(--text); }
+
+@media (max-width: 640px) {
+  .startup-cards-grid { grid-template-columns: 1fr; }
+  .startup-modal-inner { padding: 20px 16px; }
+}
+
+/* =========================================================
+   4K & Ultra-High Resolution Responsive Scaling (~30% Bigger)
+   ========================================================= */
+@media (min-width: 2200px) {
+  body {
+    font-size: 18.2px; /* 30% larger than 14px */
+    line-height: 1.55;
+  }
+  .sidebar {
+    width: 318px;
+  }
+  .sidebar.collapsed {
+    width: 88px;
+  }
+  .brand {
+    padding: 22px 22px 18px; gap: 14px;
+  }
+  .brand .logo {
+    width: 44px; height: 44px; border-radius: 12px;
+  }
+  .brand .name { font-size: 18px; }
+  .brand .sub { font-size: 14px; }
+  .nav { padding: 12px 14px; gap: 6px; }
+  .nav-item {
+    padding: 12px 16px; border-radius: 10px; gap: 13px;
+  }
+  .nav-item .lbl { font-size: 17px; }
+  .nav-item svg { width: 23px; height: 23px; }
+  .sidebar-foot { padding: 16px; gap: 10px; }
+  .sidebar-foot .btn { font-size: 15px; padding: 10px 14px; }
+
+  .topbar {
+    padding: 16px 40px;
+    gap: 16px;
+  }
+  .topbar .title { font-size: 21px; }
+  .topbar .crumb { font-size: 16px; }
+  .saved-dot { font-size: 15px; }
+  .saved-dot .dot { width: 9px; height: 9px; }
+
+  .main-inner {
+    max-width: 1780px;
+    padding: 32px 40px 80px;
+  }
+
+  .card {
+    padding: 24px 28px;
+    border-radius: 1rem;
+    gap: 8px;
+  }
+  .card-title {
+    font-size: 17.5px; gap: 10px;
+  }
+  .card-title svg { width: 21px; height: 21px; }
+
+  .stat { min-height: 130px; }
+  .stat .n { font-size: 38px; }
+  .stat .l { font-size: 15.5px; margin-top: 8px; }
+
+  .btn {
+    font-size: 16px; padding: 10px 18px; border-radius: 10px; gap: 9px;
+  }
+  .btn svg { width: 18px; height: 18px; }
+  .btn-sm { font-size: 14.5px; padding: 7px 13px; }
+
+  .badge {
+    font-size: 14px; padding: 4px 12px;
+  }
+  .badge .dot { width: 8px; height: 8px; }
+
+  .field label { font-size: 14.5px; }
+  .field .hint { font-size: 13.5px; }
+  .input, select.input, textarea.input {
+    font-size: 16.5px; padding: 10px 14px; border-radius: 10px;
+  }
+
+  .tbl { font-size: 16px; }
+  .tbl th { font-size: 13.5px; padding: 13px 16px; }
+  .tbl td { padding: 14px 16px; }
+
+  .search-input-wrap { min-width: 320px; }
+  .search-icon svg { width: 20px; height: 20px; }
+  .search-input { padding-left: 42px !important; }
+
+  .chip { font-size: 14.5px; padding: 4px 12px; border-radius: 9px; }
+  .chip-sm { font-size: 13.5px; padding: 3px 10px; }
+
+  .project-title { font-size: 26px; }
+  .meta-label { font-size: 15px; min-width: 120px; }
+  .meta-val { font-size: 16px; }
+  .avatar { width: 44px; height: 44px; font-size: 16px; }
+
+  .modal { width: min(840px, 94vw); border-radius: 18px; }
+  .modal .head { padding: 20px 26px; }
+  .modal .body { padding: 26px; }
+  .modal .foot { padding: 18px 26px; }
+
+  .tour-bubble { max-width: 440px; padding: 20px; font-size: 16px; border-radius: 16px; }
+  .tour-bubble .t { font-size: 18px; margin-bottom: 6px; }
+  .tour-bubble .foot .step { font-size: 14px; }
+
+  .startup-modal-inner { padding: 38px 40px 30px; gap: 24px; }
+  .startup-modal-title { font-size: 26px; }
+  .startup-modal-sub { font-size: 16px; max-width: 600px; }
+  .startup-card { padding: 24px; border-radius: 16px; }
+  .startup-card-title { font-size: 18px; }
+  .startup-card-body { font-size: 15px; }
+  .startup-card-icon { width: 48px; height: 48px; }
+  .startup-card-icon svg { width: 24px; height: 24px; }
+  .startup-checkbox-label { font-size: 15px; }
+}
+
+@media (min-width: 3200px) {
+  body {
+    font-size: 20px;
+  }
+  .main-inner {
+    max-width: 2200px;
+  }
+  .sidebar {
+    width: 380px;
+  }
+  .sidebar.collapsed {
+    width: 104px;
+  }
+  .stat .n { font-size: 46px; }
+}

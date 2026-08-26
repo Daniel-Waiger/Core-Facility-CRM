@@ -32,7 +32,7 @@
       ORDER BY m.due_date ASC LIMIT 10`, [now]);
 
     return `
-    <div class="grid cols-4">
+    <div class="grid cols-4 mb-16">
       <div class="card stat"><span class="n">${total}</span><span class="l">Total projects</span></div>
       <div class="card stat"><span class="n" style="color:var(--primary)">${active}</span><span class="l">Active</span></div>
       <div class="card stat"><span class="n" style="color:var(--danger)">${overdue.length}</span><span class="l">Overdue milestones</span></div>
@@ -121,60 +121,62 @@
 
     ${!rows.length ? emptyState('folder', 'No matching projects', projectFilter.query || projectFilter.status ? 'Try changing your search or filters.' : 'Create your first project to start tracking.') : `
     <div class="card">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>Project</th>
-            <th>Status</th>
-            <th>Priority</th>
-            <th>PI</th>
-            <th>Modality / Tags</th>
-            <th>Progress</th>
-            <th>Timeline</th>
-            <th style="text-align:right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((p) => {
-            const total = p.ms_total || 0;
-            const done = p.ms_done || 0;
-            const pct = total ? Math.round((done / total) * 100) : 0;
-            const flags = (p.flags || '').split(',').filter(Boolean);
-            return `
-            <tr class="row-link" data-goto="project" data-id="${p.id}">
-              <td>
-                <div style="font-weight:600;font-size:14px;color:var(--text)">${esc(p.title)}</div>
-                <div class="faint mono small">Code: ${esc(p.code)}</div>
-              </td>
-              <td>${statusBadge(p.status)}</td>
-              <td><span class="badge ${p.priority === 'High' ? 'danger' : p.priority === 'Low' ? 'neutral' : 'warning'}">${esc(p.priority || 'Medium')}</span></td>
-              <td class="muted small">${esc(p.pi_name || '—')}</td>
-              <td>
-                <div class="chips">
-                  ${p.modality ? `<span class="chip-sm">${esc(p.modality)}</span>` : ''}
-                  ${p.sample ? `<span class="chip-sm">${esc(p.sample)}</span>` : ''}
-                  ${flags.map((f) => `<span class="badge danger" style="padding:1px 6px;font-size:10px">${esc(f)}</span>`).join('')}
-                </div>
-              </td>
-              <td>
-                <div class="row" style="gap:6px">
-                  <div class="progress seg" style="width:80px"><i style="width:${pct}%"></i></div>
-                  <span class="mono small faint">${pct}%</span>
-                </div>
-                <div class="faint small">${done}/${total} done</div>
-              </td>
-              <td class="mono small">
-                <div>${fmt(p.start_date)}</div>
-                <div class="faint">to ${fmt(p.end_date)}</div>
-              </td>
-              <td style="text-align:right" onclick="event.stopPropagation()">
-                <button class="btn btn-ghost btn-sm" data-act="edit-project" data-id="${p.id}" title="Edit Project">${ic('edit')}</button>
-                <button class="btn btn-ghost btn-sm" data-goto="project" data-id="${p.id}" title="Open Details">${ic('chevron')}</button>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Status</th>
+              <th>Priority</th>
+              <th>PI</th>
+              <th>Modality / Tags</th>
+              <th>Progress</th>
+              <th>Timeline</th>
+              <th style="text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((p) => {
+              const total = p.ms_total || 0;
+              const done = p.ms_done || 0;
+              const pct = total ? Math.round((done / total) * 100) : 0;
+              const flags = (p.flags || '').split(',').filter(Boolean);
+              return `
+              <tr class="row-link" data-goto="project" data-id="${p.id}">
+                <td>
+                  <div style="font-weight:600;font-size:14px;color:var(--text)">${esc(p.title)}</div>
+                  <div class="faint mono small">Code: ${esc(p.code)}</div>
+                </td>
+                <td>${statusBadge(p.status)}</td>
+                <td><span class="badge ${p.priority === 'High' ? 'danger' : p.priority === 'Low' ? 'neutral' : 'warning'}">${esc(p.priority || 'Medium')}</span></td>
+                <td class="muted small">${esc(p.pi_name || '—')}</td>
+                <td>
+                  <div class="chips">
+                    ${p.modality ? `<span class="chip-sm">${esc(p.modality)}</span>` : ''}
+                    ${p.sample ? `<span class="chip-sm">${esc(p.sample)}</span>` : ''}
+                    ${flags.map((f) => `<span class="badge danger" style="padding:1px 6px;font-size:10px">${esc(f)}</span>`).join('')}
+                  </div>
+                </td>
+                <td>
+                  <div class="row" style="gap:6px">
+                    <div class="progress seg" style="width:80px"><i style="width:${pct}%"></i></div>
+                    <span class="mono small faint">${pct}%</span>
+                  </div>
+                  <div class="faint small">${done}/${total} done</div>
+                </td>
+                <td class="mono small">
+                  <div>${fmt(p.start_date)}</div>
+                  <div class="faint">to ${fmt(p.end_date)}</div>
+                </td>
+                <td style="text-align:right" onclick="event.stopPropagation()">
+                  <button class="btn btn-ghost btn-sm" data-act="edit-project" data-id="${p.id}" title="Edit Project">${ic('edit')}</button>
+                  <button class="btn btn-ghost btn-sm" data-goto="project" data-id="${p.id}" title="Open Details">${ic('chevron')}</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
     </div>`}`;
   }
 
@@ -440,34 +442,36 @@
         <button class="btn btn-primary btn-sm" data-act="add-person" data-tooltip="Register a new researcher or staff">${ic('plus')} Add Person</button>
       </div>
       ${!rows.length ? emptyState('users', 'No people added yet', 'Add Principal Investigators, lab members, and facility technicians.') : `
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Role / Position</th>
-            <th>Lab / Group / Company</th>
-            <th>Email</th>
-            <th>Notes</th>
-            <th>Active Projects</th>
-            <th style="text-align:right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((r) => `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead>
             <tr>
-              <td style="font-weight:600">${esc(r.name)}</td>
-              <td><span class="badge neutral">${esc(r.type)}</span></td>
-              <td><span class="chip-sm" style="font-weight:600">${esc(r.organization || '—')}</span></td>
-              <td class="muted small">${esc(r.email || '—')}</td>
-              <td class="faint small">${esc(r.note || '—')}</td>
-              <td><span class="badge primary">${r.proj_count} projects</span></td>
-              <td style="text-align:right">
-                <button class="btn btn-ghost btn-sm" data-act="edit-person" data-id="${r.id}" title="Edit Person" data-tooltip="Edit profile">${ic('edit')}</button>
-                <button class="btn btn-ghost btn-sm" data-act="delete-person" data-id="${r.id}" title="Delete Person" data-tooltip="Delete person">${ic('trash')}</button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`}
+              <th>Name</th>
+              <th>Role / Position</th>
+              <th>Lab / Group / Company</th>
+              <th>Email</th>
+              <th>Notes</th>
+              <th>Active Projects</th>
+              <th style="text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((r) => `
+              <tr>
+                <td style="font-weight:600">${esc(r.name)}</td>
+                <td><span class="badge neutral">${esc(r.type)}</span></td>
+                <td><span class="chip-sm" style="font-weight:600">${esc(r.organization || '—')}</span></td>
+                <td class="muted small">${esc(r.email || '—')}</td>
+                <td class="faint small">${esc(r.note || '—')}</td>
+                <td><span class="badge primary">${r.proj_count} projects</span></td>
+                <td style="text-align:right">
+                  <button class="btn btn-ghost btn-sm" data-act="edit-person" data-id="${r.id}" title="Edit Person" data-tooltip="Edit profile">${ic('edit')}</button>
+                  <button class="btn btn-ghost btn-sm" data-act="delete-person" data-id="${r.id}" title="Delete Person" data-tooltip="Delete person">${ic('trash')}</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
     </div>`;
   }
 
@@ -486,23 +490,25 @@
         <button class="btn btn-primary btn-sm" data-act="add-instrument">${ic('plus')} Add Instrument</button>
       </div>
       ${!rows.length ? emptyState('cpu', 'No instruments added', 'Add microscopes, cytometers, or analysis workstations.') : `
-      <table class="tbl">
-        <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Notes</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>
-          ${rows.map((r) => `
-            <tr>
-              <td style="font-weight:600">${esc(r.name)}</td>
-              <td class="muted small">${esc(r.kind || '—')}</td>
-              <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
-              <td class="faint small">${esc(r.note || '—')}</td>
-              <td><span class="badge neutral">${r.proj_count} projects</span></td>
-              <td style="text-align:right">
-                <button class="btn btn-ghost btn-sm" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
-                <button class="btn btn-ghost btn-sm" data-act="delete-instrument" data-id="${r.id}" title="Delete Instrument">${ic('trash')}</button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`}
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Notes</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${rows.map((r) => `
+              <tr>
+                <td style="font-weight:600">${esc(r.name)}</td>
+                <td class="muted small">${esc(r.kind || '—')}</td>
+                <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
+                <td class="faint small">${esc(r.note || '—')}</td>
+                <td><span class="badge neutral">${r.proj_count} projects</span></td>
+                <td style="text-align:right">
+                  <button class="btn btn-ghost btn-sm" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
+                  <button class="btn btn-ghost btn-sm" data-act="delete-instrument" data-id="${r.id}" title="Delete Instrument">${ic('trash')}</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
     </div>`;
   }
 
@@ -578,7 +584,7 @@
       const evs = byDay[ds] || [];
 
       cells += `
-      <div class="cal-cell ${isToday ? 'today' : ''} ${!inMonth ? 'other-month' : ''}">
+      <div class="cal-cell ${isToday ? 'today clickable' : ''} ${!inMonth ? 'other-month' : ''}" ${isToday ? 'data-act="open-today-modal" data-tooltip="Click to expand today\'s schedule"' : ''}>
         <div class="cal-cell-head">
           <span class="num">${cur.getDate()}</span>
           ${isToday ? '<span class="today-tag">Today</span>' : ''}
@@ -599,10 +605,10 @@
     <div class="card">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('calendar')} ${monthLabel}</span></div>
-        <div class="row">
-          <button class="btn btn-secondary btn-sm" data-act="cal-prev">${ic('chevron')} Prev</button>
-          <button class="btn btn-secondary btn-sm" data-act="cal-today">Today</button>
-          <button class="btn btn-secondary btn-sm" data-act="cal-next">Next ${ic('chevron')}</button>
+        <div class="row" style="gap:6px">
+          <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous Month">${ic('chevron-left')} Prev</button>
+          <button class="btn btn-primary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">Today</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next Month">Next ${ic('chevron-right')}</button>
         </div>
       </div>
       <div class="cal-grid-header">${headerCells}</div>
@@ -612,6 +618,8 @@
 
   /* ---------------- Settings ---------------- */
   function settings() {
+    const hideStartup = localStorage.getItem('crm-hide-startup-modal') === '1';
+
     return `
     <div class="card mb-16">
       <div class="card-title">${ic('settings')} Preferences &amp; Theme</div>
@@ -623,6 +631,35 @@
           </div>
           <div class="theme-toggle" data-act="theme-toggle"><div class="knob"></div></div>
         </div>
+        <div class="divider"></div>
+        <div class="row mb-8">
+          <div class="grow">
+            <div style="font-weight:600">Startup Welcome Modal</div>
+            <div class="faint small">Show the welcome modal with Quick Demo vs Fresh Start options upon opening the app.</div>
+          </div>
+          <label class="row" style="cursor:pointer;gap:8px">
+            <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="localStorage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
+            <span class="small font-medium">Show on startup</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-title">${ic('sparkles')} Sample Data &amp; Walkthrough</div>
+      <div class="card-body">
+        <div class="row mb-8">
+          <div class="grow">
+            <div style="font-weight:600">Facility Sandbox &amp; Interactive Tour</div>
+            <div class="faint small">Load a complete multi-modality research dataset (projects, PIs, microscopes, milestones, meetings, calendar events) or start the guided walkthrough.</div>
+          </div>
+        </div>
+        <div class="row mt-8" style="gap:10px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" data-act="open-startup-modal">${ic('compass')} Open Welcome Screen</button>
+          <button class="btn btn-secondary btn-sm" data-act="load-sample-data">${ic('sparkles')} Load Sample Data</button>
+          <button class="btn btn-tour btn-sm" data-act="tour">${ic('play')} Launch Field Walkthrough</button>
+          <button class="btn btn-ghost btn-sm text-danger" style="color:var(--danger)" data-act="clear-data">${ic('trash')} Clear All Data</button>
+        </div>
       </div>
     </div>
 
@@ -632,7 +669,7 @@
         <div class="row mb-8">
           <div class="grow">
             <div style="font-weight:600">Single-File Backup &amp; Recovery</div>
-            <div class="faint small">Your entire facility database and files live in your browser's persistent storage. Export a JSON backup anytime for safekeeping or to migrate to another PC.</div>
+            <div class="faint small">Your entire facility database lives securely in your browser's persistent storage. Export a portable JSON backup anytime for safekeeping or to transfer to another workstation.</div>
           </div>
         </div>
         <div class="row mt-8" style="gap:10px">
