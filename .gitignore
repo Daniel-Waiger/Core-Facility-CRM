@@ -1,0 +1,10 @@
+# Logs / Temporary folders
+unsloth-tmp/
+sandbox/
+*.log
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

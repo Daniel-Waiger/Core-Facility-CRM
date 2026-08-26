@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Core Facility Project Tracker</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toasts" class="toasts"></div>
+
+  <!-- sql.js: asm.js build = single file, works from file:// (no wasm fetch) -->
+  <script src="libs/sql-asm.js"></script>
+  <!-- Export libs (bundled locally) -->
+  <script src="libs/xlsx.full.min.js"></script>
+  <script src="libs/jspdf.umd.min.js"></script>
+  <script src="libs/docx.iife.js"></script>
+
+  <script src="js/consts.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/views.js"></script>
+  <script src="js/exports.js"></script>
+  <script src="js/app.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', function () { App.boot(); });</script>
+</body>
+</html>
