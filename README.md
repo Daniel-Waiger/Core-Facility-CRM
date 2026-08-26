@@ -33,6 +33,78 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 ---
 
+## Screenshots
+
+**Onboarding & first run**
+
+<img src="docs/screenshots/01-onboarding.png" width="720" alt="Welcome onboarding modal">
+
+*Figure 1 — The startup modal offers a seeded demo dataset with a guided walkthrough, or a clean empty workspace.*
+
+**Dashboard, theming & layout**
+
+<img src="docs/screenshots/02-dashboard.png" width="720" alt="Dashboard overview">
+
+*Figure 2 — Facility Dashboard: at-a-glance KPI counters (total/active projects, overdue milestones, completed) plus upcoming and overdue milestone feeds.*
+
+<img src="docs/screenshots/02b-sidebar-collapsed.png" width="720" alt="Collapsed icon-only sidebar">
+
+*Figure 3 — The sidebar collapses to an icon-only rail to maximize working canvas width.*
+
+<img src="docs/screenshots/02c-light-theme.png" width="720" alt="Light theme">
+
+*Figure 4 — One-click Dark/Light theme switching across the entire UI.*
+
+**Projects registry**
+
+<img src="docs/screenshots/03-projects-registry.png" width="720" alt="Projects registry with search and filters">
+
+*Figure 5 — Projects Registry with live search and filtering by modality, lifecycle status, and priority.*
+
+**Project detail**
+
+<img src="docs/screenshots/04-project-header.png" width="720" alt="Project header with status lifecycle and export actions">
+
+*Figure 6 — Project header: unique project code, PI, timeline, priority/status badges, one-click lifecycle stage buttons, and inline XLSX/DOCX/PDF export/delete actions.*
+
+<img src="docs/screenshots/06-metadata-tags.png" width="420" alt="Metadata and custom fields"> <img src="docs/screenshots/07-team-collaborators.png" width="420" alt="Team and collaborators">
+
+*Figure 7 — Left: funding, modality, sample type, tags, and extensible custom key-value metadata (e.g. laser wavelength, biosafety level, grant account). Right: team & collaborator roster with roles and inline contact info.*
+
+<img src="docs/screenshots/08-assigned-instruments.png" width="720" alt="Assigned instruments">
+
+*Figure 8 — Instruments assigned to a project, with live operational status badges.*
+
+<img src="docs/screenshots/09-milestones.png" width="720" alt="Milestones and deliverables timeline">
+
+*Figure 9 — Milestones & Deliverables timeline: due dates, status (done/in-progress/pending/overdue), and assigned owners/instruments per deliverable. Clicking a status node cycles its state.*
+
+<img src="docs/screenshots/10-meetings.png" width="720" alt="Meetings and consultation notes">
+
+*Figure 10 — Consultation meeting notes with attendee tagging and next-step action items.*
+
+**People, instruments & scheduling**
+
+<img src="docs/screenshots/11-people-labs.png" width="720" alt="People, labs and researchers directory">
+
+*Figure 11 — People, Labs & Researchers directory: PIs, postdocs, students, and core staff with lab/organization affiliations and active project counts.*
+
+<img src="docs/screenshots/12-instruments.png" width="720" alt="Core instruments inventory">
+
+*Figure 12 — Core Instruments inventory with operational status (Available, In-use, Maintenance, Down) and imaging modality.*
+
+<img src="docs/screenshots/13-calendar.png" width="720" alt="Derived monthly calendar">
+
+*Figure 13 — Interactive derived calendar combining milestone deadlines and scheduled consultations.*
+
+**Settings & data portability**
+
+<img src="docs/screenshots/14-settings.png" width="720" alt="Settings, backup and theme preferences">
+
+*Figure 14 — Settings: single-file JSON backup/restore, sample data reload, and appearance preferences — all data stays local to the browser's IndexedDB.*
+
+---
+
 ## Directory Structure
 
 ```text
