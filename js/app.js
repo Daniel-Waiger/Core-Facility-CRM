@@ -192,9 +192,10 @@
 
       const handleFresh = () => {
         savePref();
+        DB.clearAllData();
         UI.closeDim(modalDim);
         route('dashboard');
-        UI.toast('Clean workspace ready!');
+        UI.toast('All facility data cleared.');
       };
 
       modalDim.querySelectorAll('[data-act="startup-demo"]').forEach(el => {
