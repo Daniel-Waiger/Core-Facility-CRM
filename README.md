@@ -10,6 +10,9 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 - **Zero-Install & Zero-Server:** Runs instantly on PC, Mac, Linux, and tablets by opening `index.html` directly in modern web browsers (Chrome, Edge, Firefox, Safari). No Node.js, Python, or local server required.
 - **Embedded SQLite Database:** Uses `sql.js` (asm.js single-file build) backed by browser `IndexedDB` storage with automatic debounced autosave.
+- **Welcome & Onboarding Experience:**
+  - **Seeded Example & Walkthrough:** Load a realistic bioimaging facility dataset (Multiphoton, STED, Lightsheet, etc.) with an interactive step-by-step tour.
+  - **Start Fresh (Empty Workspace):** One-click initialization of a clean, empty database ready for direct entry.
 - **Full CRUD Capabilities:**
   - **Projects:** Title, unique project code generation (`PRJ-YYMM-###`), status lifecycle (`Initiated` → `Active` → `On-hold` → `Completed` → `Archived`), priority, funding sources, modality/techniques, sample types, risk flags, timelines, tags, and notes. Includes inline researcher/PI registration.
   - **Milestones:** Deliverables with due dates, notes, assigned staff/collaborators, assigned instruments, and single-click status cycling (`pending` → `in-progress` → `done`). Overall project progress is automatically derived.
@@ -18,15 +21,15 @@ Track research projects from initiation to completion with full lifecycle tracki
   - **Meetings & Consultations:** Consultation notes, known attendee tagging with lab affiliations, inline attendee registration, discussion summaries, and next step action items.
   - **Custom Metadata (KV):** Extensible project attributes (e.g. grant numbers, ethics protocol IDs, billing codes).
   - **Attachments & Links:** Local file storage (embedded safely in IndexedDB) and network/cloud link management.
-- **Interactive Derived Calendar:** 7-day monthly schedule grid showing upcoming milestone deadlines and consultation meetings with direct navigation.
+- **Interactive Derived Calendar:** 7-day monthly schedule grid showing upcoming milestone deadlines and consultation meetings with direct navigation and "Today" quick view.
 - **Collapsible Navigation & Adaptive Theme:** Compact icon-only sidebar mode and smart next-theme switcher (`🌙 Dark Mode` / `☀️ Light Mode`).
 - **Search & Live Filtering:** Search by project title, code, PI name, modality, funding, sample type, or tags.
 - **Multi-Format Report Export:**
   - **XLSX:** Comprehensive multi-sheet workbook (Overview, Milestones, Team, Instruments, Meetings, Files) via SheetJS.
   - **DOCX:** Formatted Word document summary via `docx`.
   - **PDF:** Multi-page paginated report with headers, footers, and page numbers via `jsPDF`.
-- **Single-File Backup & Recovery:** Export your entire facility database into a self-contained `.json` backup file and restore it on any machine.
-- **Modern SaaS Minimalist UI:** Hand-written CSS design system with Dark/Light theme switching, toast feedback, and guided onboarding tour.
+- **Single-File Backup & Recovery:** Export your entire facility database into a self-contained `.json` backup file and restore it on any machine anytime.
+- **Modern SaaS Minimalist UI:** Hand-written CSS design system with Dark/Light theme switching, toast feedback, custom brand favicon, and guided onboarding tour.
 
 ---
 
@@ -35,15 +38,16 @@ Track research projects from initiation to completion with full lifecycle tracki
 ```text
 Core-Facility-CRM/
 ├── index.html          # Application entry point
+├── favicon.svg         # Brand logo favicon
 ├── css/
 │   └── app.css         # Modern SaaS Minimalist design system
 ├── js/
 │   ├── consts.js       # Shared vocabularies (modalities, statuses, priorities)
-│   ├── db.js           # sql.js engine, schema, IndexedDB persistence, queries
-│   ├── ui.js           # Toasts, modals, theme switcher, icons, tour engine
+│   ├── db.js           # sql.js engine, schema, IndexedDB persistence, sample dataset & clear
+│   ├── ui.js           # Toasts, modals, theme switcher, icons, interactive tour engine
 │   ├── views.js        # Screen renderers (Dashboard, Projects, Detail, People, Instruments, Calendar, Settings)
 │   ├── exports.js      # Multi-page PDF, DOCX, and XLSX export engines
-│   └── app.js          # Routing, action dispatcher, CRUD modal logic
+│   └── app.js          # Routing, startup welcome modal, action dispatcher, CRUD modal logic
 ├── libs/
 │   ├── sql-asm.js      # SQLite engine compiled to JS (asm.js, file:// compatible)
 │   ├── xlsx.full.min.js# SheetJS spreadsheet export engine
@@ -59,7 +63,8 @@ Core-Facility-CRM/
 
 1. Download or clone this repository.
 2. Double-click `index.html` to open it in your browser.
-3. Click **"New Project"** in the sidebar to start tracking your first project!
+3. Choose **Load Demo & Start Tour** to explore with sample data or **Start Fresh** to begin with an empty database.
+4. Click **"New Project"** in the sidebar to start tracking projects!
 
 ---
 
