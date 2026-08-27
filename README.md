@@ -1,4 +1,4 @@
-# Core Facility Project Tracker & CRM
+# Core Facility Tracker
 
 A portable, standalone web application tailored for microscopy, bioimaging, flow cytometry, and scientific image-analysis core facilities.
 
@@ -28,7 +28,7 @@ Track research projects from initiation to completion with full lifecycle tracki
   - **XLSX:** Comprehensive multi-sheet workbook (Overview, Milestones, Team, Instruments, Meetings, Files) via SheetJS.
   - **DOCX:** Formatted Word document summary via `docx`.
   - **PDF:** Multi-page paginated report with headers, footers, and page numbers via `jsPDF`.
-- **Single-File Backup & Recovery:** Export your entire facility database into a self-contained `.json` backup file and restore it on any machine anytime.
+- **Single-File Backup & Recovery:** Export your entire facility database (including attached files) into a self-contained `.json` backup file and restore it on any machine anytime. An automatic backup also runs roughly once every 24 hours while the app is open (toggleable in Settings), so you're never relying solely on browser storage — in Chrome/Edge, point it at the app's folder once and it writes silently into a `backups/` subfolder there with no download prompts; otherwise it falls back to a normal file download.
 - **Modern SaaS Minimalist UI:** Hand-written CSS design system with Dark/Light theme switching, toast feedback, custom brand favicon, and guided onboarding tour.
 
 ---
@@ -170,7 +170,7 @@ Either way, no installation, server, or account is required — each person's da
 
 ## Data Safety & Privacy
 
-All project data, attachments, and metadata remain **100% local to your machine**. No data is ever sent to external cloud servers or third parties. Regular backups can be downloaded anytime via **Settings → Export Backup**.
+All project data, attachments, and metadata remain **100% local to your machine**. No data is ever sent to external cloud servers or third parties. Backups (including attachments) can be exported anytime via **Settings → Export Backup**, and an automatic dated backup runs roughly every 24 hours while the app is open as an additional safety net against browser storage being cleared — written silently into a `backups/` subfolder next to the app (Chrome/Edge, after a one-time folder selection in Settings), or downloaded normally otherwise.
 
 ---
 

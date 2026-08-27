@@ -108,8 +108,8 @@ body {
   background: linear-gradient(135deg, #4f46e5, #7c3aed);
   display: grid; place-items: center; color: #fff; flex-shrink: 0;
 }
-.brand .name { font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
-.brand .sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.brand .name { font-weight: 600; letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand .sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-collapse-btn {
   margin-left: auto; cursor: pointer; color: var(--text-muted);
   border: none; background: transparent; padding: 4px; border-radius: 6px;
@@ -263,6 +263,39 @@ body {
 [data-theme="dark"] .btn-tour svg {
   stroke: #200701;
   stroke-width: 2.2;
+}
+
+/* ---------- Theme Switch Button (Previews Next Theme Colors) ---------- */
+.sidebar-theme-btn {
+  background: #0b1120 !important;
+  color: #ffffff !important;
+  border: 1px solid #24334d !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  font-weight: 600;
+}
+.sidebar-theme-btn:hover {
+  background: #111a2c !important;
+  color: #ffffff !important;
+  border-color: #3b5074 !important;
+}
+.sidebar-theme-btn svg {
+  stroke: #ffffff;
+}
+
+[data-theme="dark"] .sidebar-theme-btn {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-weight: 600;
+}
+[data-theme="dark"] .sidebar-theme-btn:hover {
+  background: #f8fafc !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+[data-theme="dark"] .sidebar-theme-btn svg {
+  stroke: #0f172a;
 }
 
 /* ---------- Theme Switch Knob ---------- */

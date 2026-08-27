@@ -6,12 +6,14 @@
   const ctx = { route: 'dashboard', project: null };
 
   let _personSavedCallback = null;
+  const autoBackupFolderStatus = { supported: false, name: null, granted: false };
 
   global.App = {
     boot: boot,
     route: route,
     refresh: refresh,
     get project() { return ctx.project; },
+    get autoBackupFolderStatus() { return autoBackupFolderStatus; },
     onSaving() { UI.setSavedState('pending'); },
     onSaved() { UI.setSavedState('saved'); },
   };
@@ -41,7 +43,7 @@
         <aside class="sidebar ${isCollapsed ? 'collapsed' : ''}" id="app-sidebar">
           <div class="brand">
             <div class="logo">${ic('cpu')}</div>
-            <div style="min-width:0">
+            <div style="min-width:0;flex:1">
               <div class="name">Core Facility Tracker</div>
               <div class="sub">Bioimaging Facility</div>
             </div>
@@ -100,6 +102,16 @@
   function renderView() {
     const v = document.getElementById('view');
     const { route: name, project: id } = ctx;
+
+    // Re-rendering replaces the DOM wholesale, which would otherwise steal focus away from
+    // whatever the user was typing in (e.g. a live search box) on every keystroke. Capture
+    // the focused element's identity + cursor position beforehand and restore it after.
+    const active = document.activeElement;
+    let focusRestore = null;
+    if (active && active.id && v.contains(active)) {
+      focusRestore = { id: active.id, selStart: active.selectionStart, selEnd: active.selectionEnd };
+    }
+
     v.innerHTML =
       name === 'project' ? Views.projectDetail(id) :
       name === 'projects' ? Views.projects() :
@@ -118,6 +130,32 @@
       if (prFilter) prFilter.onchange = (e) => Views.setProjectFilter({ priority: e.target.value });
       const modFilter = document.getElementById('proj-modality-filter');
       if (modFilter) modFilter.onchange = (e) => Views.setProjectFilter({ modality: e.target.value });
+    }
+
+    if (name === 'people') {
+      const searchInput = document.getElementById('people-search');
+      if (searchInput) searchInput.oninput = (e) => Views.setPeopleFilter({ query: e.target.value });
+      const typeFilter = document.getElementById('people-type-filter');
+      if (typeFilter) typeFilter.onchange = (e) => Views.setPeopleFilter({ type: e.target.value });
+    }
+
+    if (name === 'instruments') {
+      const searchInput = document.getElementById('inst-search');
+      if (searchInput) searchInput.oninput = (e) => Views.setInstrumentFilter({ query: e.target.value });
+      const stFilter = document.getElementById('inst-status-filter');
+      if (stFilter) stFilter.onchange = (e) => Views.setInstrumentFilter({ status: e.target.value });
+      const kindFilter = document.getElementById('inst-kind-filter');
+      if (kindFilter) kindFilter.onchange = (e) => Views.setInstrumentFilter({ kind: e.target.value });
+    }
+
+    if (focusRestore) {
+      const el = document.getElementById(focusRestore.id);
+      if (el) {
+        el.focus();
+        if (typeof el.setSelectionRange === 'function' && focusRestore.selStart != null) {
+          try { el.setSelectionRange(focusRestore.selStart, focusRestore.selEnd); } catch (_) { /* not a text-selectable input */ }
+        }
+      }
     }
   }
 
@@ -225,22 +263,106 @@
   const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
   function isAutoBackupEnabled() { return localStorage.getItem('auto-backup-enabled') !== '0'; }
+  function supportsSilentBackupFolder() { return typeof window.showDirectoryPicker === 'function'; }
+
+  async function refreshAutoBackupFolderStatus() {
+    autoBackupFolderStatus.supported = supportsSilentBackupFolder();
+    autoBackupFolderStatus.name = null;
+    autoBackupFolderStatus.granted = false;
+    if (!autoBackupFolderStatus.supported) return;
+    try {
+      const stored = await DB.getAutoBackupDirHandle();
+      if (!stored || !stored.dirHandle) return;
+      autoBackupFolderStatus.name = stored.parentName ? `${stored.parentName}/backups` : stored.dirHandle.name;
+      autoBackupFolderStatus.granted = (await stored.dirHandle.queryPermission({ mode: 'readwrite' })) === 'granted';
+    } catch (_) { /* leave as not-configured */ }
+  }
+
+  async function regrantAutoBackupFolder() {
+    try {
+      const stored = await DB.getAutoBackupDirHandle();
+      if (!stored || !stored.dirHandle) { UI.toast('No backup folder configured', 'error'); return; }
+      const perm = await stored.dirHandle.requestPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') { UI.toast('Permission was not granted', 'error'); return; }
+      await refreshAutoBackupFolderStatus();
+      UI.toast('Silent backup folder re-enabled');
+      refresh();
+    } catch (e) {
+      UI.toast('Could not re-enable: ' + e.message, 'error');
+    }
+  }
+
+  // Writes into the previously-granted "backups" subfolder with no dialog. Returns false
+  // (never throws) if no folder is configured, permission has lapsed, or the write fails for
+  // any reason — callers should fall back to a normal download in that case.
+  async function tryWriteSilentBackup(filename, json) {
+    if (!supportsSilentBackupFolder()) return false;
+    try {
+      const stored = await DB.getAutoBackupDirHandle();
+      if (!stored || !stored.dirHandle) return false;
+      const perm = await stored.dirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') return false; // re-granting requires a user gesture; don't prompt silently
+      const fileHandle = await stored.dirHandle.getFileHandle(filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      return true;
+    } catch (e) {
+      console.error('silent auto-backup write failed', e);
+      return false;
+    }
+  }
+
+  async function chooseAutoBackupFolder() {
+    if (!supportsSilentBackupFolder()) {
+      UI.toast('Your browser doesn’t support silent folder backups', 'error');
+      return;
+    }
+    try {
+      // The user picks the app's own folder (or any folder); we create/reuse a "backups"
+      // subfolder inside it and store a handle to THAT, so writes never touch other files there.
+      const parentHandle = await window.showDirectoryPicker({ id: 'core-facility-auto-backup', mode: 'readwrite' });
+      const perm = await parentHandle.requestPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') { UI.toast('Folder permission was not granted', 'error'); return; }
+      const backupsHandle = await parentHandle.getDirectoryHandle('backups', { create: true });
+      await DB.saveAutoBackupDirHandle({ dirHandle: backupsHandle, parentName: parentHandle.name });
+      await refreshAutoBackupFolderStatus();
+      UI.toast(`Silent automatic backups enabled to "${parentHandle.name}/backups"`);
+      refresh();
+    } catch (e) {
+      if (e && e.name !== 'AbortError') UI.toast('Could not set up the backup folder: ' + e.message, 'error');
+    }
+  }
+
+  async function disableAutoBackupFolder() {
+    await DB.clearAutoBackupDirHandle();
+    await refreshAutoBackupFolderStatus();
+    UI.toast('Silent backup folder disabled — automatic backups will download instead');
+    refresh();
+  }
 
   async function performBackupDownload(auto) {
     const data = await DB.buildBackup();
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const json = JSON.stringify(data);
+    const filename = `core-facility-${auto ? 'autobackup' : 'backup'}-${new Date().toISOString().slice(0, 10)}.json`;
+
+    if (auto) {
+      const wroteSilently = await tryWriteSilentBackup(filename, json);
+      localStorage.setItem('last-auto-backup-at', new Date().toISOString());
+      if (wroteSilently) {
+        UI.toast('Automatic backup saved silently');
+        return;
+      }
+    }
+
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `core-facility-${auto ? 'autobackup' : 'backup'}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-    if (auto) {
-      localStorage.setItem('last-auto-backup-at', new Date().toISOString());
-      UI.toast('Automatic backup saved to your Downloads folder');
-    } else {
-      UI.toast('Complete backup exported');
-    }
+    UI.toast(auto ? 'Automatic backup downloaded (set a silent backup folder in Settings to skip the download prompt)' : 'Complete backup exported');
   }
 
   function maybeAutoBackup() {
@@ -270,6 +392,7 @@
     wireGlobal();
 
     requestPersistentStorage();
+    await refreshAutoBackupFolderStatus();
     maybeAutoBackup();
     setInterval(maybeAutoBackup, 60 * 60 * 1000);
 
@@ -319,6 +442,9 @@
       }
       case 'backup': return doBackup();
       case 'restore': return doRestore();
+      case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
+      case 'disable-auto-backup-folder': return disableAutoBackupFolder();
+      case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
       case 'cal-prev': return Views.navCalendar(-1);
       case 'cal-next': return Views.navCalendar(1);
       case 'cal-today': return Views.navCalendar(0);

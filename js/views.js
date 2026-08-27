@@ -428,20 +428,49 @@
   }
 
   /* ---------------- People ---------------- */
+  let peopleFilter = { query: '', type: '' };
+  function setPeopleFilter(f) {
+    peopleFilter = Object.assign(peopleFilter, f);
+    global.App.refresh();
+  }
+
   function people() {
-    const rows = global.DB.rows(`
+    const allRows = global.DB.rows(`
       SELECT pe.*,
              (SELECT COUNT(*) FROM project_people pp WHERE pp.person_id = pe.id) as proj_count
       FROM people pe
       ORDER BY pe.type, pe.name`);
 
+    const qLower = (peopleFilter.query || '').trim().toLowerCase();
+    const rows = allRows.filter((r) => {
+      if (peopleFilter.type && r.type !== peopleFilter.type) return false;
+      if (qLower) {
+        const textToSearch = `${r.name} ${r.type} ${r.organization || ''} ${r.email || ''} ${r.note || ''}`.toLowerCase();
+        if (!textToSearch.includes(qLower)) return false;
+      }
+      return true;
+    });
+
     return `
+    <div class="card mb-16">
+      <div class="filter-bar">
+        <div class="search-input-wrap grow">
+          <span class="search-icon">${ic('search')}</span>
+          <input type="text" class="input search-input" id="people-search" placeholder="Search by name, role, lab, or email..." value="${esc(peopleFilter.query)}" />
+        </div>
+        <select class="input select-filter" id="people-type-filter" style="width:150px">
+          <option value="">All Roles</option>
+          ${C.PERSON_TYPES.map((t) => `<option value="${t}" ${peopleFilter.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary" data-act="add-person" data-tooltip="Register a new researcher or staff">${ic('plus')} Add Person</button>
+      </div>
+    </div>
+
     <div class="card">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('users')} People, Labs &amp; Researchers</span></div>
-        <button class="btn btn-primary btn-sm" data-act="add-person" data-tooltip="Register a new researcher or staff">${ic('plus')} Add Person</button>
       </div>
-      ${!rows.length ? emptyState('users', 'No people added yet', 'Add Principal Investigators, lab members, and facility technicians.') : `
+      ${!rows.length ? emptyState('users', 'No matching people', allRows.length ? 'Try changing your search or filters.' : 'Add Principal Investigators, lab members, and facility technicians.') : `
       <div class="tbl-wrap">
         <table class="tbl">
           <thead>
@@ -476,20 +505,54 @@
   }
 
   /* ---------------- Instruments ---------------- */
+  let instrumentFilter = { query: '', status: '', kind: '' };
+  function setInstrumentFilter(f) {
+    instrumentFilter = Object.assign(instrumentFilter, f);
+    global.App.refresh();
+  }
+
   function instruments() {
-    const rows = global.DB.rows(`
+    const allRows = global.DB.rows(`
       SELECT i.*,
              (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count
       FROM instruments i
       ORDER BY i.name`);
 
+    const qLower = (instrumentFilter.query || '').trim().toLowerCase();
+    const rows = allRows.filter((r) => {
+      if (instrumentFilter.status && r.status !== instrumentFilter.status) return false;
+      if (instrumentFilter.kind && r.kind !== instrumentFilter.kind) return false;
+      if (qLower) {
+        const textToSearch = `${r.name} ${r.kind || ''} ${r.status || ''} ${r.note || ''}`.toLowerCase();
+        if (!textToSearch.includes(qLower)) return false;
+      }
+      return true;
+    });
+
     return `
+    <div class="card mb-16">
+      <div class="filter-bar">
+        <div class="search-input-wrap grow">
+          <span class="search-icon">${ic('search')}</span>
+          <input type="text" class="input search-input" id="inst-search" placeholder="Search by name, modality, or notes..." value="${esc(instrumentFilter.query)}" />
+        </div>
+        <select class="input select-filter" id="inst-status-filter" style="width:140px">
+          <option value="">All Statuses</option>
+          ${C.INSTRUMENT_STATUS.map((s) => `<option value="${s}" ${instrumentFilter.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+        <select class="input select-filter" id="inst-kind-filter" style="width:150px">
+          <option value="">All Modalities</option>
+          ${C.MODALITY.map((m) => `<option value="${m}" ${instrumentFilter.kind === m ? 'selected' : ''}>${m}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary" data-act="add-instrument">${ic('plus')} Add Instrument</button>
+      </div>
+    </div>
+
     <div class="card">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('cpu')} Core Instruments</span></div>
-        <button class="btn btn-primary btn-sm" data-act="add-instrument">${ic('plus')} Add Instrument</button>
       </div>
-      ${!rows.length ? emptyState('cpu', 'No instruments added', 'Add microscopes, cytometers, or analysis workstations.') : `
+      ${!rows.length ? emptyState('cpu', 'No matching instruments', allRows.length ? 'Try changing your search or filters.' : 'Add microscopes, cytometers, or analysis workstations.') : `
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Notes</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
@@ -622,6 +685,7 @@
     const autoBackupEnabled = localStorage.getItem('auto-backup-enabled') !== '0';
     const lastAutoBackup = localStorage.getItem('last-auto-backup-at');
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
+    const folderStatus = global.App.autoBackupFolderStatus;
 
     return `
     <div class="card mb-16">
@@ -675,18 +739,43 @@
         <div class="row mb-8">
           <div class="grow">
             <div style="font-weight:600">Automatic Daily Backup</div>
-            <div class="faint small">While the app is open, a dated backup file is downloaded automatically roughly once every 24 hours (skipped when there's no data yet). Last automatic backup: ${esc(lastAutoBackupLabel)}</div>
+            <div class="faint small">Roughly once every 24 hours while the app is open (skipped when there's no data yet). Last automatic backup: ${esc(lastAutoBackupLabel)}</div>
           </div>
           <label class="row" style="cursor:pointer;gap:8px">
             <input type="checkbox" id="pref-auto-backup" ${autoBackupEnabled ? 'checked' : ''} onchange="localStorage.setItem('auto-backup-enabled', this.checked ? '1' : '0'); UI.toast('Automatic backup preference updated');" />
             <span class="small font-medium">Enabled</span>
           </label>
         </div>
+        <div class="row mb-8" style="flex-wrap:wrap">
+          <div class="grow">
+            <div style="font-weight:600">Silent Backup Folder</div>
+            <div class="faint small">${
+              !folderStatus.supported
+                ? "Not supported in this browser (Chrome/Edge only). Without it, automatic backups use your browser's normal file download — if that shows a save dialog every time, disable \"Ask where to save each file before downloading\" in your browser's download settings for a fully silent experience."
+                : folderStatus.name && folderStatus.granted
+                ? `Automatic backups write silently into <strong>${esc(folderStatus.name)}</strong> — no download prompts.`
+                : folderStatus.name && !folderStatus.granted
+                ? `Backup folder "${esc(folderStatus.name)}" was configured but needs permission again (this can happen after a browser restart).`
+                : 'Not set up. Pick the folder where this app is saved (or any folder) — a "backups" subfolder will be created inside it automatically, and every automatic backup writes there silently with no download dialog.'
+            }</div>
+          </div>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            ${!folderStatus.supported ? '' :
+              folderStatus.name && folderStatus.granted ? `
+                <button class="btn btn-secondary btn-sm" data-act="choose-auto-backup-folder">${ic('folder')} Change Folder</button>
+                <button class="btn btn-ghost btn-sm" data-act="disable-auto-backup-folder">${ic('x')} Disable</button>` :
+              folderStatus.name && !folderStatus.granted ? `
+                <button class="btn btn-primary btn-sm" data-act="regrant-auto-backup-folder">${ic('check')} Re-enable</button>
+                <button class="btn btn-ghost btn-sm" data-act="disable-auto-backup-folder">${ic('x')} Disable</button>` :
+                `<button class="btn btn-primary btn-sm" data-act="choose-auto-backup-folder">${ic('folder')} Choose App Folder</button>`
+            }
+          </div>
+        </div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">${ic('cpu')} Core Facility Project Tracker</div>
+      <div class="card-title">${ic('cpu')} Core Facility Tracker</div>
       <div class="card-body">
         <div class="faint small" style="line-height:1.7">
           <p class="mt-0 mb-8"><strong>Platform:</strong> Standalone Portable Web App (Zero Install / Zero Server).</p>
@@ -709,7 +798,9 @@
     setProjectFilter,
     projectDetail,
     people,
+    setPeopleFilter,
     instruments,
+    setInstrumentFilter,
     calendar,
     settings,
     emptyState,

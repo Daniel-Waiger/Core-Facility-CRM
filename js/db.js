@@ -268,6 +268,12 @@
   async function saveUpload(name, blob) { await idbSet(UPLOAD_KEY + ':' + name, blob); }
   async function getUpload(name) { return idbGet(UPLOAD_KEY + ':' + name); }
 
+  /* ---------------- Silent auto-backup folder handle (IndexedDB) ---------------- */
+  const AUTO_BACKUP_DIR_KEY = 'auto-backup-dir-handle';
+  async function saveAutoBackupDirHandle(handle) { await idbSet(AUTO_BACKUP_DIR_KEY, handle); }
+  async function getAutoBackupDirHandle() { return idbGet(AUTO_BACKUP_DIR_KEY); }
+  async function clearAutoBackupDirHandle() { await idbSet(AUTO_BACKUP_DIR_KEY, null); }
+
   /* ---------------- Query helpers ---------------- */
   // Object-based rows helper
   function rows(sql, params = []) {
@@ -346,6 +352,12 @@
       DELETE FROM people;
       DELETE FROM instruments;
     `);
+    try {
+      // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
+      // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
+      // point at IDs that no longer match once counters have advanced past a prior seed/clear.
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv')");
+    } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     markDirty();
   }
 
@@ -535,6 +547,9 @@
     restoreBackup,
     saveUpload,
     getUpload,
+    saveAutoBackupDirHandle,
+    getAutoBackupDirHandle,
+    clearAutoBackupDirHandle,
     rows,
     row,
     q,
