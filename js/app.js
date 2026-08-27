@@ -55,13 +55,13 @@
             <div class="nav-item" data-nav="people" data-tooltip="Researchers &amp; Labs">${ic('users')}<span class="lbl">People &amp; Labs</span></div>
             <div class="nav-item" data-nav="instruments" data-tooltip="Facility Equipment">${ic('cpu')}<span class="lbl">Instruments</span></div>
             <div class="nav-item" data-nav="calendar" data-tooltip="Monthly Schedule">${ic('calendar')}<span class="lbl">Calendar</span></div>
-            <div class="nav-item" data-nav="settings" data-tooltip="Backups &amp; Config">${ic('settings')}<span class="lbl">Settings</span></div>
           </nav>
           <div class="nav-spacer"></div>
           <div class="sidebar-foot">
             <button class="btn btn-primary btn-sm" data-act="new-project" data-tooltip="Initiate Project">${ic('plus')}<span class="lbl">New Project</span></button>
             <button class="btn btn-tour btn-sm" data-act="tour" data-tooltip="Interactive Guided Tour">${ic('play')}<span class="lbl">Tour</span></button>
             <button class="btn btn-secondary btn-sm sidebar-theme-btn" data-act="theme-toggle" data-tooltip="Switch Appearance"></button>
+            <button class="btn btn-secondary btn-sm sidebar-settings-btn" data-nav="settings" data-tooltip="Backups &amp; Settings">${ic('gear')}<span class="lbl">Settings</span></button>
           </div>
         </aside>
         <div class="main">
@@ -341,8 +341,13 @@
   function generateProjectCode() {
     const d = new Date();
     const prefix = 'PRJ-' + d.getFullYear().toString().slice(2) + (d.getMonth() + 1).toString().padStart(2, '0');
-    const existing = DB.rows('SELECT code FROM projects WHERE code LIKE ?', [prefix + '%']);
-    const seq = (existing.length + 1).toString().padStart(3, '0');
+    const existing = DB.rows('SELECT code FROM projects WHERE code LIKE ?', [prefix + '-%']);
+    let maxSeq = 0;
+    for (const r of existing) {
+      const m = /-(\d+)$/.exec(r.code);
+      if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
+    }
+    const seq = (maxSeq + 1).toString().padStart(3, '0');
     return `${prefix}-${seq}`;
   }
 
@@ -477,13 +482,21 @@
     const tags = m.querySelector('#np-tags').value.trim();
     const notes = m.querySelector('#np-notes').value.trim();
 
-    DB.run(`
-      INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes]
-    );
+    try {
+      DB.run(`
+        INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes]
+      );
+    } catch (e) {
+      UI.toast('Could not create project: ' + (e.message || 'unknown error'), 'error');
+      return;
+    }
 
     const inserted = DB.row('SELECT id FROM projects WHERE code=?', [code]);
+    if (piId && inserted) {
+      DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [inserted.id, piId, 'Principal Investigator']);
+    }
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Project created successfully');
     route('project', inserted ? inserted.id : null);
@@ -576,13 +589,21 @@
     const tags = m.querySelector('#ep-tags').value.trim();
     const notes = m.querySelector('#ep-notes').value.trim();
 
-    DB.run(`
-      UPDATE projects
-      SET title=?, code=?, status=?, priority=?, pi_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
-      WHERE id=?`,
-      [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes, id]
-    );
+    try {
+      DB.run(`
+        UPDATE projects
+        SET title=?, code=?, status=?, priority=?, pi_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
+        WHERE id=?`,
+        [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes, id]
+      );
+    } catch (e) {
+      UI.toast('Could not save project: ' + (e.message || 'unknown error'), 'error');
+      return;
+    }
 
+    if (piId) {
+      DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [id, piId, 'Principal Investigator']);
+    }
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Project updated');
     refresh();
@@ -598,7 +619,7 @@
   async function deleteProject() {
     const p = DB.row('SELECT title FROM projects WHERE id=?', [ctx.project]);
     if (!p) return;
-    const ok = await UI.confirmModal('Delete Project', `Are you sure you want to permanently delete "${p.title}" and all its milestones, files, and meeting records?`, { danger: true });
+    const ok = await UI.confirmModal('Delete Project', `Are you sure you want to permanently delete "${esc(p.title)}" and all its milestones, files, and meeting records?`, { danger: true });
     if (!ok) return;
 
     DB.run('DELETE FROM projects WHERE id=?', [ctx.project]);
@@ -812,7 +833,7 @@
   async function deletePerson(id) {
     const p = DB.row('SELECT name FROM people WHERE id=?', [id]);
     if (!p) return;
-    const ok = await UI.confirmModal('Delete Person', `Are you sure you want to remove "${p.name}"? This will unlink them from projects.`, { danger: true });
+    const ok = await UI.confirmModal('Delete Person', `Are you sure you want to remove "${esc(p.name)}"? This will unlink them from projects.`, { danger: true });
     if (!ok) return;
     DB.run('DELETE FROM people WHERE id=?', [id]);
     UI.toast('Person deleted');
@@ -876,7 +897,7 @@
   async function deleteInstrument(id) {
     const i = DB.row('SELECT name FROM instruments WHERE id=?', [id]);
     if (!i) return;
-    const ok = await UI.confirmModal('Delete Instrument', `Are you sure you want to delete "${i.name}"?`, { danger: true });
+    const ok = await UI.confirmModal('Delete Instrument', `Are you sure you want to delete "${esc(i.name)}"?`, { danger: true });
     if (!ok) return;
     DB.run('DELETE FROM instruments WHERE id=?', [id]);
     UI.toast('Instrument deleted');

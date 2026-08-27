@@ -170,6 +170,45 @@
       tx.onerror = () => reject(tx.error);
     });
   }
+  async function idbGetAllWithPrefix(prefix) {
+    const s = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = s.transaction('kv', 'readonly');
+      const store = tx.objectStore('kv');
+      const results = [];
+      const req = store.openCursor();
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          if (String(cursor.key).startsWith(prefix)) results.push({ key: cursor.key, value: cursor.value.v });
+          cursor.continue();
+        } else {
+          resolve(results);
+        }
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  /* ---------------- Blob <-> base64 (for JSON-safe backups) ---------------- */
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result; // data:<mime>;base64,<data>
+        const comma = result.indexOf(',');
+        resolve({ type: blob.type || 'application/octet-stream', data: result.slice(comma + 1) });
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+  function base64ToBlob(entry) {
+    const bin = atob(entry.data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: entry.type || 'application/octet-stream' });
+  }
 
   function currentBytes() { return db.export(); }
 
@@ -193,13 +232,20 @@
   }
 
   /* ---------------- Backup (single self-contained file) ---------------- */
-  function buildBackup() {
+  async function buildBackup() {
+    const uploadEntries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+    const uploads = {};
+    for (const { key, value } of uploadEntries) {
+      if (!value) continue;
+      const name = key.slice((UPLOAD_KEY + ':').length);
+      uploads[name] = await blobToBase64(value);
+    }
     return {
       kind: 'core-facility-backup',
-      version: 1,
+      version: 2,
       created: new Date().toISOString(),
       db: Array.from(currentBytes()),
-      uploads: global.__uploads || {},
+      uploads,
     };
   }
 
@@ -210,9 +256,12 @@
     db = new SQL.Database(rawBytes);
     db.exec('PRAGMA foreign_keys = ON;');
     migrate();
-    global.__uploads = data.uploads || {};
     await idbSet(DB_KEY, currentBytes());
-    for (const [k, v] of Object.entries(data.uploads || {})) await idbSet(UPLOAD_KEY + ':' + k, v);
+    for (const [name, entry] of Object.entries(data.uploads || {})) {
+      if (entry && typeof entry === 'object' && typeof entry.data === 'string') {
+        await idbSet(UPLOAD_KEY + ':' + name, base64ToBlob(entry));
+      }
+    }
   }
 
   /* ---------------- Uploads (IndexedDB) ---------------- */
