@@ -99,9 +99,9 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 **Settings & data portability**
 
-<img src="docs/screenshots/14-settings.png" width="720" alt="Settings, backup and theme preferences">
+<img src="docs/screenshots/14-settings.png" width="720" alt="Settings and backup preferences">
 
-*Figure 14 — Settings: single-file JSON backup/restore, sample data reload, and appearance preferences — all data stays local to the browser's IndexedDB.*
+*Figure 14 — Settings: single-file JSON backup/restore, sample data reload, and startup preferences — all data stays local to the browser's IndexedDB.*
 
 ---
 

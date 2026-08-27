@@ -622,16 +622,8 @@
 
     return `
     <div class="card mb-16">
-      <div class="card-title">${ic('settings')} Preferences &amp; Theme</div>
+      <div class="card-title">${ic('settings')} Preferences</div>
       <div class="card-body">
-        <div class="row mb-8">
-          <div class="grow">
-            <div style="font-weight:600">Appearance Theme</div>
-            <div class="faint small">Switch between clean Light mode and high-contrast Dark mode.</div>
-          </div>
-          <div class="theme-toggle" data-act="theme-toggle"><div class="knob"></div></div>
-        </div>
-        <div class="divider"></div>
         <div class="row mb-8">
           <div class="grow">
             <div style="font-weight:600">Startup Welcome Modal</div>
