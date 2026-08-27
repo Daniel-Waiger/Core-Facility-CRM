@@ -132,7 +132,7 @@ body {
 .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
 .nav-spacer { flex: 1; }
 .sidebar-foot { border-top: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-.sidebar-foot .btn { justify-content: flex-start; gap: 8px; }
+.sidebar-foot .btn { justify-content: center; text-align: center; gap: 8px; }
 .sidebar-foot .btn.active {
   background: var(--primary-soft);
   color: var(--primary);

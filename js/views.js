@@ -362,7 +362,7 @@
               <span class="faint">${ic('file')}</span>
               <div class="grow">
                 <div class="font-medium">${esc(f.name)}</div>
-                <div class="faint small">${f.kind === 'link' ? `<a href="${esc(f.path)}" target="_blank" class="link-btn">${esc(f.path)} ${ic('external')}</a>` : 'Uploaded File'} · ${fmt(f.created_at)}</div>
+                <div class="faint small">${f.kind === 'link' ? (global.UI.isSafeUrl(f.path) ? `<a href="${esc(f.path)}" target="_blank" rel="noopener noreferrer" class="link-btn">${esc(f.path)} ${ic('external')}</a>` : esc(f.path)) : 'Uploaded File'} · ${fmt(f.created_at)}</div>
               </div>
               ${f.kind === 'upload' ? `<button class="btn btn-secondary btn-sm" data-act="download-file" data-id="${f.id}" data-name="${esc(f.name)}">Download</button>` : ''}
               <button class="btn btn-ghost btn-sm" data-act="file-del" data-id="${f.id}" title="Delete file">${ic('trash')}</button>
@@ -619,6 +619,9 @@
   /* ---------------- Settings ---------------- */
   function settings() {
     const hideStartup = localStorage.getItem('crm-hide-startup-modal') === '1';
+    const autoBackupEnabled = localStorage.getItem('auto-backup-enabled') !== '0';
+    const lastAutoBackup = localStorage.getItem('last-auto-backup-at');
+    const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
 
     return `
     <div class="card mb-16">
@@ -667,6 +670,17 @@
         <div class="row mt-8" style="gap:10px">
           <button class="btn btn-primary btn-sm" data-act="backup">${ic('file')} Export Backup (.json)</button>
           <button class="btn btn-secondary btn-sm" data-act="restore">${ic('external')} Restore from Backup</button>
+        </div>
+        <div class="divider"></div>
+        <div class="row mb-8">
+          <div class="grow">
+            <div style="font-weight:600">Automatic Daily Backup</div>
+            <div class="faint small">While the app is open, a dated backup file is downloaded automatically roughly once every 24 hours (skipped when there's no data yet). Last automatic backup: ${esc(lastAutoBackupLabel)}</div>
+          </div>
+          <label class="row" style="cursor:pointer;gap:8px">
+            <input type="checkbox" id="pref-auto-backup" ${autoBackupEnabled ? 'checked' : ''} onchange="localStorage.setItem('auto-backup-enabled', this.checked ? '1' : '0'); UI.toast('Automatic backup preference updated');" />
+            <span class="small font-medium">Enabled</span>
+          </label>
         </div>
       </div>
     </div>

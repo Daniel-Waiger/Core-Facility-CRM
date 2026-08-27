@@ -42,7 +42,7 @@
           <div class="brand">
             <div class="logo">${ic('cpu')}</div>
             <div style="min-width:0">
-              <div class="name">Core Tracker</div>
+              <div class="name">Core Facility Tracker</div>
               <div class="sub">Bioimaging Facility</div>
             </div>
             <button class="sidebar-collapse-btn" data-act="toggle-sidebar" data-tooltip="Toggle Sidebar Width">
@@ -191,11 +191,20 @@
       };
 
       const handleFresh = () => {
-        savePref();
-        DB.clearAllData();
-        UI.closeDim(modalDim);
-        route('dashboard');
-        UI.toast('All facility data cleared.');
+        const proceed = () => {
+          savePref();
+          DB.clearAllData();
+          UI.closeDim(modalDim);
+          route('dashboard');
+          UI.toast('All facility data cleared.');
+        };
+        if (hasAnyData()) {
+          UI.confirmModal('Start Fresh?', 'This will permanently delete all existing projects, people, instruments, milestones, and meetings currently stored in this browser. This cannot be undone. Continue?', { danger: true }).then((ok) => {
+            if (ok) proceed();
+          });
+        } else {
+          proceed();
+        }
       };
 
       modalDim.querySelectorAll('[data-act="startup-demo"]').forEach(el => {
@@ -207,6 +216,51 @@
     });
   }
 
+  function hasAnyData() {
+    const r = DB.row('SELECT (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) as c');
+    return !!(r && r.c);
+  }
+
+  /* ---------------- Automatic Backup ---------------- */
+  const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+  function isAutoBackupEnabled() { return localStorage.getItem('auto-backup-enabled') !== '0'; }
+
+  async function performBackupDownload(auto) {
+    const data = await DB.buildBackup();
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `core-facility-${auto ? 'autobackup' : 'backup'}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    if (auto) {
+      localStorage.setItem('last-auto-backup-at', new Date().toISOString());
+      UI.toast('Automatic backup saved to your Downloads folder');
+    } else {
+      UI.toast('Complete backup exported');
+    }
+  }
+
+  function maybeAutoBackup() {
+    if (!isAutoBackupEnabled()) return;
+    if (!hasAnyData()) return;
+    const last = localStorage.getItem('last-auto-backup-at');
+    const lastTime = last ? new Date(last).getTime() : 0;
+    if (Date.now() - lastTime < AUTO_BACKUP_INTERVAL_MS) return;
+    performBackupDownload(true).catch((e) => console.error('auto-backup failed', e));
+  }
+
+  async function requestPersistentStorage() {
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        const already = await navigator.storage.persisted();
+        if (!already) await navigator.storage.persist();
+      }
+    } catch (_) { /* best-effort only */ }
+  }
+
   /* ---------------- Boot ---------------- */
   async function boot() {
     await DB.boot();
@@ -214,6 +268,10 @@
     renderShell();
     route('dashboard');
     wireGlobal();
+
+    requestPersistentStorage();
+    maybeAutoBackup();
+    setInterval(maybeAutoBackup, 60 * 60 * 1000);
 
     const hideStartup = localStorage.getItem('crm-hide-startup-modal') === '1';
     if (!hideStartup) {
@@ -1242,17 +1300,7 @@
   }
 
   /* ---------------- Backup & Restore ---------------- */
-  function doBackup() {
-    const data = DB.buildBackup();
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `core-facility-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    UI.toast('Complete backup exported');
-  }
+  function doBackup() { return performBackupDownload(false); }
 
   async function doRestore() {
     const input = document.createElement('input');

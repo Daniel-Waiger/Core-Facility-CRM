@@ -231,7 +231,8 @@
     setSavedState,
     esc,
     fmtDate,
-    today
+    today,
+    isSafeUrl
   };
 
 })(window);
