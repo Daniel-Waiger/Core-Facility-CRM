@@ -121,7 +121,20 @@
 
   async function boot() {
     const SQL = await initSqljs();
-    const blob = await idbGet(DB_KEY);
+    await probeStorage();
+
+    let blob;
+    if (!memoryMode) {
+      try {
+        blob = await idbGet(DB_KEY);
+      } catch (e) {
+        // IndexedDB opened but a read failed mid-boot (seen on some locked-down mobile
+        // WebViews) — fall back to an in-memory session rather than blank-screening.
+        console.warn('IndexedDB read failed, continuing in a temporary in-memory session:', e);
+        memoryMode = true;
+      }
+    }
+
     if (blob) {
       db = new SQL.Database(blob);
       db.exec('PRAGMA foreign_keys = ON;');
@@ -130,10 +143,51 @@
       db = new SQL.Database();
       db.exec(SCHEMA);
     }
-    return db;
+    return { persistent: !memoryMode };
   }
 
-  /* ---------------- Persistence (IndexedDB) ---------------- */
+  /* ---------------- Storage availability probe ----------------
+     IndexedDB requires a "secure context" (https, or localhost) — a document opened
+     via file:// (e.g. double-tapping index.html on a tablet) is commonly treated as an
+     untrusted origin, where IndexedDB is disabled outright or hangs without ever firing
+     onsuccess/onerror. Rather than let boot() hang or throw and blank the page, we probe
+     it up front with a timeout and, if it's unusable, fall back to an in-memory KV store
+     so the app still runs (just without saving between sessions on this device). */
+  let memoryMode = false;
+  const memoryStore = new Map();
+
+  function withTimeout(promise, ms, label) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error((label || 'operation') + ' timed out after ' + ms + 'ms'));
+      }, ms);
+      promise.then(
+        (v) => { if (settled) return; settled = true; clearTimeout(timer); resolve(v); },
+        (e) => { if (settled) return; settled = true; clearTimeout(timer); reject(e); }
+      );
+    });
+  }
+
+  async function probeStorage() {
+    if (typeof indexedDB === 'undefined' || !indexedDB) {
+      memoryMode = true;
+      return false;
+    }
+    try {
+      await withTimeout(idbOpen(), 3000, 'IndexedDB open');
+      memoryMode = false;
+      return true;
+    } catch (e) {
+      console.warn('IndexedDB unavailable — running in a temporary in-memory session:', e);
+      memoryMode = true;
+      return false;
+    }
+  }
+
+  /* ---------------- Persistence (IndexedDB, with in-memory fallback) ---------------- */
   let idbHandle = null;
   function idbOpen() {
     if (idbHandle) return Promise.resolve(idbHandle);
@@ -151,6 +205,7 @@
     });
   }
   async function idbGet(key) {
+    if (memoryMode) return memoryStore.has(key) ? memoryStore.get(key) : undefined;
     const s = await idbOpen();
     return new Promise((resolve, reject) => {
       const tx = s.transaction('kv', 'readonly');
@@ -160,6 +215,7 @@
     });
   }
   async function idbSet(key, val) {
+    if (memoryMode) { memoryStore.set(key, val); return; }
     const s = await idbOpen();
     return new Promise((resolve, reject) => {
       const tx = s.transaction('kv', 'readwrite');
@@ -171,6 +227,13 @@
     });
   }
   async function idbGetAllWithPrefix(prefix) {
+    if (memoryMode) {
+      const results = [];
+      for (const [k, v] of memoryStore) {
+        if (String(k).startsWith(prefix)) results.push({ key: k, value: v });
+      }
+      return results;
+    }
     const s = await idbOpen();
     return new Promise((resolve, reject) => {
       const tx = s.transaction('kv', 'readonly');
@@ -541,6 +604,7 @@
 
   global.DB = {
     boot,
+    get memoryMode() { return memoryMode; },
     currentBytes,
     markDirty,
     buildBackup,

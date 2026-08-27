@@ -1,0 +1,18 @@
+{
+  "name": "Core Facility Tracker",
+  "short_name": "Core Facility",
+  "description": "Portable, standalone project tracker for microscopy and bioimaging core facilities.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

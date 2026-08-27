@@ -2,6 +2,46 @@
 (function (global) {
   'use strict';
 
+  /* ---------------- Safe localStorage ----------------
+     Locked-down mobile WebViews (and private-browsing modes) can throw on any
+     localStorage access, not just IndexedDB. Route all reads/writes through here so a
+     blocked browser degrades to an in-memory value instead of crashing the page. */
+  const memoryStorageFallback = {};
+  let localStorageBlocked = false;
+  function storageGet(key) {
+    if (localStorageBlocked) {
+      return Object.prototype.hasOwnProperty.call(memoryStorageFallback, key) ? memoryStorageFallback[key] : null;
+    }
+    try { return localStorage.getItem(key); } catch (_) { localStorageBlocked = true; return storageGet(key); }
+  }
+  function storageSet(key, val) {
+    if (localStorageBlocked) { memoryStorageFallback[key] = String(val); return; }
+    try { localStorage.setItem(key, val); } catch (_) { localStorageBlocked = true; storageSet(key, val); }
+  }
+
+  /* ---------------- OS detection (for tailored guidance text only — never for logic) ---------------- */
+  function detectOS() {
+    try {
+      const uaData = navigator.userAgentData;
+      if (uaData && uaData.platform) {
+        const p = uaData.platform.toLowerCase();
+        if (p.includes('android')) return 'android';
+        if (p.includes('ios')) return 'ios';
+        if (p.includes('win')) return 'windows';
+        if (p.includes('mac')) return 'mac';
+        if (p.includes('linux') || p.includes('chrome os')) return 'linux';
+      }
+      const ua = (navigator.userAgent || '').toLowerCase();
+      if (/android/.test(ua)) return 'android';
+      // iPadOS 13+ reports its UA as "Macintosh"; touch points distinguish it from a real Mac.
+      if (/iphone|ipad|ipod/.test(ua) || (/macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+      if (/windows/.test(ua)) return 'windows';
+      if (/mac os/.test(ua)) return 'mac';
+      if (/linux/.test(ua)) return 'linux';
+    } catch (_) { /* best-effort only */ }
+    return 'other';
+  }
+
   /* ---------------- Toasts ---------------- */
   function toast(msg, type = 'success') {
     const host = document.getElementById('toasts');
@@ -17,7 +57,10 @@
 
   /* ---------------- Theme ---------------- */
   function initTheme() {
-    const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    let t = storageGet('theme');
+    if (!t) {
+      try { t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (_) { t = 'light'; }
+    }
     document.documentElement.setAttribute('data-theme', t);
     updateThemeToggleButtons(t);
   }
@@ -25,7 +68,7 @@
     const cur = document.documentElement.getAttribute('data-theme') || 'light';
     const next = cur === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
+    storageSet('theme', next);
     updateThemeToggleButtons(next);
     const knob = document.querySelector('.theme-toggle .knob');
     if (knob) knob.style.left = next === 'dark' ? '22px' : '2px';
@@ -46,29 +89,42 @@
     });
   }
 
-  /* ---------------- Modal ---------------- */
-  function openModal(html, onMount) {
+  /* ---------------- Modal ----------------
+     openModal returns the inner `.modal` card (not the `.modal-dim` overlay) — callers that
+     need to close the dim themselves should get it via `m.closest('.modal-dim')` or the `dim`
+     param onMount receives, not by assuming the return value IS the dim (that mismatch used to
+     leave the blurred backdrop stuck on screen after a promise-based modal like confirmModal
+     resolved — the inner card was removed but the outer overlay never was). */
+  function openModal(html, onMount, onOutsideClick) {
     const dim = document.createElement('div');
     dim.className = 'modal-dim';
     dim.innerHTML = `<div class="modal">${html}</div>`;
     document.body.appendChild(dim);
     const m = dim.querySelector('.modal');
     if (onMount) onMount(m, dim);
-    dim.addEventListener('click', (e) => { if (e.target === dim) closeDim(dim); });
+    dim.addEventListener('click', (e) => {
+      if (e.target !== dim) return;
+      closeDim(dim);
+      if (onOutsideClick) onOutsideClick();
+    });
     return m;
   }
   function closeDim(dim) { if (dim) dim.remove(); }
   function confirmModal(title, body, { danger = false } = {}) {
     return new Promise((resolve) => {
-      const dim = openModal(`
+      // Tapping outside the dialog (easy to do by accident on a touch screen) still needs to
+      // settle this promise — otherwise whatever's awaiting the answer hangs forever even
+      // though the modal itself has visibly closed. Treat it as Cancel.
+      const m = openModal(`
         <div class="head"><span class="t" style="font-weight:600">${title}</span></div>
         <div class="body"><p class="mt-0 mb-8">${body}</p></div>
         <div class="foot">
           <button class="btn btn-secondary" data-act="no">Cancel</button>
           <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="yes">Confirm</button>
-        </div>`);
-      const yes = dim.querySelector('[data-act="yes"]');
-      const no = dim.querySelector('[data-act="no"]');
+        </div>`, null, () => resolve(false));
+      const dim = m.closest('.modal-dim');
+      const yes = m.querySelector('[data-act="yes"]');
+      const no = m.querySelector('[data-act="no"]');
       no.onclick = () => { closeDim(dim); resolve(false); };
       yes.onclick = () => { closeDim(dim); resolve(true); };
     });
@@ -232,7 +288,9 @@
     esc,
     fmtDate,
     today,
-    isSafeUrl
+    isSafeUrl,
+    detectOS,
+    storage: { getItem: storageGet, setItem: storageSet }
   };
 
 })(window);

@@ -36,7 +36,7 @@
 
   /* ---------------- Shell ---------------- */
   function renderShell() {
-    const isCollapsed = localStorage.getItem('sidebar-collapsed') === '1';
+    const isCollapsed = UI.storage.getItem('sidebar-collapsed') === '1';
 
     document.getElementById('app').innerHTML = `
       <div class="app">
@@ -85,7 +85,7 @@
     if (!sb) return;
     sb.classList.toggle('collapsed');
     const isCollapsed = sb.classList.contains('collapsed');
-    localStorage.setItem('sidebar-collapsed', isCollapsed ? '1' : '0');
+    UI.storage.setItem('sidebar-collapsed', isCollapsed ? '1' : '0');
     const collapseBtn = sb.querySelector('.sidebar-collapse-btn');
     if (collapseBtn) collapseBtn.innerHTML = ic(isCollapsed ? 'expand' : 'collapse');
   }
@@ -162,8 +162,18 @@
   function refresh() { renderView(); }
 
   /* ---------------- Startup Welcome Modal ---------------- */
-  function openStartupModal() {
-    const isChecked = localStorage.getItem('crm-hide-startup-modal') === '1';
+  // afterChoice (optional): runs once the user has made a choice here (or dismissed this modal),
+  // so the boot flow can show the first-run device notice AFTER the welcome screen rather than
+  // stacked in front of it. Only passed during boot — the Settings "Open Welcome Screen" reuse
+  // passes nothing.
+  function openStartupModal(afterChoice) {
+    let afterChoiceRan = false;
+    const runAfterChoice = async () => {
+      if (afterChoiceRan) return;
+      afterChoiceRan = true;
+      if (afterChoice) await afterChoice();
+    };
+    const isChecked = UI.storage.getItem('crm-hide-startup-modal') === '1';
 
     UI.openModal(`
       <div class="startup-modal-inner">
@@ -213,28 +223,30 @@
 
       const savePref = () => {
         if (neverShowCheck && neverShowCheck.checked) {
-          localStorage.setItem('crm-hide-startup-modal', '1');
+          UI.storage.setItem('crm-hide-startup-modal', '1');
         } else {
-          localStorage.setItem('crm-hide-startup-modal', '0');
+          UI.storage.setItem('crm-hide-startup-modal', '0');
         }
       };
 
-      const handleDemo = () => {
+      const handleDemo = async () => {
         savePref();
         DB.seedSampleData();
         UI.closeDim(modalDim);
         route('dashboard');
         UI.toast('Sample facility dataset loaded!');
+        await runAfterChoice(); // show the first-run notice before the tour takes over the screen
         startTour();
       };
 
       const handleFresh = () => {
-        const proceed = () => {
+        const proceed = async () => {
           savePref();
           DB.clearAllData();
           UI.closeDim(modalDim);
           route('dashboard');
           UI.toast('All facility data cleared.');
+          await runAfterChoice();
         };
         if (hasAnyData()) {
           UI.confirmModal('Start Fresh?', 'This will permanently delete all existing projects, people, instruments, milestones, and meetings currently stored in this browser. This cannot be undone. Continue?', { danger: true }).then((ok) => {
@@ -251,7 +263,7 @@
       modalDim.querySelectorAll('[data-act="startup-fresh"]').forEach(el => {
         el.onclick = (e) => { e.stopPropagation(); handleFresh(); };
       });
-    });
+    }, () => { runAfterChoice(); }); // dismissing the welcome modal (outside click) still shows the notice
   }
 
   function hasAnyData() {
@@ -262,7 +274,7 @@
   /* ---------------- Automatic Backup ---------------- */
   const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-  function isAutoBackupEnabled() { return localStorage.getItem('auto-backup-enabled') !== '0'; }
+  function isAutoBackupEnabled() { return UI.storage.getItem('auto-backup-enabled') !== '0'; }
   function supportsSilentBackupFolder() { return typeof window.showDirectoryPicker === 'function'; }
 
   async function refreshAutoBackupFolderStatus() {
@@ -348,7 +360,7 @@
 
     if (auto) {
       const wroteSilently = await tryWriteSilentBackup(filename, json);
-      localStorage.setItem('last-auto-backup-at', new Date().toISOString());
+      UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
       if (wroteSilently) {
         UI.toast('Automatic backup saved silently');
         return;
@@ -368,7 +380,7 @@
   function maybeAutoBackup() {
     if (!isAutoBackupEnabled()) return;
     if (!hasAnyData()) return;
-    const last = localStorage.getItem('last-auto-backup-at');
+    const last = UI.storage.getItem('last-auto-backup-at');
     const lastTime = last ? new Date(last).getTime() : 0;
     if (Date.now() - lastTime < AUTO_BACKUP_INTERVAL_MS) return;
     performBackupDownload(true).catch((e) => console.error('auto-backup failed', e));
@@ -384,21 +396,224 @@
   }
 
   /* ---------------- Boot ---------------- */
+  // Storage-blocked / boot-failure guidance is OS-tailored text only; the decision to show
+  // it is always feature-detection-based (DB.boot()'s persistence probe or a thrown error),
+  // since file:// and locked-down browsers can occur on any OS, not just mobile.
+  function storageGuidanceFor(os) {
+    const fromFile = location.protocol === 'file:';
+    switch (os) {
+      case 'android':
+        return {
+          headline: 'This browser is blocking permanent saving for the app in its current location.',
+          steps: [
+            fromFile
+              ? 'Opening the file directly (by tapping it in a file manager) is the most common cause on Android — saving needs a real web address.'
+              : 'Your browser has storage disabled or restricted for this page.',
+            'Open the hosted version of this app instead (ask whoever set it up for the link) using Chrome, then use the browser menu → <strong>Add to Home screen</strong> for an app-like icon that saves normally.'
+          ]
+        };
+      case 'ios':
+        return {
+          headline: 'This browser is blocking permanent saving for the app in its current location.',
+          steps: [
+            fromFile
+              ? 'Opening the file directly is the most common cause on iPad/iPhone — Safari needs a real web address to allow saving.'
+              : 'Safari has storage disabled or restricted for this page (this can happen in some in-app browsers, e.g. opened from Mail or Notes).',
+            'Open the hosted version of this app in <strong>Safari</strong> (ask whoever set it up for the link), then use Share → <strong>Add to Home Screen</strong> for an app-like icon that saves normally.'
+          ]
+        };
+      case 'windows':
+        return {
+          headline: 'This browser is blocking permanent saving for the app in its current location.',
+          steps: [
+            fromFile
+              ? 'Opening index.html directly by double-clicking it can trigger this in some browsers/security settings.'
+              : 'Your browser has storage disabled or restricted for this page.',
+            'Run the included local server (see README) or open the hosted version of this app, then reload.'
+          ]
+        };
+      default:
+        return {
+          headline: 'This browser is blocking permanent saving for the app in its current location.',
+          steps: [
+            fromFile ? 'Opening the file directly (file://) is the most common cause.' : 'Your browser has storage disabled or restricted for this page.',
+            'Open the hosted version of this app (or run a local server — see README), then reload.'
+          ]
+        };
+    }
+  }
+
+  function renderStorageUnavailableScreen() {
+    const guidance = storageGuidanceFor(UI.detectOS());
+    document.getElementById('app').innerHTML = `
+      <div class="boot-screen">
+        <div class="boot-card">
+          <div class="boot-icon">${ic('cpu')}</div>
+          <h1>Storage unavailable</h1>
+          <p>${guidance.headline}</p>
+          <ol class="boot-steps">${guidance.steps.map((s) => `<li>${s}</li>`).join('')}</ol>
+          <p class="boot-note">Note: your data always stays on <strong>this one device/browser</strong> — it never syncs between devices or people, even once saving works. See the README for how to move data between devices.</p>
+          <div class="boot-actions">
+            <button class="btn btn-secondary" id="boot-continue">Continue anyway (temporary session)</button>
+          </div>
+          <p class="boot-fine">If you continue, anything you enter will be lost when you close this tab unless you export a backup first (Settings → Export Backup, once the app loads).</p>
+        </div>
+      </div>`;
+    document.getElementById('boot-continue').onclick = () => {
+      finishBoot({ persistent: false }).catch(renderBootError);
+    };
+  }
+
+  function renderBootError(err) {
+    console.error('Boot failed:', err);
+    const el = document.getElementById('app');
+    if (!el) return;
+    const detail = esc(String((err && err.stack) || err));
+    el.innerHTML = `
+      <div class="boot-screen">
+        <div class="boot-card boot-card-error">
+          <div class="boot-icon">${ic('alert')}</div>
+          <h1>Something went wrong while starting up</h1>
+          <p>The app hit an unexpected error and couldn't load. Reloading usually fixes a one-off glitch.</p>
+          <pre class="boot-error-detail">${detail}</pre>
+          <div class="boot-actions">
+            <button class="btn btn-primary" id="boot-reload">Reload</button>
+          </div>
+        </div>
+      </div>`;
+    const reloadBtn = document.getElementById('boot-reload');
+    if (reloadBtn) reloadBtn.onclick = () => location.reload();
+  }
+
+  function showTemporarySessionBanner() {
+    if (document.getElementById('temp-session-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'temp-session-banner';
+    bar.className = 'temp-session-banner';
+    bar.innerHTML = `
+      <span class="temp-session-banner-ic">${ic('alert')}</span>
+      <span>Temporary session — changes here won't be saved on this device. Export a backup before closing this tab.</span>
+      <button class="temp-session-banner-close" aria-label="Dismiss" type="button">${ic('x')}</button>`;
+    document.body.prepend(bar);
+    bar.querySelector('.temp-session-banner-close').onclick = () => bar.remove();
+  }
+
+  // Up-front notice with two INDEPENDENT parts (per user request):
+  //   1. The per-device data explanation — dismissible for good via "Don't show this again"
+  //      (flag: crm-seen-device-notice).
+  //   2. The optional silent backup-folder setup — kept in front of the user on every first
+  //      boot of a session until they either actually pick a folder OR explicitly decline
+  //      (flag: crm-declined-backup-folder). Merely dismissing the info text does NOT hide it.
+  // The folder picker needs a real user click, so it can't be auto-triggered — hence the CTA.
+  function shouldShowDeviceNotice() {
+    const infoNeeded = UI.storage.getItem('crm-seen-device-notice') !== '1';
+    const folderNeeded = autoBackupFolderStatus.supported
+      && !autoBackupFolderStatus.name
+      && UI.storage.getItem('crm-declined-backup-folder') !== '1';
+    return { infoNeeded, folderNeeded, show: infoNeeded || folderNeeded };
+  }
+
+  function showDeviceNotice(parts) {
+    const { infoNeeded, folderNeeded } = parts;
+    return new Promise((resolve) => {
+      const infoHtml = infoNeeded ? `
+          <p>Your data is stored <strong>only in this browser, on this device</strong>. It does not sync between devices or people automatically.</p>
+          <p>To move data to another device, or share a snapshot with a colleague, use <strong>Settings → Export Backup</strong>, then <strong>Import Backup</strong> on the other device.</p>
+          <p>You can put an exported backup <em>file</em> in a cloud-synced folder (Google Drive, Dropbox, etc.) as a manual convenience — but it's a snapshot, not live sync: it's only as current as your last export, and editing on two devices before re-importing means whichever backup you import last overwrites the other device's changes.</p>` : '';
+      const folderHtml = folderNeeded ? `
+          <div class="card" id="device-notice-folder-card" style="background:var(--surface-2);border-style:dashed;padding:12px">
+            <div style="font-weight:600;font-size:12.5px;margin-bottom:4px">${ic('folder')} Optional: silent automatic backups on this device</div>
+            <div class="faint small" style="margin-bottom:8px">Pick a folder once and a dated backup writes there automatically roughly every 24 hours — no download prompts. (Also available anytime later in Settings.)</div>
+            <div class="row" style="gap:8px;flex-wrap:wrap">
+              <button type="button" class="btn btn-secondary btn-sm" id="device-notice-choose-folder">${ic('folder')} Choose Backup Folder</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="device-notice-decline-folder">Don't ask again</button>
+            </div>
+          </div>` : '';
+
+      UI.openModal(`
+        <div class="head"><span class="modal-title">${ic('cpu')} ${infoNeeded ? 'Before you start' : 'Set up automatic backups?'}</span></div>
+        <div class="body"><div class="stack">
+          ${infoHtml}
+          ${folderHtml}
+        </div></div>
+        <div class="foot">
+          ${infoNeeded ? `
+          <label class="startup-checkbox-label" style="margin-right:auto">
+            <input type="checkbox" id="device-notice-dont-show" />
+            <span>Don't show this again</span>
+          </label>` : '<span style="margin-right:auto"></span>'}
+          <button class="btn btn-primary" id="device-notice-ok">${folderNeeded && !infoNeeded ? 'Not now' : 'Got it'}</button>
+        </div>`, (m, dim) => {
+        if (folderNeeded) {
+          const folderBtn = m.querySelector('#device-notice-choose-folder');
+          const declineBtn = m.querySelector('#device-notice-decline-folder');
+          const folderCard = m.querySelector('#device-notice-folder-card');
+          if (folderBtn) {
+            folderBtn.onclick = async () => {
+              await chooseAutoBackupFolder();
+              // Picking a folder satisfies the CTA permanently (status.name is now set), so it
+              // won't reappear. Reflect success inline instead of closing abruptly.
+              if (folderCard && autoBackupFolderStatus.name && autoBackupFolderStatus.granted) {
+                folderCard.innerHTML = `<div style="font-weight:600;font-size:12.5px">${ic('check')} Silent backups enabled to "${esc(autoBackupFolderStatus.name)}"</div>`;
+              }
+            };
+          }
+          if (declineBtn) {
+            declineBtn.onclick = () => {
+              UI.storage.setItem('crm-declined-backup-folder', '1');
+              if (folderCard) folderCard.innerHTML = `<div class="faint small">No problem — you can set this up later in Settings.</div>`;
+            };
+          }
+        }
+        m.querySelector('#device-notice-ok').onclick = () => {
+          const check = m.querySelector('#device-notice-dont-show');
+          if (check && check.checked) UI.storage.setItem('crm-seen-device-notice', '1');
+          UI.closeDim(dim);
+          resolve();
+        };
+      }, () => resolve()); // tapping outside (easy on a touch screen) still has to unblock boot
+    });
+  }
+
   async function boot() {
-    await DB.boot();
+    let status;
+    try {
+      status = await DB.boot();
+    } catch (err) {
+      renderBootError(err);
+      return;
+    }
+
     UI.initTheme();
+
+    if (!status.persistent) {
+      renderStorageUnavailableScreen();
+      return;
+    }
+
+    await finishBoot(status);
+  }
+
+  async function finishBoot(status) {
     renderShell();
     route('dashboard');
     wireGlobal();
+
+    if (!status.persistent) showTemporarySessionBanner();
 
     requestPersistentStorage();
     await refreshAutoBackupFolderStatus();
     maybeAutoBackup();
     setInterval(maybeAutoBackup, 60 * 60 * 1000);
 
-    const hideStartup = localStorage.getItem('crm-hide-startup-modal') === '1';
+    const noticeParts = shouldShowDeviceNotice();
+    const showNotice = () => (noticeParts.show ? showDeviceNotice(noticeParts) : Promise.resolve());
+
+    const hideStartup = UI.storage.getItem('crm-hide-startup-modal') === '1';
     if (!hideStartup) {
-      openStartupModal();
+      openStartupModal(showNotice); // notice pops after the welcome modal, not before it
+    } else {
+      await showNotice();
     }
   }
 

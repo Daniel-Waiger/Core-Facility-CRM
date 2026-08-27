@@ -681,9 +681,9 @@
 
   /* ---------------- Settings ---------------- */
   function settings() {
-    const hideStartup = localStorage.getItem('crm-hide-startup-modal') === '1';
-    const autoBackupEnabled = localStorage.getItem('auto-backup-enabled') !== '0';
-    const lastAutoBackup = localStorage.getItem('last-auto-backup-at');
+    const hideStartup = UI.storage.getItem('crm-hide-startup-modal') === '1';
+    const autoBackupEnabled = UI.storage.getItem('auto-backup-enabled') !== '0';
+    const lastAutoBackup = UI.storage.getItem('last-auto-backup-at');
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
     const folderStatus = global.App.autoBackupFolderStatus;
 
@@ -697,7 +697,7 @@
             <div class="faint small">Show the welcome modal with Quick Demo vs Fresh Start options upon opening the app.</div>
           </div>
           <label class="row" style="cursor:pointer;gap:8px">
-            <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="localStorage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
+            <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
             <span class="small font-medium">Show on startup</span>
           </label>
         </div>
@@ -742,7 +742,7 @@
             <div class="faint small">Roughly once every 24 hours while the app is open (skipped when there's no data yet). Last automatic backup: ${esc(lastAutoBackupLabel)}</div>
           </div>
           <label class="row" style="cursor:pointer;gap:8px">
-            <input type="checkbox" id="pref-auto-backup" ${autoBackupEnabled ? 'checked' : ''} onchange="localStorage.setItem('auto-backup-enabled', this.checked ? '1' : '0'); UI.toast('Automatic backup preference updated');" />
+            <input type="checkbox" id="pref-auto-backup" ${autoBackupEnabled ? 'checked' : ''} onchange="UI.storage.setItem('auto-backup-enabled', this.checked ? '1' : '0'); UI.toast('Automatic backup preference updated');" />
             <span class="small font-medium">Enabled</span>
           </label>
         </div>

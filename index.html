@@ -5,11 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Core Facility Tracker</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="css/app.css">
+  <!-- ?v= cache-busters: bump these when css/js change so browsers (and the service-worker
+       precache) pick up the new files instead of serving a stale copy. -->
+  <link rel="stylesheet" href="css/app.css?v=2">
+  <!-- Installable/offline support when served over https (e.g. GitHub Pages). Both are
+       no-ops under file:// or plain http — the app still runs via the boot fallbacks below. -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#4f46e5">
 </head>
 <body>
   <div id="app"></div>
   <div id="toasts" class="toasts"></div>
+
+  <noscript>
+    <div style="padding:40px;font-family:ui-sans-serif,system-ui,sans-serif;max-width:640px;margin:40px auto;text-align:center">
+      <h1>JavaScript required</h1>
+      <p>Core Facility Tracker needs JavaScript enabled to run. Please enable JavaScript in your browser settings and reload this page.</p>
+    </div>
+  </noscript>
 
   <!-- sql.js: asm.js build = single file, works from file:// (no wasm fetch) -->
   <script src="libs/sql-asm.js"></script>
@@ -18,12 +31,42 @@
   <script src="libs/jspdf.umd.min.js"></script>
   <script src="libs/docx.iife.js"></script>
 
-  <script src="js/consts.js"></script>
-  <script src="js/db.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/views.js"></script>
-  <script src="js/exports.js"></script>
-  <script src="js/app.js"></script>
-  <script>document.addEventListener('DOMContentLoaded', function () { App.boot(); });</script>
+  <script src="js/consts.js?v=2"></script>
+  <script src="js/db.js?v=2"></script>
+  <script src="js/ui.js?v=2"></script>
+  <script src="js/views.js?v=2"></script>
+  <script src="js/exports.js?v=2"></script>
+  <script src="js/app.js?v=2"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      // Last-resort net: App.boot() already catches its own errors and renders a diagnostic
+      // screen, but if something throws before that (e.g. a script failed to parse), this
+      // keeps the page from going silently blank with no way to tell what happened.
+      Promise.resolve().then(function () { return App.boot(); }).catch(function (e) {
+        console.error('Fatal boot error', e);
+        var el = document.getElementById('app');
+        if (!el) return;
+        var detail = String((e && e.stack) || e)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        el.innerHTML =
+          '<div style="padding:40px;font-family:ui-sans-serif,system-ui,sans-serif;max-width:640px;margin:40px auto;text-align:center">' +
+          '<h1 style="margin-bottom:8px">Something went wrong</h1>' +
+          '<p>The app failed to start. Try reloading. If this keeps happening, make sure you opened it as a web link rather than double-clicking the file — some browsers (especially on tablets) block the storage the app needs when opened that way.</p>' +
+          '<pre style="white-space:pre-wrap;text-align:left;background:#f3f3f3;color:#111;padding:12px;border-radius:8px;font-size:12px;overflow:auto">' + detail + '</pre>' +
+          '<button onclick="location.reload()" style="margin-top:16px;padding:8px 16px;cursor:pointer">Reload</button>' +
+          '</div>';
+      });
+    });
+
+    // Installable/offline (PWA). Registering under file:// throws (service workers require a
+    // secure context), so this is guarded to only run when actually served over http(s).
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function (e) {
+          console.warn('Service worker registration failed (app still works without it):', e);
+        });
+      });
+    }
+  </script>
 </body>
 </html>

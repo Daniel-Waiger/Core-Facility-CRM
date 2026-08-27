@@ -8,7 +8,8 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 ## Key Features
 
-- **Zero-Install & Zero-Server:** Runs instantly on PC, Mac, Linux, and tablets by opening `index.html` directly in modern web browsers (Chrome, Edge, Firefox, Safari). No Node.js, Python, or local server required.
+- **Zero-Install & Zero-Server:** Runs on PC, Mac, Linux, Android, and iPad in modern web browsers (Chrome, Edge, Firefox, Safari). No Node.js, Python, or account required. On desktop you can open `index.html` directly; **on tablets you need to open it from a web address for saving to work** — see [Running on Tablets](#running-on-tablets-android--ipad).
+- **Installable (PWA):** When served over `https`, it can be added to your home screen and works offline like a native app.
 - **Embedded SQLite Database:** Uses `sql.js` (asm.js single-file build) backed by browser `IndexedDB` storage with automatic debounced autosave.
 - **Welcome & Onboarding Experience:**
   - **Seeded Example & Walkthrough:** Load a realistic bioimaging facility dataset (Multiphoton, STED, Lightsheet, etc.) with an interactive step-by-step tour.
@@ -110,6 +111,9 @@ Track research projects from initiation to completion with full lifecycle tracki
 ```text
 Core-Facility-CRM/
 ├── index.html            # Application entry point
+├── manifest.json         # PWA metadata (installable / home-screen icon)
+├── sw.js                 # Service worker — offline app-shell cache (https only)
+├── .nojekyll             # Tells GitHub Pages to serve all files verbatim
 ├── favicon.svg           # Brand logo favicon
 ├── css/
 │   └── app.css           # Modern SaaS Minimalist design system
@@ -130,16 +134,74 @@ Core-Facility-CRM/
 └── README.md             # Documentation
 ```
 
-> **`index.html`, `favicon.svg`, `css/`, `js/`, and `libs/` are the entire runtime app** — that's what needs to travel together (see [Sharing With Colleagues](#sharing-the-app-with-colleagues)). Everything else (`docs/`, `LICENSE`, `README.md`) is documentation only.
+> **`index.html`, `manifest.json`, `sw.js`, `favicon.svg`, `css/`, `js/`, and `libs/` are the entire runtime app** — that's what needs to travel together (see [Sharing With Colleagues](#sharing-the-app-with-colleagues)). Everything else (`docs/`, `LICENSE`, `README.md`) is documentation only.
 
 ---
 
 ## Quick Start
 
+### On a computer (Windows / Mac / Linux)
+
 1. Download or clone this repository.
 2. Double-click `index.html` to open it in your browser.
 3. Choose **Load Demo & Start Tour** to explore with sample data or **Start Fresh** to begin with an empty database.
 4. Click **"New Project"** in the sidebar to start tracking projects!
+
+> If your browser blocks storage for local files, the app will tell you so on a **"Storage unavailable"** screen instead of showing a blank page — follow the on-screen steps, or run the local server below.
+
+**Optional local server** (useful if double-clicking hits storage restrictions):
+
+```bash
+python -m http.server 8734
+```
+
+Then open <http://localhost:8734/index.html>.
+
+---
+
+## Running on Tablets (Android / iPad)
+
+**Important:** tablets need the app opened from a **web address**, not a file.
+
+Browsers only allow permanent saving (IndexedDB) in a "secure context" — an `https://` (or `localhost`) address. A page opened directly from a file (`file://`, e.g. tapping `index.html` in a file manager) is treated as untrusted, so mobile browsers block or wipe its storage. That is why copying the folder to a tablet and opening the file shows an error screen (and, before this was handled, a blank page).
+
+### Recommended: open the hosted version
+
+1. Host the app once (see [Hosting](#hosting-github-pages) below) — e.g. `https://<your-user>.github.io/Core-Facility-CRM/`.
+2. Open that link on the tablet:
+   - **Android:** open in **Chrome** → menu (⋮) → **Add to Home screen**.
+   - **iPad / iPhone:** open in **Safari** → Share → **Add to Home Screen**.
+3. Launch it from the new home-screen icon. It now saves normally on that device and works offline.
+
+### If you open it as a file anyway
+
+The app still opens, but you'll get a **"Storage unavailable"** screen explaining the situation, with a **"Continue anyway (temporary session)"** option. In that mode a warning banner stays visible and **nothing is saved when you close the tab** — use **Settings → Export Backup** before closing if you want to keep anything.
+
+---
+
+## Hosting (GitHub Pages)
+
+The app is plain static files with relative paths, so it can be hosted as-is — no build step.
+
+1. Push this repository to GitHub.
+2. On github.com: **Settings → Pages → Build and deployment → Deploy from a branch → `main` / `/ (root)`**.
+3. Wait a minute, then open `https://<your-user>.github.io/<repo-name>/`.
+
+The included `.nojekyll` file makes sure GitHub Pages serves every file verbatim.
+
+### Optional: free custom domain (GitHub Student / Education Pack)
+
+If you have an academic email address, you can claim a free domain for a year:
+
+1. Apply at <https://education.github.com/pack> and verify your academic status.
+2. Claim a domain offer from the pack (e.g. Namecheap `.me`, or name.com) on the registrar's site.
+3. Add a file named `CNAME` at the repo root containing just your domain, e.g. `crm.yourname.me`.
+4. At the registrar, point the domain at GitHub Pages:
+   - **Subdomain** (e.g. `crm.yourname.me`) → a `CNAME` record to `<your-user>.github.io`
+   - **Apex domain** (e.g. `yourname.me`) → `A` records to `185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`
+5. Back in **Settings → Pages**, wait for the domain to verify, then tick **Enforce HTTPS** (required for saving and offline install to work).
+
+No code changes are needed — all asset paths are relative.
 
 ---
 
@@ -151,6 +213,8 @@ Core-Facility-CRM/
 
 ```text
 index.html
+manifest.json
+sw.js
 favicon.svg
 css/
 js/
@@ -161,16 +225,43 @@ libs/
 
 **How to share it:**
 
-- **Zip the folder** and send it directly — the recipient unzips it and double-clicks `index.html`.
+- **Share a hosted link** (see [Hosting](#hosting-github-pages)) — best option, and the only one that works properly on tablets.
+- **Zip the folder** and send it directly — the recipient unzips it and opens `index.html` on a computer.
 - **Share the GitHub repo** (clone or "Download ZIP") so everyone always gets the latest version.
 
-Either way, no installation, server, or account is required — each person's data is saved locally in their own browser's IndexedDB, so colleagues won't see or share each other's data unless they exchange a backup file (**Settings → Export Backup**).
+No installation, server, or account is required. Note that **sharing the app is not sharing data** — each person's data is saved locally in their own browser, so colleagues won't see each other's projects unless they exchange a backup file (**Settings → Export Backup**).
 
 ---
 
 ## Data Safety & Privacy
 
-All project data, attachments, and metadata remain **100% local to your machine**. No data is ever sent to external cloud servers or third parties. Backups (including attachments) can be exported anytime via **Settings → Export Backup**, and an automatic dated backup runs roughly every 24 hours while the app is open as an additional safety net against browser storage being cleared — written silently into a `backups/` subfolder next to the app (Chrome/Edge, after a one-time folder selection in Settings), or downloaded normally otherwise.
+### Your data is per-device — there is no sync
+
+All project data, attachments, and metadata remain **100% local to your machine**. No data is ever sent to external cloud servers or third parties.
+
+Because of that, please be clear on what this means in practice:
+
+- Data lives in **one browser on one device**. Your tablet and your laptop each hold a **separate, independent database**.
+- **Hosting the app does not share data.** Two people opening the same hosted link each get their own private database — you will not see each other's projects.
+- There is **no multi-user or live collaboration.** The app is designed for single-device use.
+- The only way to move data between devices or people is **Settings → Export Backup** → send/copy the `.json` file → **Restore from Backup** on the other device.
+
+The app states this up front on first run so it's never a surprise.
+
+### Backups
+
+Backups (including attachments) can be exported anytime via **Settings → Export Backup**, and an automatic dated backup runs roughly every 24 hours while the app is open as an additional safety net against browser storage being cleared — written silently into a `backups/` subfolder next to the app (Chrome/Edge, after a one-time folder selection), or downloaded normally otherwise.
+
+### Using a cloud folder (Google Drive, Dropbox, OneDrive)
+
+You can point backups at a cloud-synced folder, or drop exported backups there manually, as a convenience. **This is a manual backup, not sync** — know the trade-offs:
+
+- **It's only as current as your last export.** The live database stays in browser storage; nothing updates the cloud file until a backup runs or you export one.
+- **Editing on two devices will lose work.** If both devices have changes and you import a backup, whichever you import *last* overwrites the other device's edits entirely. There is no merge.
+- **Backups with attachments can get large**, since uploaded files are embedded in the `.json`.
+- **Privacy follows the cloud account.** A backup in a shared or synced folder is readable by anyone with access to that folder — treat it like any other sensitive research file.
+
+> Putting the *app folder* itself in Drive does **not** sync your data — the database lives in browser storage, not in the folder. Only exported backup files carry data.
 
 ---
 
