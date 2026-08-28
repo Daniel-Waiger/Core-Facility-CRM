@@ -751,6 +751,10 @@ textarea.input { resize: vertical; min-height: 74px; }
 /* Inline icons inside the first-run notice's folder card live in plain divs (no .btn/.card-title
    svg rule to size them), so constrain them here or they render at the SVG default (huge). */
 #device-notice-folder-card svg { width: 15px; height: 15px; vertical-align: -3px; }
+
+/* Extra-small icon-only button (e.g. copy-code next to a project code) */
+.btn.btn-xs { padding: 2px 5px; font-size: 11px; line-height: 1; vertical-align: middle; }
+.btn.btn-xs svg { width: 13px; height: 13px; }
 .temp-session-banner span:not(.temp-session-banner-ic) { flex: 1; }
 .temp-session-banner-close {
   border: none; background: transparent; cursor: pointer; color: var(--text-muted);

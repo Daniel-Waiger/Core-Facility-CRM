@@ -677,12 +677,17 @@
       case 'ep-save': return epSave(el.dataset.id);
       case 'ep-add-person': return editProjectAddPerson(el.dataset.projectId);
       case 'set-project-status': return setProjectStatus(el.dataset.status);
+      case 'duplicate-project': return duplicateProject(el.dataset.id || ctx.project);
       case 'delete-project': return deleteProject();
+
+      // Clipboard
+      case 'copy': return UI.copyToClipboard(el.dataset.copy, el.dataset.copyLabel || 'Copied to clipboard');
 
       // Exports
       case 'export-xlsx': return Exports.exportXlsx(ctx.project);
       case 'export-docx': return Exports.exportDocx(ctx.project);
       case 'export-pdf': return Exports.exportPdf(ctx.project);
+      case 'export-all-xlsx': return Exports.exportAllXlsx();
 
       // Milestones CRUD & Toggle
       case 'add-milestone': return addMilestone();
@@ -1024,6 +1029,60 @@
     DB.run('DELETE FROM projects WHERE id=?', [ctx.project]);
     UI.toast('Project deleted');
     route('projects');
+  }
+
+  // Clone a project as a starting template: copies the project fields, team, instruments,
+  // custom metadata, and milestones (reset to pending, dates cleared). Meetings and files
+  // are historical/one-off, so they are intentionally NOT copied. Reuses generateProjectCode()
+  // and the same insert + last_insert_rowid() pattern used elsewhere in this file.
+  async function duplicateProject(id) {
+    const src = DB.row('SELECT * FROM projects WHERE id=?', [id]);
+    if (!src) { UI.toast('Project not found', 'error'); return; }
+
+    const ok = await UI.confirmModal(
+      'Duplicate Project',
+      `Create a copy of "${esc(src.title)}" as a new template? This copies the project details, team, assigned instruments, custom fields, and milestones (reset to pending, dates cleared). Meetings and files are not copied.`
+    );
+    if (!ok) return;
+
+    const newCode = generateProjectCode();
+    try {
+      DB.run(`
+        INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [src.title + ' (Copy)', newCode, 'Initiated', src.priority, src.pi_id, src.modality, src.funding, src.sample, src.flags, null, null, src.tags, src.notes]
+      );
+    } catch (e) {
+      UI.toast('Could not duplicate project: ' + (e.message || 'unknown error'), 'error');
+      return;
+    }
+
+    const created = DB.row('SELECT id FROM projects WHERE code=?', [newCode]);
+    if (!created) { UI.toast('Could not duplicate project', 'error'); return; }
+    const newId = created.id;
+
+    // Associations
+    DB.rows('SELECT person_id, role FROM project_people WHERE project_id=?', [id]).forEach((r) =>
+      DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [newId, r.person_id, r.role]));
+    DB.rows('SELECT instrument_id FROM project_instruments WHERE project_id=?', [id]).forEach((r) =>
+      DB.run('INSERT OR IGNORE INTO project_instruments (project_id, instrument_id) VALUES (?,?)', [newId, r.instrument_id]));
+    DB.rows('SELECT key, value FROM kv WHERE project_id=?', [id]).forEach((r) =>
+      DB.run('INSERT INTO kv (project_id, key, value) VALUES (?,?,?)', [newId, r.key, r.value]));
+
+    // Milestones — reset status to pending and clear due dates; carry over owners/instruments.
+    DB.rows('SELECT * FROM milestones WHERE project_id=? ORDER BY id ASC', [id]).forEach((m) => {
+      DB.run('INSERT INTO milestones (project_id, name, due_date, status, note) VALUES (?,?,?,?,?)', [newId, m.name, null, 'pending', m.note]);
+      const nm = DB.row('SELECT last_insert_rowid() as id');
+      if (!nm) return;
+      const newMid = nm.id;
+      DB.rows('SELECT person_id FROM milestone_owners WHERE milestone_id=?', [m.id]).forEach((o) =>
+        DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [newMid, o.person_id]));
+      DB.rows('SELECT instrument_id FROM milestone_instruments WHERE milestone_id=?', [m.id]).forEach((mi) =>
+        DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [newMid, mi.instrument_id]));
+    });
+
+    UI.toast('Project duplicated');
+    route('project', newId);
   }
 
   /* ---------------- Milestone Modals & Status Toggle ---------------- */

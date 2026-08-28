@@ -115,6 +115,7 @@
           <option value="">All Modalities</option>
           ${C.MODALITY.map((m) => `<option value="${m}" ${projectFilter.modality === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
+        <button class="btn btn-secondary" data-act="export-all-xlsx" title="Export all projects to one spreadsheet">${ic('file')} Export All</button>
         <button class="btn btn-primary" data-act="new-project">${ic('plus')} New Project</button>
       </div>
     </div>
@@ -226,7 +227,7 @@
             <span class="badge ${p.priority === 'High' ? 'danger' : p.priority === 'Low' ? 'neutral' : 'warning'}">${esc(p.priority || 'Medium')} Priority</span>
           </div>
           <div class="faint small mt-8" style="display:flex;gap:16px;flex-wrap:wrap">
-            <span><strong>Code:</strong> <span class="mono">${esc(p.code)}</span></span>
+            <span><strong>Code:</strong> <span class="mono">${esc(p.code)}</span> <button class="btn btn-ghost btn-xs" data-act="copy" data-copy="${esc(p.code)}" data-copy-label="Project code copied" title="Copy project code">${ic('copy')}</button></span>
             <span><strong>PI:</strong> ${esc(p.pi_name || 'None')}</span>
             <span><strong>Created:</strong> ${fmt(p.created_at)}</span>
             <span><strong>Timeline:</strong> ${fmt(p.start_date)} → ${fmt(p.end_date)}</span>
@@ -234,6 +235,7 @@
         </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" data-act="edit-project" data-id="${p.id}">${ic('edit')} Edit Project</button>
+          <button class="btn btn-secondary btn-sm" data-act="duplicate-project" data-id="${p.id}" title="Duplicate as a new project template">${ic('layers')} Duplicate</button>
           <button class="btn btn-secondary btn-sm" data-act="export-xlsx" title="Export Spreadsheet">${ic('file')} XLSX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-docx" title="Export Word Document">${ic('file')} DOCX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-pdf" title="Export Formatted PDF">${ic('file')} PDF</button>
@@ -778,7 +780,8 @@
       <div class="card-title">${ic('cpu')} Core Facility Tracker</div>
       <div class="card-body">
         <div class="faint small" style="line-height:1.7">
-          <p class="mt-0 mb-8"><strong>Platform:</strong> Standalone Portable Web App (Zero Install / Zero Server).</p>
+          <p class="mt-0 mb-8"><strong>Version:</strong> ${esc(global.APP_VERSION || '—')}</p>
+          <p class="mb-8"><strong>Platform:</strong> Standalone Portable Web App (Zero Install / Zero Server).</p>
           <p class="mb-8"><strong>Database:</strong> SQLite Engine via WebAssembly/asm.js + IndexedDB persistent storage.</p>
           <p class="mb-8"><strong>Export Engines:</strong> SheetJS (.xlsx), docx (.docx), jsPDF (.pdf).</p>
           <p class="mb-0">Designed for advanced microscopy, bioimaging, and scientific core facilities.</p>

@@ -445,6 +445,87 @@
     UI.toast('Exported formatted PDF report');
   }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf };
+  /* ---------------- Facility-wide XLSX Export (all projects) ---------------- */
+  function exportAllXlsx() {
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+
+    const projects = DB.rows(`
+      SELECT p.*, pe.name as pi_name, pe.email as pi_email
+      FROM projects p LEFT JOIN people pe ON pe.id = p.pi_id
+      ORDER BY p.updated_at DESC`);
+
+    if (!projects.length) { UI.toast('No projects to export', 'error'); return; }
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Projects overview (one row per project)
+    const projRows = [[
+      'Code', 'Title', 'Status', 'Priority', 'PI', 'PI Email', 'Funding', 'Modality',
+      'Sample', 'Flags', 'Tags', 'Start Date', 'End Date', 'Progress %', 'Milestones', 'Created', 'Updated'
+    ]];
+    projects.forEach((p) => {
+      const prog = DB.projectProgress(p.id);
+      projRows.push([
+        p.code, p.title, p.status, p.priority || 'Medium', p.pi_name || '—', p.pi_email || '—',
+        p.funding || '—', p.modality || '—', p.sample || '—', p.flags || '—', p.tags || '—',
+        p.start_date || '—', p.end_date || '—', prog.pct + '%', `${prog.done} of ${prog.total}`,
+        p.created_at, p.updated_at
+      ]);
+    });
+    const wsP = XLSX.utils.aoa_to_sheet(projRows);
+    wsP['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsP, 'Projects');
+
+    // Sheet 2: All milestones (across every project)
+    const msRows = [['Project Code', 'Project', 'Milestone', 'Status', 'Due Date', 'Owners', 'Instruments', 'Notes']];
+    DB.rows(`
+      SELECT m.*, p.code as project_code, p.title as project_title,
+             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+      FROM milestones m JOIN projects p ON p.id = m.project_id
+      ORDER BY p.code ASC, m.due_date IS NULL, m.due_date ASC, m.id ASC`).forEach((m) => {
+      msRows.push([m.project_code, m.project_title, m.name, m.status, m.due_date || '—', m.owners || '—', m.instruments || '—', m.note || '']);
+    });
+    const wsM = XLSX.utils.aoa_to_sheet(msRows);
+    wsM['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 24 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
+
+    // Sheet 3: People
+    const peopleRows = [['Name', 'Type', 'Lab / Group / Company', 'Email', 'Notes']];
+    DB.rows('SELECT name, type, organization, email, note FROM people ORDER BY name').forEach((pe) => {
+      peopleRows.push([pe.name, pe.type || '—', pe.organization || '—', pe.email || '—', pe.note || '']);
+    });
+    const wsPe = XLSX.utils.aoa_to_sheet(peopleRows);
+    wsPe['!cols'] = [{ wch: 25 }, { wch: 14 }, { wch: 34 }, { wch: 30 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsPe, 'People');
+
+    // Sheet 4: Instruments
+    const instRows = [['Name', 'Kind / Modality', 'Status', 'Notes']];
+    DB.rows('SELECT name, kind, status, note FROM instruments ORDER BY name').forEach((i) => {
+      instRows.push([i.name, i.kind || '—', i.status || '—', i.note || '']);
+    });
+    const wsI = XLSX.utils.aoa_to_sheet(instRows);
+    wsI['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 14 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
+
+    // Sheet 5: All meetings
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Date', 'Attendees', 'Notes', 'Action Items']];
+    DB.rows(`
+      SELECT mt.*, p.code as project_code, p.title as project_title
+      FROM meetings mt JOIN projects p ON p.id = mt.project_id
+      ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
+      mtRows.push([m.project_code, m.project_title, m.title, m.date || '—', m.attendees || '—', m.note || '', m.actions || '']);
+    });
+    const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
+    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    UI.toast(`Exported ${projects.length} project${projects.length === 1 ? '' : 's'} to XLSX`);
+  }
+
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx };
 
 })(window);

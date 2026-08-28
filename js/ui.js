@@ -101,6 +101,9 @@
     dim.innerHTML = `<div class="modal">${html}</div>`;
     document.body.appendChild(dim);
     const m = dim.querySelector('.modal');
+    // Stash the dismissal handler so Esc can reuse the exact outside-click semantics
+    // (important for promise-based modals like confirmModal, which resolve on dismissal).
+    dim._onDismiss = onOutsideClick || null;
     if (onMount) onMount(m, dim);
     dim.addEventListener('click', (e) => {
       if (e.target !== dim) return;
@@ -110,6 +113,57 @@
     return m;
   }
   function closeDim(dim) { if (dim) dim.remove(); }
+
+  /* ---------------- Global keyboard shortcuts ----------------
+     Esc closes the topmost modal (reusing its dismissal handler so promise-based modals
+     resolve as if the backdrop was clicked). "/" focuses the current view's search box. */
+  function isTypingTarget(el) {
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const dims = document.querySelectorAll('.modal-dim');
+      if (!dims.length) return;
+      const dim = dims[dims.length - 1]; // topmost
+      const onDismiss = dim._onDismiss;
+      closeDim(dim);
+      if (onDismiss) onDismiss();
+      return;
+    }
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (isTypingTarget(document.activeElement)) return;      // let the user type a real slash
+      if (document.querySelector('.modal-dim')) return;         // don't hijack while a modal is open
+      const box = document.getElementById('proj-search')
+        || document.getElementById('people-search')
+        || document.getElementById('inst-search');
+      if (box) { e.preventDefault(); box.focus(); box.select && box.select(); }
+    }
+  });
+
+  /* ---------------- Clipboard ---------------- */
+  async function copyToClipboard(text, label) {
+    const value = String(text == null ? '' : text);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        // Legacy fallback for non-secure contexts (e.g. plain http, older WebViews).
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      toast(label || 'Copied to clipboard');
+    } catch (_) {
+      toast('Could not copy — your browser blocked clipboard access', 'error');
+    }
+  }
   function confirmModal(title, body, { danger = false } = {}) {
     return new Promise((resolve) => {
       // Tapping outside the dialog (easy to do by accident on a touch screen) still needs to
@@ -246,7 +300,8 @@
     clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
     eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
     collapse: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9-3 3 3 3"/>',
-    expand: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m11 9 3 3-3 3"/>'
+    expand: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m11 9 3 3-3 3"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'
   };
   function icon(name) {
     return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -290,6 +345,7 @@
     today,
     isSafeUrl,
     detectOS,
+    copyToClipboard,
     storage: { getItem: storageGet, setItem: storageSet }
   };
 
