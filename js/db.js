@@ -28,6 +28,7 @@
     name TEXT NOT NULL,
     type TEXT NOT NULL,
     organization TEXT DEFAULT '',
+    department TEXT DEFAULT '',
     email TEXT DEFAULT '',
     note TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -37,6 +38,7 @@
     name TEXT NOT NULL,
     kind TEXT DEFAULT '',
     status TEXT DEFAULT 'Available',
+    location TEXT DEFAULT '',
     note TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -73,14 +75,25 @@
   );
   CREATE TABLE IF NOT EXISTS meetings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     title TEXT NOT NULL,
     date TEXT,
     attendees TEXT DEFAULT '',
+    link TEXT DEFAULT '',
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS meeting_people (
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    PRIMARY KEY (meeting_id, person_id)
+  );
+  CREATE TABLE IF NOT EXISTS meeting_instruments (
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+    PRIMARY KEY (meeting_id, instrument_id)
   );
   CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +108,12 @@
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
     value TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS vocab (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    value TEXT NOT NULL,
+    UNIQUE(category, value)
   );
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
@@ -117,6 +136,61 @@
     try { db.exec("ALTER TABLE projects ADD COLUMN sample TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE projects ADD COLUMN flags TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE people ADD COLUMN organization TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN department TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE instruments ADD COLUMN location TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN link TEXT DEFAULT ''"); } catch (_) {}
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS vocab (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          category TEXT NOT NULL,
+          value TEXT NOT NULL,
+          UNIQUE(category, value)
+        );
+        CREATE TABLE IF NOT EXISTS meeting_people (
+          meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          PRIMARY KEY (meeting_id, person_id)
+        );
+        CREATE TABLE IF NOT EXISTS meeting_instruments (
+          meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+          instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+          PRIMARY KEY (meeting_id, instrument_id)
+        );
+      `);
+    } catch (_) {}
+
+    // Relax meetings.project_id to nullable so a booking can stand alone (facility-wide,
+    // not tied to a project). Older databases created it NOT NULL — SQLite can't ALTER a
+    // column's constraint in place, so detect the old shape via the table's own SQL and,
+    // if found, rebuild it the standard SQLite way (new table, copy rows, swap in).
+    try {
+      const info = db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='meetings'");
+      const createSql = (info[0] && info[0].values[0] && info[0].values[0][0]) || '';
+      if (/project_id\s+INTEGER\s+NOT\s+NULL/i.test(createSql)) {
+        db.exec(`
+          PRAGMA foreign_keys = OFF;
+          CREATE TABLE meetings_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+            title TEXT NOT NULL,
+            date TEXT,
+            attendees TEXT DEFAULT '',
+            link TEXT DEFAULT '',
+            note TEXT DEFAULT '',
+            actions TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          INSERT INTO meetings_new (id, project_id, title, date, attendees, link, note, actions, created_at, updated_at)
+            SELECT id, project_id, title, date, attendees, link, note, actions, created_at, updated_at FROM meetings;
+          DROP TABLE meetings;
+          ALTER TABLE meetings_new RENAME TO meetings;
+          CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
+          PRAGMA foreign_keys = ON;
+        `);
+      }
+    } catch (e) { console.warn('meetings.project_id migration skipped:', e); }
   }
 
   async function boot() {
@@ -273,7 +347,19 @@
     return new Blob([bytes], { type: entry.type || 'application/octet-stream' });
   }
 
-  function currentBytes() { return db.export(); }
+  function currentBytes() {
+    const bytes = db.export();
+    // sql.js's export() serializes the database as a side effect resets this connection's
+    // foreign_keys pragma back to OFF (observed empirically — the pragma reads 1 right up
+    // until the first export() call, then 0 forever after, on every build tested). Every
+    // mutation schedules an autosave that calls this via markDirty(), so left unpatched,
+    // ON DELETE CASCADE would silently stop firing ~400ms after the very first save of a
+    // session. Reassert it immediately so cascades (project/person/instrument deletes →
+    // their linked milestones/meetings/join-table rows) keep working for the rest of the
+    // session, not just before the first autosave.
+    db.exec('PRAGMA foreign_keys = ON;');
+    return bytes;
+  }
 
   /* Debounced autosave: every mutation calls markDirty() */
   let saveTimer = null;
@@ -400,6 +486,32 @@
     return flags;
   }
 
+  /* ---------------- Vocab (user-extensible dropdown terms) ----------------
+     Built-in CONST[category] values are always shown first, then any
+     facility-added terms on top — merged and deduped so callers never need
+     to know which list a value came from. */
+  function vocabList(category) {
+    const defaults = (global.CONST && global.CONST[category]) || [];
+    const custom = rows('SELECT value FROM vocab WHERE category=? ORDER BY value', [category]).map((r) => r.value);
+    const hasOther = defaults.includes('Other') || custom.includes('Other');
+    const seen = new Set();
+    const out = [];
+    for (const v of [...defaults, ...custom]) {
+      // "Other" isn't a real term — it's the escape hatch that opens "+ Add New" — so it's
+      // never listed among the regular options; it's appended once at the very end below.
+      if (!v || v === 'Other' || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+    if (hasOther) out.push('Other');
+    return out;
+  }
+  function addVocab(category, value) {
+    const v = String(value || '').trim();
+    if (!v) return;
+    run('INSERT OR IGNORE INTO vocab (category, value) VALUES (?,?)', [category, v]);
+  }
+
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
   function clearAllData() {
     db.exec(`
@@ -408,6 +520,8 @@
       DELETE FROM milestone_owners;
       DELETE FROM milestone_instruments;
       DELETE FROM milestones;
+      DELETE FROM meeting_people;
+      DELETE FROM meeting_instruments;
       DELETE FROM meetings;
       DELETE FROM files;
       DELETE FROM kv;
@@ -429,27 +543,27 @@
 
     // 1. People
     const peopleData = [
-      ['Dr. Elena Rostova', 'PI', 'Bio-Photonics Lab, Harvard Immunology', 'elena.rostova@harvard.edu', 'Specializes in deep-tissue intravital 2-photon imaging'],
-      ['Prof. Marcus Thorne', 'PI', 'Neural Dynamics Institute, MIT', 'mthorne@mit.edu', 'Synaptic plasticity & optogenetics grant leader'],
-      ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy, Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening'],
-      ['Alex Chen', 'Researcher', 'Bio-Photonics Lab, Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses'],
-      ['Maya Patel', 'Researcher', 'Neural Dynamics Institute, MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays'],
-      ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer']
+      ['Dr. Elena Rostova', 'PI', 'Bio-Photonics Lab', 'Harvard Immunology', 'elena.rostova@harvard.edu', 'Specializes in deep-tissue intravital 2-photon imaging'],
+      ['Prof. Marcus Thorne', 'PI', 'Neural Dynamics Institute', 'MIT', 'mthorne@mit.edu', 'Synaptic plasticity & optogenetics grant leader'],
+      ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy', 'Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening'],
+      ['Alex Chen', 'Researcher', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses'],
+      ['Maya Patel', 'Researcher', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays'],
+      ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', '', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer']
     ];
     for (const p of peopleData) {
-      run('INSERT INTO people (name, type, organization, email, note) VALUES (?,?,?,?,?)', p);
+      run('INSERT INTO people (name, type, organization, department, email, note) VALUES (?,?,?,?,?,?)', p);
     }
 
     // 2. Instruments
     const instData = [
-      ['Leica SP8 FALCON', 'FLIM / Confocal', 'Available', 'Fluorescence lifetime imaging, White Light Laser 470-670nm + 405nm'],
-      ['Olympus FV3000', 'Multiphoton / Confocal', 'In-use', 'High-sensitivity spectral GaAsP detectors, heated stage chamber'],
-      ['Zeiss Lightsheet Z.1', 'Lightsheet (Volume)', 'Available', 'Dual-side illumination for cleared tissue & whole organ 3D imaging'],
-      ['Nikon AX R Resonant', 'Resonant Confocal', 'Available', '2K x 2K resonant scanning for high-speed calcium dynamics'],
-      ['Glacios Cryo-TEM', 'Cryo-EM', 'Maintenance', '200kV autoloader - undergoing routine monthly beam alignment']
+      ['Leica SP8 FALCON', 'FLIM / Confocal', 'Available', 'Room 118', 'Fluorescence lifetime imaging, White Light Laser 470-670nm + 405nm'],
+      ['Olympus FV3000', 'Multiphoton / Confocal', 'In-use', 'Room 204', 'High-sensitivity spectral GaAsP detectors, heated stage chamber'],
+      ['Zeiss Lightsheet Z.1', 'Lightsheet (Volume)', 'Available', 'Room 210', 'Dual-side illumination for cleared tissue & whole organ 3D imaging'],
+      ['Nikon AX R Resonant', 'Resonant Confocal', 'Available', 'Room 212', '2K x 2K resonant scanning for high-speed calcium dynamics'],
+      ['Glacios Cryo-TEM', 'Cryo-EM', 'Maintenance', 'Room B14', '200kV autoloader - undergoing routine monthly beam alignment']
     ];
     for (const i of instData) {
-      run('INSERT INTO instruments (name, kind, status, note) VALUES (?,?,?,?)', i);
+      run('INSERT INTO instruments (name, kind, status, location, note) VALUES (?,?,?,?,?)', i);
     }
 
     // 3. Projects
@@ -621,6 +735,8 @@
     run,
     projectProgress,
     projectFlags,
+    vocabList,
+    addVocab,
     seedSampleData,
     clearAllData
   };

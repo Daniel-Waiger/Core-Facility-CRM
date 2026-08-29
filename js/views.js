@@ -115,6 +115,7 @@
           <option value="">All Modalities</option>
           ${C.MODALITY.map((m) => `<option value="${m}" ${projectFilter.modality === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
+        <button class="btn btn-secondary" data-act="export-all-xlsx" title="Export all projects to one spreadsheet">${ic('file')} Export All</button>
         <button class="btn btn-primary" data-act="new-project">${ic('plus')} New Project</button>
       </div>
     </div>
@@ -123,6 +124,10 @@
     <div class="card">
       <div class="tbl-wrap">
         <table class="tbl">
+          <colgroup>
+            <col style="width:24%"><col style="width:10%"><col style="width:9%"><col style="width:15%">
+            <col style="width:15%"><col style="width:9%"><col style="width:11%"><col style="width:7%">
+          </colgroup>
           <thead>
             <tr>
               <th>Project</th>
@@ -168,9 +173,9 @@
                   <div>${fmt(p.start_date)}</div>
                   <div class="faint">to ${fmt(p.end_date)}</div>
                 </td>
-                <td style="text-align:right" onclick="event.stopPropagation()">
-                  <button class="btn btn-ghost btn-sm" data-act="edit-project" data-id="${p.id}" title="Edit Project">${ic('edit')}</button>
-                  <button class="btn btn-ghost btn-sm" data-goto="project" data-id="${p.id}" title="Open Details">${ic('chevron')}</button>
+                <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-ghost btn-xs" data-act="edit-project" data-id="${p.id}" title="Edit Project">${ic('edit')}</button>
+                  <button class="btn btn-ghost btn-xs" data-goto="project" data-id="${p.id}" title="Open Details">${ic('chevron')}</button>
                 </td>
               </tr>`;
             }).join('')}
@@ -226,7 +231,7 @@
             <span class="badge ${p.priority === 'High' ? 'danger' : p.priority === 'Low' ? 'neutral' : 'warning'}">${esc(p.priority || 'Medium')} Priority</span>
           </div>
           <div class="faint small mt-8" style="display:flex;gap:16px;flex-wrap:wrap">
-            <span><strong>Code:</strong> <span class="mono">${esc(p.code)}</span></span>
+            <span><strong>Code:</strong> <span class="mono">${esc(p.code)}</span> <button class="btn btn-ghost btn-xs" data-act="copy" data-copy="${esc(p.code)}" data-copy-label="Project code copied" title="Copy project code">${ic('copy')}</button></span>
             <span><strong>PI:</strong> ${esc(p.pi_name || 'None')}</span>
             <span><strong>Created:</strong> ${fmt(p.created_at)}</span>
             <span><strong>Timeline:</strong> ${fmt(p.start_date)} → ${fmt(p.end_date)}</span>
@@ -234,6 +239,7 @@
         </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" data-act="edit-project" data-id="${p.id}">${ic('edit')} Edit Project</button>
+          <button class="btn btn-secondary btn-sm" data-act="duplicate-project" data-id="${p.id}" title="Duplicate as a new project template">${ic('layers')} Duplicate</button>
           <button class="btn btn-secondary btn-sm" data-act="export-xlsx" title="Export Spreadsheet">${ic('file')} XLSX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-docx" title="Export Word Document">${ic('file')} DOCX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-pdf" title="Export Formatted PDF">${ic('file')} PDF</button>
@@ -357,16 +363,20 @@
           <button class="btn btn-ghost btn-sm" data-act="add-file">${ic('plus')} Add File</button>
         </div>
         <div class="card-body">
-          ${files.length ? files.map((f) => `
-            <div class="row file-row" style="padding:8px 0;border-bottom:1px solid var(--border)">
-              <span class="faint">${ic('file')}</span>
-              <div class="grow">
-                <div class="font-medium">${esc(f.name)}</div>
-                <div class="faint small">${f.kind === 'link' ? (global.UI.isSafeUrl(f.path) ? `<a href="${esc(f.path)}" target="_blank" rel="noopener noreferrer" class="link-btn">${esc(f.path)} ${ic('external')}</a>` : esc(f.path)) : 'Uploaded File'} · ${fmt(f.created_at)}</div>
-              </div>
+          ${files.length ? files.map((f) => {
+            const isSafeLink = f.kind === 'link' && global.UI.isSafeUrl(f.path);
+            const box = isSafeLink
+              ? `<a href="${esc(f.path)}" target="_blank" rel="noopener noreferrer" class="file-link" data-tooltip="${esc(f.path)}">${ic('file')}<span>${esc(f.name)}</span>${ic('external')}</a>`
+              : `<span class="file-link file-link-static">${ic('file')}<span>${esc(f.name)}</span></span>`;
+            const meta = f.kind === 'upload' ? 'Uploaded File' : (isSafeLink ? esc(f.path) : esc(f.path || ''));
+            return `
+            <div class="row file-row" style="padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+              ${box}
+              <div class="grow faint small">${meta} · ${fmt(f.created_at)}</div>
               ${f.kind === 'upload' ? `<button class="btn btn-secondary btn-sm" data-act="download-file" data-id="${f.id}" data-name="${esc(f.name)}">Download</button>` : ''}
               <button class="btn btn-ghost btn-sm" data-act="file-del" data-id="${f.id}" title="Delete file">${ic('trash')}</button>
-            </div>`).join('') : emptyState('file', 'No files linked', 'Attach data files, scripts, or external links.')}
+            </div>`;
+          }).join('') : emptyState('file', 'No files linked', 'Attach data files, scripts, or external links.')}
         </div>
       </div>
 
@@ -382,11 +392,11 @@
               <div class="row">
                 <span class="font-medium grow">${esc(m.title)}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
-                <button class="btn btn-ghost btn-sm" data-act="edit-meeting" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="meeting-del" data-id="${m.id}" title="Delete meeting">${ic('trash')}</button>
               </div>
               ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
-              ${m.note ? `<div class="small muted mt-8 whitespace-pre">${esc(m.note)}</div>` : ''}
+              ${m.note ? `<div class="small muted mt-8 rte-content">${global.UI.noteHtml(m.note)}</div>` : ''}
               ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
             </div>`).join('') : emptyState('calendar', 'No meetings recorded', 'Log sync meetings, consultation notes, and action items.')}
         </div>
@@ -445,7 +455,7 @@
     const rows = allRows.filter((r) => {
       if (peopleFilter.type && r.type !== peopleFilter.type) return false;
       if (qLower) {
-        const textToSearch = `${r.name} ${r.type} ${r.organization || ''} ${r.email || ''} ${r.note || ''}`.toLowerCase();
+        const textToSearch = `${r.name} ${r.type} ${r.organization || ''} ${r.department || ''} ${r.email || ''} ${r.note || ''}`.toLowerCase();
         if (!textToSearch.includes(qLower)) return false;
       }
       return true;
@@ -473,14 +483,19 @@
       ${!rows.length ? emptyState('users', 'No matching people', allRows.length ? 'Try changing your search or filters.' : 'Add Principal Investigators, lab members, and facility technicians.') : `
       <div class="tbl-wrap">
         <table class="tbl">
+          <colgroup>
+            <col style="width:16%"><col style="width:11%"><col style="width:17%"><col style="width:14%">
+            <col style="width:16%"><col style="width:14%"><col style="width:56px"><col style="width:78px">
+          </colgroup>
           <thead>
             <tr>
               <th>Name</th>
               <th>Role / Position</th>
               <th>Lab / Group / Company</th>
+              <th>Department</th>
               <th>Email</th>
               <th>Notes</th>
-              <th>Active Projects</th>
+              <th title="Active projects">Proj.</th>
               <th style="text-align:right">Actions</th>
             </tr>
           </thead>
@@ -489,13 +504,14 @@
               <tr>
                 <td style="font-weight:600">${esc(r.name)}</td>
                 <td><span class="badge neutral">${esc(r.type)}</span></td>
-                <td><span class="chip-sm" style="font-weight:600">${esc(r.organization || '—')}</span></td>
+                <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
+                <td>${r.department ? `<span class="chip-sm" style="font-weight:600">${esc(r.department)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="muted small">${esc(r.email || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
-                <td><span class="badge primary">${r.proj_count} projects</span></td>
-                <td style="text-align:right">
-                  <button class="btn btn-ghost btn-sm" data-act="edit-person" data-id="${r.id}" title="Edit Person" data-tooltip="Edit profile">${ic('edit')}</button>
-                  <button class="btn btn-ghost btn-sm" data-act="delete-person" data-id="${r.id}" title="Delete Person" data-tooltip="Delete person">${ic('trash')}</button>
+                <td><span class="badge primary" title="${r.proj_count} active project${r.proj_count === 1 ? '' : 's'}">${r.proj_count}</span></td>
+                <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
+                  <button class="btn btn-ghost btn-xs" data-act="delete-person" data-id="${r.id}" title="Delete Person">${ic('trash')}</button>
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -523,7 +539,7 @@
       if (instrumentFilter.status && r.status !== instrumentFilter.status) return false;
       if (instrumentFilter.kind && r.kind !== instrumentFilter.kind) return false;
       if (qLower) {
-        const textToSearch = `${r.name} ${r.kind || ''} ${r.status || ''} ${r.note || ''}`.toLowerCase();
+        const textToSearch = `${r.name} ${r.kind || ''} ${r.status || ''} ${r.location || ''} ${r.note || ''}`.toLowerCase();
         if (!textToSearch.includes(qLower)) return false;
       }
       return true;
@@ -555,18 +571,23 @@
       ${!rows.length ? emptyState('cpu', 'No matching instruments', allRows.length ? 'Try changing your search or filters.' : 'Add microscopes, cytometers, or analysis workstations.') : `
       <div class="tbl-wrap">
         <table class="tbl">
-          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Notes</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
+          <colgroup>
+            <col style="width:20%"><col style="width:16%"><col style="width:10%"><col style="width:12%">
+            <col style="width:24%"><col style="width:10%"><col style="width:8%">
+          </colgroup>
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr>
                 <td style="font-weight:600">${esc(r.name)}</td>
                 <td class="muted small">${esc(r.kind || '—')}</td>
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
+                <td class="faint small">${esc(r.location || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td><span class="badge neutral">${r.proj_count} projects</span></td>
-                <td style="text-align:right">
-                  <button class="btn btn-ghost btn-sm" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
-                  <button class="btn btn-ghost btn-sm" data-act="delete-instrument" data-id="${r.id}" title="Delete Instrument">${ic('trash')}</button>
+                <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
+                  <button class="btn btn-ghost btn-xs" data-act="delete-instrument" data-id="${r.id}" title="Delete Instrument">${ic('trash')}</button>
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -609,7 +630,7 @@
     const mtgs = global.DB.rows(`
       SELECT m.id, m.date, m.title, p.id as project_id, p.title as project_title
       FROM meetings m
-      JOIN projects p ON p.id = m.project_id
+      LEFT JOIN projects p ON p.id = m.project_id
       WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
 
     const byDay = {};
@@ -647,7 +668,8 @@
       const evs = byDay[ds] || [];
 
       cells += `
-      <div class="cal-cell ${isToday ? 'today clickable' : ''} ${!inMonth ? 'other-month' : ''}" ${isToday ? 'data-act="open-today-modal" data-tooltip="Click to expand today\'s schedule"' : ''}>
+      <div class="cal-cell clickable ${isToday ? 'today' : ''} ${!inMonth ? 'other-month' : ''}"
+           data-act="new-booking" data-date="${ds}" data-tooltip="Click to add a booking on ${ds}">
         <div class="cal-cell-head">
           <span class="num">${cur.getDate()}</span>
           ${isToday ? '<span class="today-tag">Today</span>' : ''}
@@ -655,8 +677,8 @@
         <div class="cal-events">
           ${evs.map((e) => `
             <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''}"
-                 data-goto="project" data-id="${e.project_id}"
-                 title="${esc(e.name)} (${esc(e.project_title)})">
+                 data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
+                 title="${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
               ${e.kind === 'mt' ? '📅 ' : '🎯 '}${esc(e.name)}
             </div>`).join('')}
         </div>
@@ -778,7 +800,8 @@
       <div class="card-title">${ic('cpu')} Core Facility Tracker</div>
       <div class="card-body">
         <div class="faint small" style="line-height:1.7">
-          <p class="mt-0 mb-8"><strong>Platform:</strong> Standalone Portable Web App (Zero Install / Zero Server).</p>
+          <p class="mt-0 mb-8"><strong>Version:</strong> ${esc(global.APP_VERSION || '—')}</p>
+          <p class="mb-8"><strong>Platform:</strong> Standalone Portable Web App (Zero Install / Zero Server).</p>
           <p class="mb-8"><strong>Database:</strong> SQLite Engine via WebAssembly/asm.js + IndexedDB persistent storage.</p>
           <p class="mb-8"><strong>Export Engines:</strong> SheetJS (.xlsx), docx (.docx), jsPDF (.pdf).</p>
           <p class="mb-0">Designed for advanced microscopy, bioimaging, and scientific core facilities.</p>

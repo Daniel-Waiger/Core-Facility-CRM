@@ -9,7 +9,7 @@
     if (!p) return null;
 
     const ppl = DB.rows(`
-      SELECT pp.role, pe.name, pe.type, pe.organization, pe.email
+      SELECT pp.role, pe.name, pe.type, pe.organization, pe.department, pe.email
       FROM project_people pp
       JOIN people pe ON pe.id = pp.person_id
       WHERE pp.project_id=?
@@ -45,6 +45,143 @@
     a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  /* ---------------- Rich-text (meeting notes) → export formats ----------------
+     Meeting notes are stored as a small HTML subset (see UI.sanitizeHtml). Excel/CSV get plain
+     text; Word and PDF preserve bold / italic / underline / bullet lists / font size. */
+  function noteDoc(html) {
+    return new DOMParser().parseFromString(UI.sanitizeHtml(html || ''), 'text/html').body;
+  }
+  const BLOCK_TAGS = { P: 1, DIV: 1, UL: 1, OL: 1, LI: 1 };
+  function htmlToPlainText(html) {
+    let s = '';
+    (function walk(node) {
+      node.childNodes.forEach((c) => {
+        if (c.nodeType === 3) { s += c.nodeValue.replace(/\s+/g, ' '); return; }
+        if (c.nodeType !== 1) return;
+        if (c.tagName === 'BR') { s += '\n'; return; }
+        const block = BLOCK_TAGS[c.tagName];
+        if (block && s && !s.endsWith('\n')) s += '\n';
+        if (c.tagName === 'LI') s += '• ';
+        walk(c);
+        if (block && !s.endsWith('\n')) s += '\n';
+      });
+    })(noteDoc(html));
+    return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // Walk inline content into styled runs: [{text, bold, italic, underline, sizeEm}]
+  function inlineRuns(node, style, out) {
+    const s = Object.assign({}, style);
+    if (node.nodeType === 1) {
+      const tag = node.tagName;
+      if (tag === 'B' || tag === 'STRONG') s.bold = true;
+      if (tag === 'I' || tag === 'EM') s.italic = true;
+      if (tag === 'U') s.underline = true;
+      const fs = (node.getAttribute('style') || '').match(/font-size:\s*([0-9.]+)(em|px)/i);
+      if (fs) s.sizeEm = fs[2].toLowerCase() === 'em' ? parseFloat(fs[1]) : parseFloat(fs[1]) / 13;
+      if (tag === 'BR') { out.push({ br: true }); return; }
+    }
+    if (node.nodeType === 3) {
+      if (node.nodeValue) out.push({ text: node.nodeValue.replace(/\s+/g, ' '), style: s });
+      return;
+    }
+    node.childNodes.forEach((c) => inlineRuns(c, s, out));
+  }
+
+  function htmlToDocxParagraphs(html, docx) {
+    const { Paragraph, TextRun } = docx;
+    const body = noteDoc(html);
+    const paras = [];
+    function runsFor(node) {
+      const raw = [];
+      inlineRuns(node, {}, raw);
+      return raw.filter((r) => r.text != null && r.text !== '').map((r) => new TextRun({
+        text: r.text,
+        bold: !!r.style.bold,
+        italics: !!r.style.italic,
+        underline: r.style.underline ? {} : undefined,
+        size: r.style.sizeEm ? Math.round(r.style.sizeEm * 22) : undefined
+      }));
+    }
+    function block(node, opts) {
+      const children = runsFor(node);
+      if (children.length) paras.push(new Paragraph(Object.assign({ children }, opts)));
+    }
+    body.childNodes.forEach((n) => {
+      if (n.nodeType === 3 && n.nodeValue.trim()) { paras.push(new Paragraph({ children: [new TextRun(n.nodeValue.trim())] })); return; }
+      if (n.nodeType !== 1) return;
+      if (n.tagName === 'UL' || n.tagName === 'OL') {
+        n.querySelectorAll('li').forEach((li) => block(li, { bullet: { level: 0 } }));
+      } else {
+        block(n, {});
+      }
+    });
+    if (!paras.length) {
+      const t = htmlToPlainText(html);
+      if (t) paras.push(new Paragraph({ children: [new TextRun(t)] }));
+    }
+    return paras;
+  }
+
+  // Render note HTML into a jsPDF doc. `cur` = { get y / set y, checkPage } so page-break
+  // bookkeeping stays in sync with the caller's cursor. Returns the final y.
+  function htmlToPdf(pdf, html, x, width, cur) {
+    const body = noteDoc(html);
+    const baseSize = 9;
+    const checkPage = cur.checkPage;
+    function emitBlock(node, indent, bullet) {
+      const runs = [];
+      inlineRuns(node, {}, runs);
+      let line = '';
+      let lineStyle = null;
+      const startX = x + indent;
+      const avail = width - indent;
+      const flush = () => {
+        if (line === '') return;
+        checkPage(6);
+        setStyle(lineStyle || {});
+        pdf.text((bullet ? '• ' : '') + line, startX, cur.y);
+        cur.y += 4.6;
+        line = '';
+      };
+      const setStyle = (st) => {
+        const fs = st.sizeEm ? Math.max(7, Math.round(baseSize * st.sizeEm)) : baseSize;
+        pdf.setFontSize(fs);
+        pdf.setFont('helvetica', st.bold && st.italic ? 'bolditalic' : st.bold ? 'bold' : st.italic ? 'italic' : 'normal');
+      };
+      runs.forEach((r) => {
+        if (r.br) { flush(); return; }
+        if (!r.text) return;
+        lineStyle = r.style;
+        r.text.split(/(\s+)/).forEach((word) => {
+          if (!word) return;
+          setStyle(r.style);
+          const test = line + word;
+          if (pdf.getTextWidth((bullet ? '• ' : '') + test) > avail && line !== '') {
+            flush();
+            bullet = false;               // wrapped continuation lines are not re-bulleted
+            line = word.replace(/^\s+/, '');
+          } else {
+            line = test;
+          }
+        });
+      });
+      flush();
+      pdf.setFontSize(baseSize);
+      pdf.setFont('helvetica', 'normal');
+    }
+    body.childNodes.forEach((n) => {
+      if (n.nodeType === 3 && n.nodeValue.trim()) { emitBlock(n, 0, false); return; }
+      if (n.nodeType !== 1) return;
+      if (n.tagName === 'UL' || n.tagName === 'OL') {
+        n.querySelectorAll('li').forEach((li) => emitBlock(li, 4, true));
+      } else {
+        emitBlock(n, 0, false);
+      }
+    });
+    return cur.y;
   }
 
   /* ---------------- XLSX Export ---------------- */
@@ -109,12 +246,12 @@
     XLSX.utils.book_append_sheet(wb, ws2, 'Milestones');
 
     // Sheet 3: Team
-    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Email']];
+    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email']];
     d.ppl.forEach((pe) => {
-      teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.email || '—']);
+      teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—']);
     });
     const ws3 = XLSX.utils.aoa_to_sheet(teamRows);
-    ws3['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 30 }];
+    ws3['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 22 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, ws3, 'Team');
 
     // Sheet 4: Instruments
@@ -129,7 +266,7 @@
     // Sheet 5: Meetings
     const mtRows = [['Meeting Title', 'Date', 'Attendees', 'Notes', 'Action Items']];
     d.mtgs.forEach((m) => {
-      mtRows.push([m.title, m.date || '—', m.attendees || '—', m.note || '', m.actions || '']);
+      mtRows.push([m.title, m.date || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
     ws5['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
@@ -201,8 +338,8 @@
     children.push(new Paragraph({ text: 'Team & Collaborators', heading: HeadingLevel.HEADING_2 }));
     if (d.ppl.length) {
       d.ppl.forEach((pe) => {
-        const orgStr = pe.organization ? ` • ${pe.organization}` : '';
-        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}` }));
+        const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
+        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}` }));
       });
     } else {
       children.push(new Paragraph({ text: 'No team members assigned.' }));
@@ -224,7 +361,7 @@
       d.mtgs.forEach((m) => {
         children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}: ${m.title}`, heading: HeadingLevel.HEADING_3 }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
-        if (m.note) children.push(new Paragraph({ text: m.note }));
+        if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
       });
     } else {
@@ -359,8 +496,8 @@
       pdf.setFontSize(9);
       d.ppl.forEach((pe) => {
         checkPage(6);
-        const orgStr = pe.organization ? ` • ${pe.organization}` : '';
-        pdf.text(`• ${pe.name} (${pe.type}${orgStr}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}`, margin, y);
+        const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
+        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}`, margin, y);
         y += 5;
       });
     } else {
@@ -403,12 +540,10 @@
           y += 4;
         }
         if (m.note) {
-          const split = pdf.splitTextToSize(m.note, 210 - margin * 2 - 4);
-          for (const l of split) {
-            checkPage(5);
-            pdf.text(l, margin + 4, y);
-            y += 4.5;
-          }
+          htmlToPdf(pdf, m.note, margin + 4, 210 - margin * 2 - 4, {
+            get y() { return y; }, set y(v) { y = v; }, checkPage
+          });
+          pdf.setFontSize(9);
         }
         if (m.actions) {
           checkPage(6);
@@ -445,6 +580,87 @@
     UI.toast('Exported formatted PDF report');
   }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf };
+  /* ---------------- Facility-wide XLSX Export (all projects) ---------------- */
+  function exportAllXlsx() {
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+
+    const projects = DB.rows(`
+      SELECT p.*, pe.name as pi_name, pe.email as pi_email
+      FROM projects p LEFT JOIN people pe ON pe.id = p.pi_id
+      ORDER BY p.updated_at DESC`);
+
+    if (!projects.length) { UI.toast('No projects to export', 'error'); return; }
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Projects overview (one row per project)
+    const projRows = [[
+      'Code', 'Title', 'Status', 'Priority', 'PI', 'PI Email', 'Funding', 'Modality',
+      'Sample', 'Flags', 'Tags', 'Start Date', 'End Date', 'Progress %', 'Milestones', 'Created', 'Updated'
+    ]];
+    projects.forEach((p) => {
+      const prog = DB.projectProgress(p.id);
+      projRows.push([
+        p.code, p.title, p.status, p.priority || 'Medium', p.pi_name || '—', p.pi_email || '—',
+        p.funding || '—', p.modality || '—', p.sample || '—', p.flags || '—', p.tags || '—',
+        p.start_date || '—', p.end_date || '—', prog.pct + '%', `${prog.done} of ${prog.total}`,
+        p.created_at, p.updated_at
+      ]);
+    });
+    const wsP = XLSX.utils.aoa_to_sheet(projRows);
+    wsP['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsP, 'Projects');
+
+    // Sheet 2: All milestones (across every project)
+    const msRows = [['Project Code', 'Project', 'Milestone', 'Status', 'Due Date', 'Owners', 'Instruments', 'Notes']];
+    DB.rows(`
+      SELECT m.*, p.code as project_code, p.title as project_title,
+             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+      FROM milestones m JOIN projects p ON p.id = m.project_id
+      ORDER BY p.code ASC, m.due_date IS NULL, m.due_date ASC, m.id ASC`).forEach((m) => {
+      msRows.push([m.project_code, m.project_title, m.name, m.status, m.due_date || '—', m.owners || '—', m.instruments || '—', m.note || '']);
+    });
+    const wsM = XLSX.utils.aoa_to_sheet(msRows);
+    wsM['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 24 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
+
+    // Sheet 3: People
+    const peopleRows = [['Name', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes']];
+    DB.rows('SELECT name, type, organization, department, email, note FROM people ORDER BY name').forEach((pe) => {
+      peopleRows.push([pe.name, pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '']);
+    });
+    const wsPe = XLSX.utils.aoa_to_sheet(peopleRows);
+    wsPe['!cols'] = [{ wch: 25 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsPe, 'People');
+
+    // Sheet 4: Instruments
+    const instRows = [['Name', 'Kind / Modality', 'Status', 'Location', 'Notes']];
+    DB.rows('SELECT name, kind, status, location, note FROM instruments ORDER BY name').forEach((i) => {
+      instRows.push([i.name, i.kind || '—', i.status || '—', i.location || '—', i.note || '']);
+    });
+    const wsI = XLSX.utils.aoa_to_sheet(instRows);
+    wsI['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
+
+    // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Date', 'Attendees', 'Link', 'Notes', 'Action Items']];
+    DB.rows(`
+      SELECT mt.*, p.code as project_code, p.title as project_title
+      FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
+      ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
+      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.date || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
+    });
+    const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
+    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    UI.toast(`Exported ${projects.length} project${projects.length === 1 ? '' : 's'} to XLSX`);
+  }
+
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx };
 
 })(window);
