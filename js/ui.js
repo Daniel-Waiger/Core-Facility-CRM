@@ -184,91 +184,133 @@
     });
   }
 
-  /* ---------------- Tour (Crisp Focus, Multi-Screen & No Blur on Target) ---------------- */
+  /* ---------------- Tour (crisp focus, multi-screen, modal showcases, soft transitions) ----------------
+     The highlight box and bubble are created ONCE and reused across steps, so their CSS transitions
+     animate the move/resize between steps (a soft glide + cross-fade) instead of the old
+     destroy-and-recreate flicker. A step may:
+       - route: '<view>'      navigate to a view first
+       - action: fn           run something before highlighting (e.g. open a modal to showcase it)
+       - sel: '<css>'         element to spotlight ('.modal' spotlights a just-opened dialog)
+     Any modal a step opens is auto-dismissed when the tour advances to the next step. */
   let tourState = null;
+  let tourEls = null;
+  const TOUR_FADE = 150;
+
   function startTour(steps) {
     stopTour();
     tourState = { steps, i: 0 };
     renderTour();
   }
+
+  function ensureTourEls() {
+    if (tourEls && document.body.contains(tourEls.box) && document.body.contains(tourEls.bubble)) return tourEls;
+    const box = document.createElement('div');
+    box.className = 'tour-box';
+    const bubble = document.createElement('div');
+    bubble.className = 'tour-bubble is-entering';
+    document.body.append(box, bubble);
+    tourEls = { box, bubble };
+    return tourEls;
+  }
+
+  function closeTourModals() {
+    document.querySelectorAll('.modal-dim').forEach((d) => d.remove());
+  }
+
   function renderTour() {
-    stopTourDom();
     if (!tourState) return;
     const step = tourState.steps[tourState.i];
 
-    // Support automatic cross-view routing
+    // Leaving the previous step: dismiss any modal it opened before we route/act again.
+    closeTourModals();
+
     if (step.route && global.App && global.App.route) {
       global.App.route(step.route, step.projectId);
     }
+    if (typeof step.action === 'function') {
+      try { step.action(); } catch (_) { /* showcase is best-effort */ }
+    }
 
+    const { box, bubble } = ensureTourEls();
+    // Fade the bubble down while the new target settles, then reposition, swap content, fade back up.
+    bubble.classList.add('is-moving');
     setTimeout(() => {
       if (!tourState) return;
-      stopTourDom();
-      const curStep = tourState.steps[tourState.i];
-      const box = document.createElement('div');
-      box.className = 'tour-box';
-      const bubble = document.createElement('div');
-      bubble.className = 'tour-bubble';
-      document.body.append(box, bubble);
-
-      const target = curStep.sel ? document.querySelector(curStep.sel) : null;
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-        const r = target.getBoundingClientRect();
-        const pad = 6;
-        box.style.left = Math.max(0, (r.left - pad)) + 'px';
-        box.style.top = Math.max(0, (r.top - pad)) + 'px';
-        box.style.width = (r.width + pad * 2) + 'px';
-        box.style.height = (r.height + pad * 2) + 'px';
-        const bw = Math.min(380, window.innerWidth - 32);
-        let bx = r.left + r.width + 16;
-        if (bx + bw > window.innerWidth - 16) bx = r.left - bw - 16;
-        if (bx < 16) bx = 16;
-        let by = Math.min(r.top, window.innerHeight - 240);
-        bubble.style.left = bx + 'px';
-        bubble.style.top = Math.max(16, by) + 'px';
-        bubble.style.maxWidth = bw + 'px';
-        bubble.innerHTML = `
-          <div class="t">${curStep.title}</div>
-          <div class="b">${curStep.body}</div>
-          <div class="foot">
-            <span class="step">${tourState.i + 1} / ${tourState.steps.length}</span>
-            <div class="grow"></div>
-            <button class="btn btn-ghost btn-sm" data-tour="skip">Skip</button>
-            <button class="btn btn-tour btn-sm" data-tour="next">${tourState.i < tourState.steps.length - 1 ? 'Next' : 'Finish'}</button>
-          </div>`;
-      } else {
-        bubble.style.left = '50%'; bubble.style.top = '50%';
-        bubble.style.transform = 'translate(-50%,-50%)';
-        bubble.innerHTML = `
-          <div class="t">${curStep.title}</div>
-          <div class="b">${curStep.body}</div>
-          <div class="foot">
-            <span class="step">${tourState.i + 1} / ${tourState.steps.length}</span>
-            <div class="grow"></div>
-            <button class="btn btn-ghost btn-sm" data-tour="skip">Skip</button>
-            <button class="btn btn-tour btn-sm" data-tour="next">${tourState.i < tourState.steps.length - 1 ? 'Next' : 'Finish'}</button>
-          </div>`;
-      }
-
-      bubble.querySelector('[data-tour="next"]').onclick = () => {
-        tourState.i++;
-        if (tourState.i >= tourState.steps.length) { stopTour(); }
-        else renderTour();
-      };
-      const skip = bubble.querySelector('[data-tour="skip"]');
-      if (skip) skip.onclick = stopTour;
-    }, 70);
+      const cur = tourState.steps[tourState.i];
+      const target = cur.sel ? document.querySelector(cur.sel) : null;
+      positionTour(box, bubble, target, cur);
+      requestAnimationFrame(() => bubble.classList.remove('is-moving', 'is-entering'));
+    }, TOUR_FADE);
   }
-  function stopTour() { tourState = null; stopTourDom(); }
+
+  function positionTour(box, bubble, target, step) {
+    const isLast = tourState.i >= tourState.steps.length - 1;
+    bubble.innerHTML =
+      '<div class="t">' + step.title + '</div>' +
+      '<div class="b">' + step.body + '</div>' +
+      '<div class="foot">' +
+        '<span class="step">' + (tourState.i + 1) + ' / ' + tourState.steps.length + '</span>' +
+        '<div class="grow"></div>' +
+        '<button class="btn btn-ghost btn-sm" data-tour="skip">Skip</button>' +
+        '<button class="btn btn-tour btn-sm" data-tour="next">' + (isLast ? 'Finish' : 'Next') + '</button>' +
+      '</div>';
+    bubble.querySelector('[data-tour="next"]').onclick = () => {
+      if (!tourState) return;
+      tourState.i++;
+      if (tourState.i >= tourState.steps.length) stopTour();
+      else renderTour();
+    };
+    const skip = bubble.querySelector('[data-tour="skip"]');
+    if (skip) skip.onclick = stopTour;
+
+    const winW = window.innerWidth, winH = window.innerHeight;
+    const bw = Math.min(360, winW - 32);
+    bubble.style.maxWidth = bw + 'px';
+
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      const r = target.getBoundingClientRect();
+      const pad = 6;
+      box.classList.remove('bare');
+      box.style.left = Math.max(0, r.left - pad) + 'px';
+      box.style.top = Math.max(0, r.top - pad) + 'px';
+      box.style.width = (r.width + pad * 2) + 'px';
+      box.style.height = (r.height + pad * 2) + 'px';
+
+      const bh = bubble.offsetHeight || 160;
+      let bx = r.right + 16;
+      if (bx + bw > winW - 16) bx = r.left - bw - 16;          // flip to the left of the target
+      if (bx < 16) bx = Math.max(16, Math.round((winW - bw) / 2)); // still won't fit → center
+      let by = Math.max(16, Math.min(r.top, winH - bh - 16));
+      bubble.style.left = bx + 'px';
+      bubble.style.top = by + 'px';
+    } else {
+      // No spotlight target: dim the whole screen (0×0 box drives the backdrop) and centre the bubble.
+      box.classList.add('bare');
+      box.style.left = Math.round(winW / 2) + 'px';
+      box.style.top = Math.round(winH / 2) + 'px';
+      box.style.width = '0px';
+      box.style.height = '0px';
+      const bh = bubble.offsetHeight || 160;
+      bubble.style.left = Math.round((winW - bw) / 2) + 'px';
+      bubble.style.top = Math.round((winH - bh) / 2) + 'px';
+    }
+  }
+
+  function stopTour() { tourState = null; tourEls = null; closeTourModals(); stopTourDom(); }
   function stopTourDom() { document.querySelectorAll('.tour-dim, .tour-box, .tour-bubble').forEach((e) => e.remove()); }
-  window.addEventListener('resize', () => { if (tourState) renderTour(); });
+  window.addEventListener('resize', () => {
+    if (!tourState || !tourEls) return;
+    const step = tourState.steps[tourState.i];
+    positionTour(tourEls.box, tourEls.bubble, step.sel ? document.querySelector(step.sel) : null, step);
+  });
 
   /* ---------------- Icons (Lucide-style, inline) ---------------- */
   const ICONS = {
     home: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
     folder: '<path d="M4 7h16"/><path d="M4 7v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7"/><path d="M4 7l2-3h8l2 3"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3"/><path d="M15 7a4 4 0 0 0 4 4"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/>',
     cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M2 8h2M20 8h2M2 16h2M20 16h2"/>',
     calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18M7 2v2M15 2v2M3 14h18"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
@@ -327,6 +369,50 @@
   function today() { return new Date().toISOString().slice(0, 10); }
   function isSafeUrl(u) { return /^https?:\/\//i.test(String(u || '').trim()); }
 
+  /* ---------------- Rich-text notes: sanitize + render ----------------
+     Notes (meeting bookings) are stored as a small HTML subset produced by a contentEditable
+     editor. sanitizeHtml() whitelists tags/attrs so nothing unsafe is ever persisted or shown;
+     noteHtml() renders a stored value, treating legacy tag-free notes as plain text. */
+  const RTE_TAGS = { B: 1, STRONG: 1, I: 1, EM: 1, U: 1, UL: 1, OL: 1, LI: 1, BR: 1, P: 1, DIV: 1, SPAN: 1 };
+  function sanitizeHtml(html) {
+    const src = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    const out = document.implementation.createHTMLDocument('').body;
+
+    function clean(srcNode, destParent) {
+      srcNode.childNodes.forEach((child) => {
+        if (child.nodeType === 3) {                                       // text
+          destParent.appendChild(out.ownerDocument.createTextNode(child.nodeValue));
+          return;
+        }
+        if (child.nodeType !== 1) return;                                 // skip comments etc.
+        const tag = child.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE') return;
+        if (!RTE_TAGS[tag]) { clean(child, destParent); return; }         // unwrap unknown tags
+
+        const el = out.ownerDocument.createElement(tag);
+        const size = (child.getAttribute('style') || '').match(/font-size:\s*([0-9.]+(?:em|px))/i);
+        if (size) {
+          let v = size[1];
+          const px = v.match(/^([0-9.]+)px$/i);
+          if (px && parseFloat(px[1]) > 48) v = '48px';
+          el.setAttribute('style', 'font-size:' + v);
+        }
+        destParent.appendChild(el);
+        clean(child, el);
+      });
+    }
+    clean(src.body, out);
+
+    if (!out.textContent.trim() && !out.querySelector('li')) return '';   // empty editor
+    return out.innerHTML.trim();
+  }
+  function noteHtml(s) {
+    s = String(s || '');
+    if (!s.trim()) return '';
+    if (/<[a-z][\s\S]*>/i.test(s)) return sanitizeHtml(s);
+    return esc(s).replace(/\n/g, '<br>');
+  }
+
   global.UI = {
     toast,
     initTheme,
@@ -341,6 +427,8 @@
     icon,
     setSavedState,
     esc,
+    sanitizeHtml,
+    noteHtml,
     fmtDate,
     today,
     isSafeUrl,

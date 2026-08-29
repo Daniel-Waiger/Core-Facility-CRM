@@ -28,10 +28,142 @@
     settings: 'Settings &amp; Portable Data'
   };
 
-  /* ---------------- Helper: Organization Datalist ---------------- */
-  function getOrgDatalist() {
-    const orgs = DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization");
-    return `<datalist id="org-list">${orgs.map((r) => `<option value="${esc(r.organization)}"></option>`).join('')}</datalist>`;
+  /* ---------------- Helper: Organization / Department value lists ---------------- */
+  function distinctPeopleCol(col) {
+    return DB.rows(`SELECT DISTINCT ${col} AS v FROM people WHERE ${col} IS NOT NULL AND TRIM(${col}) != '' ORDER BY ${col}`).map((r) => r.v);
+  }
+  function orgNames() { return distinctPeopleCol('organization'); }
+  function deptNames() { return distinctPeopleCol('department'); }
+
+  /* ---------------- Helper: Editable Vocabulary Dropdowns ----------------
+     A <select> backed by DB.vocabList(category) (built-in CONST terms plus any
+     facility-added ones, with "Other" always sorted last) plus a "+ Add New" button.
+     Picking "Other" is itself a trigger, not a storable value — both it and the button
+     open the same small nested modal, persist the term via DB.addVocab, and inject+select
+     it in the still-open parent select — no reload / re-render of the parent modal needed.
+     The select's own change is caught by a global delegated listener (see wireGlobal),
+     keyed off the "vocab-select" class plus its data-cat/data-label attributes, so this
+     works in every modal without each one having to wire it individually. */
+  function vocabField({ category, id, selected = '', label, required = false, placeholder = '-- Select --' }) {
+    const opts = DB.vocabList(category);
+    // A record's current value may predate this vocab list (older data, or a value entered
+    // before this category existed) — always render it as a selectable option so saving the
+    // form again can't silently blank the field out just because it's an "unknown" term.
+    if (selected && selected !== 'Other' && !opts.includes(selected)) opts.push(selected);
+    return `
+    <div class="field">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;row-gap:4px">
+        <label style="margin-bottom:0">${esc(label)}${required ? ' *' : ''}</label>
+        <button type="button" class="btn btn-secondary btn-sm" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
+      </div>
+      <select class="input vocab-select" id="${id}" data-cat="${category}" data-label="${esc(label)}" data-prev="${esc(selected)}">
+        <option value="">${placeholder}</option>
+        ${opts.map((o) => `<option value="${esc(o)}" ${o === selected ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  /* ---------------- Helper: free-list <select> + "Add New" ----------------
+     For fields whose values are just distinct strings already in the data (Lab / Group,
+     Department) — no vocab table. Mirrors the vocab dropdown UX: a <select> of known values
+     plus a "+ Add New" button that opens a tiny nested modal, then injects+selects the new
+     value in the still-open parent form. `data-list` names the modal title. */
+  function listPickerField({ id, label, values, selected = '', modalTitle }) {
+    const opts = values.slice();
+    if (selected && !opts.includes(selected)) opts.push(selected);
+    return `
+    <div class="field">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;row-gap:4px">
+        <label style="margin-bottom:0">${esc(label)}</label>
+        <button type="button" class="btn btn-secondary btn-sm" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-tooltip="Register a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
+      </div>
+      <select class="input" id="${id}">
+        <option value="">— None —</option>
+        ${opts.map((o) => `<option value="${esc(o)}" ${o === selected ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  function openAddListValue(targetId, title) {
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('plus')} Add New ${esc(title || 'Value')}</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>${esc(title || 'Value')} *</label><input class="input" id="list-new-value" placeholder="e.g. ${esc(title || 'Value')}" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="list-save" data-target="${targetId}">Add</button>
+      </div>`, (m) => { const i = m.querySelector('#list-new-value'); if (i) i.focus(); });
+  }
+
+  function listAddSave(targetId) {
+    const dims = document.querySelectorAll('.modal-dim');
+    const topDim = dims[dims.length - 1];
+    if (!topDim) return;
+    const value = topDim.querySelector('#list-new-value').value.trim();
+    if (!value) { UI.toast('A value is required', 'error'); return; }
+    UI.closeDim(topDim);
+
+    const parentDims = document.querySelectorAll('.modal-dim');
+    const parentDim = parentDims[parentDims.length - 1];
+    const select = parentDim ? parentDim.querySelector('#' + targetId) : null;
+    if (select) {
+      let opt = [...select.options].find((o) => o.value === value);
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value;
+        select.appendChild(opt);
+      }
+      opt.selected = true;
+    }
+    UI.toast(`Added "${value}"`);
+  }
+
+  function openAddVocab(category, targetId, label) {
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('plus')} Add New ${esc(label || category)}</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>${esc(label || category)} *</label><input class="input" id="vocab-new-value" placeholder="e.g. ${esc(label || category)}" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="vocab-save" data-cat="${category}" data-target="${targetId}">Add</button>
+      </div>`, (m) => {
+      const input = m.querySelector('#vocab-new-value');
+      if (input) input.focus();
+    });
+  }
+
+  function vocabSave(category, targetId) {
+    const dims = document.querySelectorAll('.modal-dim');
+    const topDim = dims[dims.length - 1];
+    if (!topDim) return;
+    const value = topDim.querySelector('#vocab-new-value').value.trim();
+    if (!value) { UI.toast('A value is required', 'error'); return; }
+
+    DB.addVocab(category, value);
+    UI.closeDim(topDim);
+
+    const parentDims = document.querySelectorAll('.modal-dim');
+    const parentDim = parentDims[parentDims.length - 1];
+    const select = parentDim ? parentDim.querySelector('#' + targetId) : null;
+    if (select) {
+      const already = [...select.options].find((o) => o.value === value);
+      if (already) {
+        already.selected = true;
+      } else {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value;
+        opt.selected = true;
+        // Keep "Other" last: insert the new term before it rather than appending after.
+        const otherOpt = [...select.options].find((o) => o.value === 'Other');
+        select.insertBefore(opt, otherOpt || null);
+      }
+      select.dataset.prev = value;
+    }
+    UI.toast(`Added "${value}"`);
   }
 
   /* ---------------- Shell ---------------- */
@@ -631,6 +763,22 @@
       const act = e.target.closest('[data-act]');
       if (act) handleAct(act.dataset.act, act);
     });
+
+    // Editable vocabulary dropdowns: picking "Other" is a trigger, not a real value — open
+    // the same "+ Add New" modal the button does, and snap the select back to whatever it
+    // held before ("data-prev") so "Other" never sits there mid-flow (e.g. while the nested
+    // modal is open, or if the user cancels it).
+    document.addEventListener('change', (e) => {
+      const sel = e.target.closest('select.vocab-select');
+      if (!sel) return;
+      if (sel.value === 'Other') {
+        const prev = sel.dataset.prev || '';
+        sel.value = prev;
+        openAddVocab(sel.dataset.cat, sel.id, sel.dataset.label);
+      } else {
+        sel.dataset.prev = sel.value;
+      }
+    });
   }
 
   function handleAct(act, el) {
@@ -665,10 +813,24 @@
       case 'cal-today': return Views.navCalendar(0);
       case 'open-today-modal': return openTodayModal();
       case 'close': {
-        const m = document.querySelector('.modal');
-        if (m) UI.closeDim(m.closest('.modal-dim'));
+        // Close the TOPMOST modal (so a nested "+ Add New" / "Register person" modal
+        // dismisses itself, not the form underneath it).
+        const dims = document.querySelectorAll('.modal-dim');
+        const top = dims[dims.length - 1];
+        if (top) { const cb = top._onDismiss; UI.closeDim(top); if (cb) cb(); }
         return;
       }
+
+      // Editable vocabulary dropdowns
+      case 'vocab-add': return openAddVocab(el.dataset.cat, el.dataset.target, el.dataset.label);
+      case 'vocab-save': return vocabSave(el.dataset.cat, el.dataset.target);
+
+      // Free-list dropdowns (Lab / Group, Department) — "+ Add New"
+      case 'list-add': return openAddListValue(el.dataset.target, el.dataset.title);
+      case 'list-save': return listAddSave(el.dataset.target);
+
+      // Booking: register a new person without leaving the booking form
+      case 'bk-add-person': return bookingAddPerson();
 
       // Projects CRUD
       case 'new-project': return newProject();
@@ -719,12 +881,14 @@
       case 'i-edit-save': return iEditSave(el.dataset.id);
       case 'delete-instrument': return deleteInstrument(el.dataset.id);
 
-      // Meetings CRUD
-      case 'add-meeting': return addMeeting();
-      case 'm-save': return mSave();
-      case 'edit-meeting': return editMeeting(el.dataset.id);
-      case 'm-edit-save': return mEditSave(el.dataset.id);
+      // Bookings (Meetings) CRUD
+      case 'new-booking': return newBooking(el.dataset.date, ctx.project);
+      case 'add-meeting': return newBooking(UI.today(), ctx.project);
+      case 'booking-save': return bookingSave();
+      case 'edit-booking': return editBooking(el.dataset.id);
+      case 'booking-edit-save': return bookingEditSave(el.dataset.id);
       case 'meeting-del': return deleteMeeting(el.dataset.id);
+      case 'booking-del': return deleteBookingFromModal(el.dataset.id);
 
       // Custom KV Fields CRUD
       case 'kv-add': return addKV();
@@ -788,46 +952,25 @@
 
         <!-- Inline New Person Section -->
         <div class="card" style="background:var(--surface-2);border-style:dashed;padding:12px">
-          <div class="row mb-8">
-            <span style="font-weight:600;font-size:12.5px">${ic('users')} Or Register New Person / PI Now</span>
-          </div>
+          <div class="reg-person-head"><span class="reg-person-avatar">${ic('user')}</span><span style="font-weight:600;font-size:12.5px">Or Register New Person / PI Now</span></div>
           <div class="grid cols-2">
             <div class="field"><label>First Name</label><input class="input" id="np-p-first" placeholder="e.g. Elena" /></div>
             <div class="field"><label>Last Name</label><input class="input" id="np-p-last" placeholder="e.g. Rostova" /></div>
           </div>
           <div class="grid cols-2 mt-8">
-            <div class="field"><label>Position / Role</label><select class="input" id="np-p-type">${C.PERSON_TYPES.map((s) => `<option value="${s}" ${s === 'PI' ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
-            <div class="field"><label>Lab / Group / Company</label><input class="input" id="np-p-org" list="org-list" placeholder="e.g. Molecular Neurobiology Lab" /></div>
+            ${vocabField({ category: 'PERSON_TYPES', id: 'np-p-type', label: 'Position / Role', selected: 'PI' })}
+            ${listPickerField({ id: 'np-p-org', label: 'Lab / Group / Company', values: orgNames(), modalTitle: 'Lab / Group / Company' })}
           </div>
           <div class="field mt-8"><label>Email Address</label><input type="email" class="input" id="np-p-email" placeholder="elena.rostova@institute.org" /></div>
         </div>
 
-        ${getOrgDatalist()}
 
         <div class="grid cols-2">
-          <div class="field">
-            <label>Modality / Technique</label>
-            <select class="input" id="np-modality">
-              <option value="">-- Select Modality --</option>
-              ${C.MODALITY.map((m) => `<option value="${m}">${m}</option>`).join('')}
-            </select>
-          </div>
-          <div class="field">
-            <label>Funding Source</label>
-            <select class="input" id="np-funding">
-              <option value="">-- Select Funding --</option>
-              ${C.FUNDING.map((f) => `<option value="${f}">${f}</option>`).join('')}
-            </select>
-          </div>
+          ${vocabField({ category: 'MODALITY', id: 'np-modality', label: 'Modality / Technique', placeholder: '-- Select Modality --' })}
+          ${vocabField({ category: 'FUNDING', id: 'np-funding', label: 'Funding Source', placeholder: '-- Select Funding --' })}
         </div>
         <div class="grid cols-2">
-          <div class="field">
-            <label>Sample Type</label>
-            <select class="input" id="np-sample">
-              <option value="">-- Select Sample --</option>
-              ${C.SAMPLE.map((s) => `<option value="${s}">${s}</option>`).join('')}
-            </select>
-          </div>
+          ${vocabField({ category: 'SAMPLE', id: 'np-sample', label: 'Sample Type', placeholder: '-- Select Sample --' })}
           <div class="field">
             <label>Risk / Status Flags</label>
             <div class="chips">
@@ -936,17 +1079,11 @@
               ${pis.map((pe) => `<option value="${pe.id}" ${pe.id === activePiId ? 'selected' : ''}>${esc(pe.name)} (${pe.type}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
             </select>
           </div>
-          <div class="field">
-            <label>Modality / Technique</label>
-            <select class="input" id="ep-modality">
-              <option value="">-- Select Modality --</option>
-              ${C.MODALITY.map((m) => `<option value="${m}" ${m === p.modality ? 'selected' : ''}>${m}</option>`).join('')}
-            </select>
-          </div>
+          ${vocabField({ category: 'MODALITY', id: 'ep-modality', label: 'Modality / Technique', selected: p.modality, placeholder: '-- Select Modality --' })}
         </div>
         <div class="grid cols-2">
-          <div class="field"><label>Funding Source</label><select class="input" id="ep-funding"><option value="">-- Select Funding --</option>${C.FUNDING.map((f) => `<option value="${f}" ${f === p.funding ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
-          <div class="field"><label>Sample Type</label><select class="input" id="ep-sample"><option value="">-- Select Sample --</option>${C.SAMPLE.map((s) => `<option value="${s}" ${s === p.sample ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+          ${vocabField({ category: 'FUNDING', id: 'ep-funding', label: 'Funding Source', selected: p.funding, placeholder: '-- Select Funding --' })}
+          ${vocabField({ category: 'SAMPLE', id: 'ep-sample', label: 'Sample Type', selected: p.sample, placeholder: '-- Select Sample --' })}
         </div>
         <div class="field">
           <label>Risk / Status Flags</label>
@@ -1213,12 +1350,14 @@
       <div class="body"><div class="stack">
         <div class="field"><label>Full Name *</label><input class="input" id="p-name" placeholder="e.g. Dr. Jane Doe" /></div>
         <div class="grid cols-2">
-          <div class="field"><label>Position / Role</label><select class="input" id="p-type">${C.PERSON_TYPES.map((s) => `<option value="${s}">${s}</option>`).join('')}</select></div>
-          <div class="field"><label>Lab / Group / Company</label><input class="input" id="p-org" list="org-list" placeholder="e.g. Chen Lab, Genentech, Pathology" /></div>
+          ${vocabField({ category: 'PERSON_TYPES', id: 'p-type', label: 'Position / Role' })}
+          ${listPickerField({ id: 'p-org', label: 'Lab / Group / Company', values: orgNames(), modalTitle: 'Lab / Group / Company' })}
         </div>
-        ${getOrgDatalist()}
-        <div class="field"><label>Email Address</label><input type="email" class="input" id="p-email" placeholder="jane.doe@university.edu" /></div>
-        <div class="field"><label>Department &amp; Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
+        <div class="grid cols-2">
+          ${listPickerField({ id: 'p-dept', label: 'Department', values: deptNames(), modalTitle: 'Department' })}
+          <div class="field"><label>Email Address</label><input type="email" class="input" id="p-email" placeholder="jane.doe@university.edu" /></div>
+        </div>
+        <div class="field"><label>Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1227,15 +1366,19 @@
   }
 
   function pSave() {
-    const m = document.querySelector('.modal');
+    // addPerson() can be opened stacked on another modal (e.g. the booking form) — operate on
+    // the TOPMOST modal, not the first one in the DOM.
+    const dims = document.querySelectorAll('.modal-dim');
+    const m = dims[dims.length - 1].querySelector('.modal');
     const name = m.querySelector('#p-name').value.trim();
     if (!name) { UI.toast('Name required', 'error'); return; }
     const type = m.querySelector('#p-type').value;
     const org = m.querySelector('#p-org').value.trim();
+    const dept = m.querySelector('#p-dept').value.trim();
     const email = m.querySelector('#p-email').value.trim();
     const note = m.querySelector('#p-note').value.trim();
 
-    DB.run('INSERT INTO people (name, type, organization, email, note) VALUES (?,?,?,?,?)', [name, type, org, email, note]);
+    DB.run('INSERT INTO people (name, type, organization, department, email, note) VALUES (?,?,?,?,?,?)', [name, type, org, dept, email, note]);
     const newPerson = DB.row('SELECT last_insert_rowid() as id');
     const newPersonId = newPerson ? newPerson.id : null;
 
@@ -1260,12 +1403,14 @@
       <div class="body"><div class="stack">
         <div class="field"><label>Full Name *</label><input class="input" id="pe-name" value="${esc(p.name)}" /></div>
         <div class="grid cols-2">
-          <div class="field"><label>Position / Role</label><select class="input" id="pe-type">${C.PERSON_TYPES.map((s) => `<option value="${s}" ${s === p.type ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
-          <div class="field"><label>Lab / Group / Company</label><input class="input" id="pe-org" list="org-list" value="${esc(p.organization || '')}" /></div>
+          ${vocabField({ category: 'PERSON_TYPES', id: 'pe-type', label: 'Position / Role', selected: p.type })}
+          ${listPickerField({ id: 'pe-org', label: 'Lab / Group / Company', values: orgNames(), selected: p.organization || '', modalTitle: 'Lab / Group / Company' })}
         </div>
-        ${getOrgDatalist()}
-        <div class="field"><label>Email Address</label><input type="email" class="input" id="pe-email" value="${esc(p.email || '')}" /></div>
-        <div class="field"><label>Department &amp; Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
+        <div class="grid cols-2">
+          ${listPickerField({ id: 'pe-dept', label: 'Department', values: deptNames(), selected: p.department || '', modalTitle: 'Department' })}
+          <div class="field"><label>Email Address</label><input type="email" class="input" id="pe-email" value="${esc(p.email || '')}" /></div>
+        </div>
+        <div class="field"><label>Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1279,10 +1424,11 @@
     if (!name) { UI.toast('Name required', 'error'); return; }
     const type = m.querySelector('#pe-type').value;
     const org = m.querySelector('#pe-org').value.trim();
+    const dept = m.querySelector('#pe-dept').value.trim();
     const email = m.querySelector('#pe-email').value.trim();
     const note = m.querySelector('#pe-note').value.trim();
 
-    DB.run('UPDATE people SET name=?, type=?, organization=?, email=?, note=? WHERE id=?', [name, type, org, email, note, id]);
+    DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=? WHERE id=?', [name, type, org, dept, email, note, id]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Person updated');
     refresh();
@@ -1304,9 +1450,12 @@
       <div class="head"><span class="modal-title">${ic('cpu')} Add Core Instrument</span></div>
       <div class="body"><div class="stack">
         <div class="field"><label>Instrument Name *</label><input class="input" id="i-name" placeholder="e.g. Zeiss LSM 980 with Airyscan 2" /></div>
-        <div class="field"><label>Modality / Technique</label><select class="input" id="i-kind">${C.MODALITY.map((s) => `<option value="${s}">${s}</option>`).join('')}</select></div>
+        ${vocabField({ category: 'MODALITY', id: 'i-kind', label: 'Modality / Technique' })}
         <div class="field"><label>Operational Status</label><select class="input" id="i-status">${C.INSTRUMENT_STATUS.map((s) => `<option value="${s}">${s}</option>`).join('')}</select></div>
-        <div class="field"><label>Location / Configuration Notes</label><input class="input" id="i-note" placeholder="Room 204, 405/488/561/633nm lasers" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Location</label><input class="input" id="i-location" placeholder="e.g. Room 204" /></div>
+          <div class="field"><label>Configuration Notes</label><input class="input" id="i-note" placeholder="e.g. 405/488/561/633nm lasers" /></div>
+        </div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1318,7 +1467,8 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#i-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('INSERT INTO instruments (name, kind, status, note) VALUES (?,?,?,?)', [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-note').value.trim()]);
+    DB.run('INSERT INTO instruments (name, kind, status, location, note) VALUES (?,?,?,?,?)',
+      [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim()]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument added');
     refresh();
@@ -1332,9 +1482,12 @@
       <div class="head"><span class="modal-title">${ic('edit')} Edit Instrument</span></div>
       <div class="body"><div class="stack">
         <div class="field"><label>Instrument Name *</label><input class="input" id="ie-name" value="${esc(inst.name)}" /></div>
-        <div class="field"><label>Modality / Technique</label><select class="input" id="ie-kind">${C.MODALITY.map((s) => `<option value="${s}" ${s === inst.kind ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+        ${vocabField({ category: 'MODALITY', id: 'ie-kind', label: 'Modality / Technique', selected: inst.kind })}
         <div class="field"><label>Operational Status</label><select class="input" id="ie-status">${C.INSTRUMENT_STATUS.map((s) => `<option value="${s}" ${s === inst.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
-        <div class="field"><label>Location / Configuration Notes</label><input class="input" id="ie-note" value="${esc(inst.note || '')}" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Location</label><input class="input" id="ie-location" value="${esc(inst.location || '')}" /></div>
+          <div class="field"><label>Configuration Notes</label><input class="input" id="ie-note" value="${esc(inst.note || '')}" /></div>
+        </div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1346,7 +1499,8 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#ie-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('UPDATE instruments SET name=?, kind=?, status=?, note=? WHERE id=?', [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-note').value.trim(), id]);
+    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=? WHERE id=?',
+      [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(), id]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
     refresh();
@@ -1381,10 +1535,7 @@
             ${available.length ? available.map((p) => `<option value="${p.id}">${esc(p.name)} (${p.type}${p.organization ? ' • ' + esc(p.organization) : ''})</option>`).join('') : '<option value="">-- No available unregistered people --</option>'}
           </select>
         </div>
-        <div class="field">
-          <label>Role on Project</label>
-          <input class="input" id="app-person-role" placeholder="e.g. Lead Analyst, Postdoc Fellow, Primary Operator" />
-        </div>
+        ${vocabField({ category: 'ROLE', id: 'app-person-role', label: 'Role on Project', placeholder: '-- Select Role --' })}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1450,122 +1601,321 @@
     refresh();
   }
 
-  /* ---------------- Meetings CRUD with Inline Attendees & Labs ---------------- */
-  function addMeeting() {
-    const allPeople = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name');
+  /* ---------------- Bookings (Meetings) CRUD — any date, any object, optional project ---------------- */
 
-    UI.openModal(`
-      <div class="head"><span class="modal-title">${ic('calendar')} Log Consultation / Sync Meeting</span></div>
-      <div class="body"><div class="stack">
-        <div class="field"><label>Meeting Title *</label><input class="input" id="m-title" placeholder="e.g. Initial Image Analysis Pipeline Sync" /></div>
-        <div class="field"><label>Date</label><input type="date" class="input" id="m-date" value="${UI.today()}" /></div>
-        
-        <div class="field">
-          <label>Select Attendees (Known People &amp; Labs)</label>
-          <div class="chips">
-            ${allPeople.map((p) => `<span class="chip" data-att-person="${esc(p.name)}${p.organization ? ' (' + esc(p.organization) + ')' : ''}">${esc(p.name)} <span style="opacity:0.75">${p.organization ? '• ' + esc(p.organization) : '(' + p.type + ')'}</span></span>`).join('')}
-          </div>
+  /* People / instrument options for the booking token-pickers.
+     `meta` shows next to the dropdown option; `tip` is the hover tooltip
+     (person → role, instrument → modality). */
+  function bkPeopleItems() {
+    return DB.rows('SELECT id, name, type, organization, department FROM people ORDER BY name')
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        meta: [r.organization, r.department].filter(Boolean).join(' · ') || r.type || '',
+        tip: r.type || 'Person'
+      }));
+  }
+  function bkInstItems() {
+    return DB.rows('SELECT id, name, kind FROM instruments ORDER BY name')
+      .map((r) => ({ id: r.id, name: r.name, meta: r.kind || '', tip: r.kind || 'Instrument' }));
+  }
+
+  function tokenPickerField(kind, label, addLabel) {
+    return `<div class="field"><label>${label}</label>
+      <div class="token-picker" data-kind="${kind}" data-add="${esc(addLabel)}">
+        <div class="token-list"></div>
+        <select class="input token-select"></select>
+      </div></div>`;
+  }
+  function rteField(id) {
+    return `<div class="field"><label>Notes</label>
+      <div class="rte">
+        <div class="rte-toolbar">
+          <button type="button" class="rte-btn" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button type="button" class="rte-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button type="button" class="rte-btn" data-cmd="insertUnorderedList" title="Bullet list">&bull;</button>
+          <select class="rte-size" title="Font size">
+            <option value="">Size</option>
+            <option value="0.85em">Small</option>
+            <option value="1em">Normal</option>
+            <option value="1.25em">Large</option>
+            <option value="1.6em">Huge</option>
+          </select>
         </div>
+        <div class="rte-editor input" id="${id}" contenteditable="true" data-placeholder="Short notes, bullet points, action context…"></div>
+      </div></div>`;
+  }
 
-        <div class="field">
-          <label>Attendees List (Edit or add manual names)</label>
-          <input class="input" id="m-att" placeholder="Selected attendees will appear here, or type comma-separated..." />
-        </div>
+  /* Token-picker: <select> of not-yet-picked items + accumulating removable badges.
+     Source of truth is the badge DOM; `wrap._setSelected(ids)` seeds it (edit mode). */
+  function mountTokenPicker(m, kind, items) {
+    const wrap = m.querySelector(`.token-picker[data-kind="${kind}"]`);
+    if (!wrap) return;
+    const list = wrap.querySelector('.token-list');
+    const sel = wrap.querySelector('.token-select');
+    const addLabel = wrap.dataset.add || '+ Add…';
+    const byId = new Map(items.map((it) => [String(it.id), it]));
+    const selected = new Set();
 
-        <!-- Inline Quick Add Person for Meeting -->
-        <div class="card" style="background:var(--surface-2);border-style:dashed;padding:12px">
-          <div class="row mb-8"><span style="font-weight:600;font-size:12.5px">${ic('users')} Or Register New Attendee &amp; Lab</span></div>
-          <div class="grid cols-2">
-            <div class="field"><label>Name</label><input class="input" id="m-new-name" placeholder="e.g. Alex Rivera" /></div>
-            <div class="field"><label>Lab / Group</label><input class="input" id="m-new-org" list="org-list" placeholder="e.g. Neuroscience Lab" /></div>
-          </div>
-        </div>
+    function render() {
+      list.innerHTML = [...selected].map((id) => {
+        const it = byId.get(id);
+        if (!it) return '';
+        return `<span class="token" data-id="${id}" data-tooltip="${esc(it.tip)}">` +
+          `<button type="button" class="token-x" aria-label="Remove ${esc(it.name)}">&times;</button>${esc(it.name)}</span>`;
+      }).join('');
+      const avail = items.filter((it) => !selected.has(String(it.id)));
+      sel.innerHTML = `<option value="">${esc(addLabel)}</option>` +
+        avail.map((it) => `<option value="${it.id}">${esc(it.name)}${it.meta ? ' — ' + esc(it.meta) : ''}</option>`).join('');
+      sel.value = '';
+    }
+    sel.addEventListener('change', () => { if (sel.value) { selected.add(sel.value); render(); } });
+    list.addEventListener('click', (e) => {
+      const x = e.target.closest('.token-x');
+      if (!x) return;
+      selected.delete(x.parentElement.dataset.id);
+      render();
+    });
+    wrap._setSelected = (ids) => {
+      selected.clear();
+      (ids || []).forEach((id) => { if (byId.has(String(id))) selected.add(String(id)); });
+      render();
+    };
+    // Add a brand-new option (e.g. a person just registered from the nested modal) and select it.
+    wrap._addItem = (it) => {
+      if (!byId.has(String(it.id))) { items.push(it); byId.set(String(it.id), it); }
+      selected.add(String(it.id));
+      render();
+    };
+    render();
+  }
+  function readTokenIds(m, kind) {
+    return [...m.querySelectorAll(`.token-picker[data-kind="${kind}"] .token-list .token`)].map((t) => Number(t.dataset.id));
+  }
 
-        ${getOrgDatalist()}
-
-        <div class="field"><label>Discussion Notes</label><textarea class="input" id="m-note" placeholder="Consultation notes, requirements, experimental design..."></textarea></div>
-        <div class="field"><label>Next Steps / Action Items</label><input class="input" id="m-act" placeholder="e.g. Transfer RAW Nikon ND2 files to facility NAS" /></div>
-      </div></div>
-      <div class="foot">
-        <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="m-save">Log Meeting</button>
-      </div>`, (modalEl) => {
-      const attInput = modalEl.querySelector('#m-att');
-      modalEl.querySelectorAll('[data-att-person]').forEach((chip) => {
-        chip.onclick = () => {
-          chip.classList.toggle('on');
-          const selected = [...modalEl.querySelectorAll('[data-att-person].on')].map((c) => c.dataset.attPerson);
-          attInput.value = selected.join(', ');
-        };
-      });
+  /* Register a new person from inside the booking modal — reuses the standard addPerson()
+     modal (which itself has a "+ Add New" lab picker) and drops the result straight into the
+     People picker as a selected badge, so several new people can be added in a row. */
+  function bookingAddPerson() {
+    const bookingModal = document.querySelector('.modal-dim:last-of-type .modal') || document.querySelector('.modal');
+    addPerson((newPersonId) => {
+      if (newPersonId == null) return;
+      const p = DB.row('SELECT id, name, type, organization, department FROM people WHERE id=?', [newPersonId]);
+      if (!p) return;
+      const picker = bookingModal && bookingModal.querySelector('.token-picker[data-kind="owner"]');
+      if (picker && picker._addItem) {
+        picker._addItem({
+          id: p.id, name: p.name, tip: p.type || 'Person',
+          meta: [p.organization, p.department].filter(Boolean).join(' · ') || p.type || ''
+        });
+      } else {
+        refresh();
+      }
     });
   }
 
-  function mSave() {
-    const m = document.querySelector('.modal');
-    const title = m.querySelector('#m-title').value.trim();
-    if (!title) { UI.toast('Meeting title required', 'error'); return; }
-
-    let attendees = m.querySelector('#m-att').value.trim();
-    const newName = m.querySelector('#m-new-name').value.trim();
-    const newOrg = m.querySelector('#m-new-org').value.trim();
-
-    if (newName) {
-      DB.run('INSERT INTO people (name, type, organization) VALUES (?,?,?)', [newName, 'Researcher', newOrg]);
-      const formatted = `${newName}${newOrg ? ' (' + newOrg + ')' : ''}`;
-      attendees = attendees ? `${attendees}, ${formatted}` : formatted;
-      UI.toast(`Registered ${newName}`);
-    }
-
-    const date = m.querySelector('#m-date').value || UI.today();
-    const note = m.querySelector('#m-note').value.trim();
-    const actions = m.querySelector('#m-act').value.trim();
-
-    DB.run('INSERT INTO meetings (project_id, title, date, attendees, note, actions) VALUES (?,?,?,?,?,?)', [ctx.project, title, date, attendees, note, actions]);
-    UI.closeDim(m.closest('.modal-dim'));
-    UI.toast('Meeting logged');
-    refresh();
+  /* Minimal rich-text editor for meeting notes. Uses execCommand (deprecated but universally
+     supported, fine for a local offline app); output is whitelisted by UI.sanitizeHtml on save. */
+  function mountRichText(m, id) {
+    const editor = m.querySelector('#' + id);
+    if (!editor) return;
+    const bar = editor.closest('.rte').querySelector('.rte-toolbar');
+    bar.querySelectorAll('.rte-btn').forEach((b) => {
+      b.addEventListener('mousedown', (e) => e.preventDefault());     // keep the selection
+      b.addEventListener('click', () => { editor.focus(); document.execCommand(b.dataset.cmd, false, null); });
+    });
+    const sizeSel = bar.querySelector('.rte-size');
+    sizeSel.addEventListener('change', () => {
+      const v = sizeSel.value;
+      sizeSel.value = '';
+      if (!v) return;
+      editor.focus();
+      applyFontSize(editor, v);
+    });
+    editor.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'b') { e.preventDefault(); document.execCommand('bold'); }
+      else if (k === 'i') { e.preventDefault(); document.execCommand('italic'); }
+    });
+    editor.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const t = (e.clipboardData || window.clipboardData).getData('text/plain');
+      document.execCommand('insertText', false, t);
+    });
+  }
+  function applyFontSize(editor, value) {
+    const s = window.getSelection();
+    if (!s || s.isCollapsed || !s.rangeCount) return;
+    document.execCommand('fontSize', false, '7');
+    editor.querySelectorAll('font[size="7"]').forEach((f) => {
+      const span = document.createElement('span');
+      span.style.fontSize = value;
+      while (f.firstChild) span.appendChild(f.firstChild);
+      f.replaceWith(span);
+    });
+  }
+  function readNote(m, id) {
+    return UI.sanitizeHtml(m.querySelector('#' + id).innerHTML);
   }
 
-  function editMeeting(id) {
-    const mt = DB.row('SELECT * FROM meetings WHERE id=?', [id]);
-    if (!mt) return;
+  function mountBookingModal(m, opts) {
+    mountTokenPicker(m, 'owner', bkPeopleItems());
+    mountTokenPicker(m, 'inst', bkInstItems());
+    mountRichText(m, opts.noteId);
+    if (opts.owners) m.querySelector('.token-picker[data-kind="owner"]')._setSelected(opts.owners);
+    if (opts.insts) m.querySelector('.token-picker[data-kind="inst"]')._setSelected(opts.insts);
+    if (opts.note) m.querySelector('#' + opts.noteId).innerHTML = UI.sanitizeHtml(opts.note);
+  }
+
+  function newBooking(date, projectId = null) {
+    const allProjects = DB.rows('SELECT id, title FROM projects ORDER BY title');
+    const pid = projectId != null ? Number(projectId) : null;
 
     UI.openModal(`
-      <div class="head"><span class="modal-title">${ic('edit')} Edit Meeting Record</span></div>
+      <div class="head"><span class="modal-title">${ic('calendar')} New Booking</span></div>
       <div class="body"><div class="stack">
-        <div class="field"><label>Meeting Title *</label><input class="input" id="mte-title" value="${esc(mt.title)}" /></div>
-        <div class="field"><label>Date</label><input type="date" class="input" id="mte-date" value="${mt.date || ''}" /></div>
-        <div class="field"><label>Attendees</label><input class="input" id="mte-att" value="${esc(mt.attendees || '')}" /></div>
-        <div class="field"><label>Discussion Notes</label><textarea class="input" id="mte-note">${esc(mt.note || '')}</textarea></div>
-        <div class="field"><label>Next Steps / Action Items</label><input class="input" id="mte-act" value="${esc(mt.actions || '')}" /></div>
+        <div class="field"><label>Title *</label><input class="input" id="bk-title" placeholder="e.g. Initial Image Analysis Pipeline Sync" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Date</label><input type="date" class="input" id="bk-date" value="${esc(date || UI.today())}" /></div>
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="bk-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${allProjects.map((p) => `<option value="${p.id}" ${pid === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
+        <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
+        ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
+
+        ${rteField('bk-note')}
+        <div class="field"><label>Next Steps / Action Items</label><input class="input" id="bk-act" placeholder="e.g. Transfer RAW Nikon ND2 files to facility NAS" /></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="m-edit-save" data-id="${mt.id}">Save Changes</button>
-      </div>`);
+        <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note' }));
   }
 
-  function mEditSave(id) {
+  function bookingSave() {
     const m = document.querySelector('.modal');
-    const title = m.querySelector('#mte-title').value.trim();
+    const title = m.querySelector('#bk-title').value.trim();
+    if (!title) { UI.toast('Booking title required', 'error'); return; }
+
+    const date = m.querySelector('#bk-date').value || UI.today();
+    const projectVal = m.querySelector('#bk-project').value;
+    const projectId = projectVal ? Number(projectVal) : null;
+    const note = readNote(m, 'bk-note');
+    const actions = m.querySelector('#bk-act').value.trim();
+
+    const ownerIds = readTokenIds(m, 'owner');
+    const instIds = readTokenIds(m, 'inst');
+
+    const attendees = ownerIds.length
+      ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
+      : '';
+
+    DB.run('INSERT INTO meetings (project_id, title, date, attendees, link, note, actions) VALUES (?,?,?,?,?,?,?)', [projectId, title, date, attendees, '', note, actions]);
+    const inserted = DB.row('SELECT last_insert_rowid() as id');
+    const mid = inserted ? inserted.id : null;
+    if (mid) {
+      ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, oid]));
+      instIds.forEach((iid) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [mid, iid]));
+    }
+
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Booking saved');
+    refresh();
+  }
+
+  function editBooking(id) {
+    const mt = DB.row('SELECT * FROM meetings WHERE id=?', [id]);
+    if (!mt) return;
+    const allProjects = DB.rows('SELECT id, title FROM projects ORDER BY title');
+    const currentOwners = DB.rows('SELECT person_id FROM meeting_people WHERE meeting_id=?', [id]).map((r) => r.person_id);
+    const currentInsts = DB.rows('SELECT instrument_id FROM meeting_instruments WHERE meeting_id=?', [id]).map((r) => r.instrument_id);
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Booking</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Title *</label><input class="input" id="bke-title" value="${esc(mt.title)}" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Date</label><input type="date" class="input" id="bke-date" value="${mt.date || ''}" /></div>
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="bke-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${allProjects.map((p) => `<option value="${p.id}" ${mt.project_id === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
+        <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
+        ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
+
+        ${rteField('bke-note')}
+        <div class="field"><label>Next Steps / Action Items</label><input class="input" id="bke-act" value="${esc(mt.actions || '')}" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-danger" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('trash')} Delete</button>
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="booking-edit-save" data-id="${mt.id}">Save Changes</button>
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bke-note', owners: currentOwners, insts: currentInsts, note: mt.note }));
+  }
+
+  function bookingEditSave(id) {
+    const m = document.querySelector('.modal');
+    const title = m.querySelector('#bke-title').value.trim();
     if (!title) { UI.toast('Title required', 'error'); return; }
 
-    const date = m.querySelector('#mte-date').value || null;
-    const attendees = m.querySelector('#mte-att').value.trim();
-    const note = m.querySelector('#mte-note').value.trim();
-    const actions = m.querySelector('#mte-act').value.trim();
+    const date = m.querySelector('#bke-date').value || null;
+    const projectVal = m.querySelector('#bke-project').value;
+    const projectId = projectVal ? Number(projectVal) : null;
+    const note = readNote(m, 'bke-note');
+    const actions = m.querySelector('#bke-act').value.trim();
 
-    DB.run("UPDATE meetings SET title=?, date=?, attendees=?, note=?, actions=?, updated_at=datetime('now') WHERE id=?", [title, date, attendees, note, actions, id]);
+    const ownerIds = readTokenIds(m, 'owner');
+    const instIds = readTokenIds(m, 'inst');
+    const attendees = ownerIds.length
+      ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
+      : '';
+
+    DB.run("UPDATE meetings SET title=?, date=?, project_id=?, attendees=?, note=?, actions=?, updated_at=datetime('now') WHERE id=?",
+      [title, date, projectId, attendees, note, actions, id]);
+
+    DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
+    DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
+    ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [id, oid]));
+    instIds.forEach((iid) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [id, iid]));
+
     UI.closeDim(m.closest('.modal-dim'));
-    UI.toast('Meeting updated');
+    UI.toast('Booking updated');
     refresh();
   }
 
   function deleteMeeting(id) {
+    // foreign_keys enforcement is off for this app's sql.js connection, so ON DELETE CASCADE
+    // on meeting_people/meeting_instruments never actually fires — clean them up explicitly.
+    DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
+    DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meetings WHERE id=?', [id]);
-    UI.toast('Meeting removed');
+    UI.toast('Booking removed');
     refresh();
+  }
+
+  // A booking with no project (facility-wide) only ever appears on the calendar / in its own
+  // edit modal — unlike a project-attached one, it has no list row with its own delete icon —
+  // so the edit modal needs its own delete entry point, confirmed and closing itself on delete.
+  async function deleteBookingFromModal(id) {
+    const ok = await UI.confirmModal('Delete Booking', 'Are you sure you want to delete this booking? This cannot be undone.', { danger: true });
+    if (!ok) return;
+    deleteMeeting(id);
+    const dim = document.querySelector('.modal-dim');
+    if (dim) UI.closeDim(dim);
   }
 
   /* ---------------- Custom Key-Value Fields ---------------- */
@@ -1742,7 +2092,7 @@
     const mtgsToday = DB.rows(`
       SELECT m.*, p.title as project_title, p.id as project_id
       FROM meetings m
-      JOIN projects p ON p.id = m.project_id
+      LEFT JOIN projects p ON p.id = m.project_id
       WHERE m.date = ?
       ORDER BY m.id ASC`, [todayStr]);
 
@@ -1792,17 +2142,17 @@
           <div class="card">
             <div class="row mb-8">
               <span class="card-title grow">${ic('calendar')} Consultations &amp; Syncs Today (${mtgsToday.length})</span>
-              ${ctx.project ? `<button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log</button>` : ''}
+              <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log</button>
             </div>
             <div class="card-body">
               ${mtgsToday.length ? mtgsToday.map((m) => `
                 <div class="meeting-box mb-8">
                   <div class="row">
-                    <span class="font-medium grow" style="cursor:pointer" data-goto="project" data-id="${m.project_id}">${esc(m.title)} (${esc(m.project_title)})</span>
-                    <button class="btn btn-ghost btn-sm" data-act="edit-meeting" data-id="${m.id}">${ic('edit')}</button>
+                    <span class="font-medium grow" ${m.project_id ? `style="cursor:pointer" data-goto="project" data-id="${m.project_id}"` : ''}>${esc(m.title)}${m.project_title ? ' (' + esc(m.project_title) + ')' : ''}</span>
+                    <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}">${ic('edit')}</button>
                   </div>
                   ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
-                  ${m.note ? `<div class="small muted mt-8 whitespace-pre">${esc(m.note)}</div>` : ''}
+                  ${m.note ? `<div class="small muted mt-8 rte-content">${UI.noteHtml(m.note)}</div>` : ''}
                   ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
                 </div>`).join('') : '<div class="faint small">No consultation meetings scheduled for today.</div>'}
             </div>
@@ -1851,6 +2201,9 @@
     const firstProj = DB.row('SELECT id FROM projects ORDER BY id ASC LIMIT 1');
     const pid = firstProj ? firstProj.id : 1;
 
+    // Modal showcases open a real dialog so you see the actual form; the tour dismisses it
+    // automatically when you advance. Milestone / custom-field / file dialogs are opened while
+    // the project is in context (the steps before them route to the project view).
     UI.startTour([
       {
         sel: '#view',
@@ -1861,7 +2214,7 @@
       {
         sel: '#app-sidebar',
         title: '2. Sidebar Navigation & Collapse',
-        body: 'Quickly switch between Projects, People & Labs, Core Instruments, Calendar, and Settings. Click the collapse icon at top to expand your working canvas.'
+        body: 'Quickly switch between Projects, People &amp; Labs, Core Instruments, Calendar, and Settings. Click the collapse icon at top to expand your working canvas.'
       },
       {
         sel: '#view',
@@ -1870,50 +2223,100 @@
         body: 'Search across titles, PIs, tags, and grant numbers. Filter projects by Modality (Multiphoton, STED, Lightsheet), Lifecycle Status, and Priority level.'
       },
       {
+        route: 'projects',
+        action: () => newProject(),
+        sel: '.modal',
+        title: '4. New Project Dialog',
+        body: 'Initiate a project: title, status, priority, and PI — or register a brand-new PI inline. Editable dropdowns (Modality, Funding, Sample) each carry a "+ Add New" option that saves a facility-wide term on the spot.'
+      },
+      {
         sel: '#view',
         route: 'project',
         projectId: pid,
-        title: '4. Project Details & Grant Metadata',
+        title: '5. Project Details & Grant Metadata',
         body: 'Each project consolidates Principal Investigator affiliations, funding accounts, optical modalities, tissue/sample conditions, and progress metrics.'
       },
       {
         sel: '.ms',
-        title: '5. Milestones & Timeline Deliverables',
+        title: '6. Milestones & Timeline Deliverables',
         body: 'Track project milestones with status indicators (done, in-progress, pending, overdue), due dates, assigned researcher owners, and required microscopes.'
       },
       {
+        action: () => addMilestone(),
+        sel: '.modal',
+        title: '7. Add Milestone Dialog',
+        body: 'Add a deliverable with a due date, then assign responsible people and the instruments it needs. Edits reuse this same dialog.'
+      },
+      {
         sel: '.grid.cols-2',
-        title: '6. Collaborators, Hardware & Meetings',
-        body: 'Log team member roles, linked instruments, consultation meeting minutes with action items, protocol links, and custom metadata fields (e.g., Laser Wavelength, BSL level).'
+        title: '8. Collaborators, Hardware & Meetings',
+        body: 'Log team member roles, linked instruments, consultation meeting minutes with action items, and custom metadata fields (e.g. Laser Wavelength, BSL level).'
+      },
+      {
+        action: () => addKV(),
+        sel: '.modal',
+        title: '9. Custom Metadata Field Dialog',
+        body: 'Attach any key/value your facility tracks — laser lines, objective NA, biosafety level, grant sub-account — as a custom field on the project.'
+      },
+      {
+        action: () => addFile(),
+        sel: '.modal',
+        title: '10. Attach File or Link Dialog',
+        body: 'Link a protocol, a dataset on the NAS, or any external URL. Links render as tidy buttons on the project page.'
       },
       {
         sel: '.row button[data-act="export-pdf"]',
-        title: '7. One-Click Report Generation',
-        body: 'Export official documentation in 1 click: Multi-page paginated PDF reports (with headers and page numbers), Word (.docx) documents, and Excel (.xlsx) spreadsheets.'
+        title: '11. One-Click Report Generation',
+        body: 'Export official documentation in 1 click: multi-page paginated PDF reports (with headers and page numbers), Word (.docx) documents, and Excel (.xlsx) spreadsheets.'
       },
       {
         sel: '#view',
         route: 'people',
-        title: '8. People, Labs & Researchers Directory',
-        body: 'Centralized registry of Principal Investigators, postdocs, students, and facility staff with organization affiliations, emails, and active project counts.'
+        title: '12. People, Labs & Researchers Directory',
+        body: 'Centralized registry of PIs, postdocs, students, and facility staff — with separate Lab / Group and Department columns, emails, and active project counts.'
+      },
+      {
+        action: () => addPerson(),
+        sel: '.modal',
+        title: '13. Register Person Dialog',
+        body: 'Register a researcher: Position / Role plus separate Lab / Group and Department dropdowns, each with a quick "+ Add New" mini-dialog for values you don\'t have yet.'
       },
       {
         sel: '#view',
         route: 'instruments',
-        title: '9. Core Instruments Inventory',
-        body: 'Monitor microscope hardware status (Available, In-use, Maintenance, Down), imaging modalities, and active research projects.'
+        title: '14. Core Instruments Inventory',
+        body: 'Monitor microscope hardware status (Available, In-use, Maintenance, Down), imaging modalities, location, and active research projects.'
+      },
+      {
+        action: () => addInstrument(),
+        sel: '.modal',
+        title: '15. Add Instrument Dialog',
+        body: 'Register a microscope or workstation with its modality, status, physical location, and configuration notes.'
       },
       {
         sel: '#view',
         route: 'calendar',
-        title: '10. Schedule & Milestone Calendar',
-        body: 'Monthly calendar combining experiment milestone deadlines and scheduled facility consultations for smooth scheduling.'
+        title: '16. Schedule & Milestone Calendar',
+        body: 'A monthly calendar combining experiment milestone deadlines and scheduled facility consultations. Click any day to book on it.'
+      },
+      {
+        action: () => newBooking(UI.today()),
+        sel: '.modal',
+        title: '17. New Booking Dialog',
+        body: 'Assign people and instruments from dropdowns that fill up with removable badges (hover for role / modality), register a new person mid-booking (the mint button), and write rich-text notes — bold, italics, bullets, and font sizes.'
+      },
+      {
+        route: 'calendar',
+        action: () => openTodayModal(),
+        sel: '.modal',
+        title: '18. Today’s Agenda Dialog',
+        body: 'A focused view of everything due or scheduled today — milestones and consultations — for a quick morning stand-up.'
       },
       {
         sel: '#view',
         route: 'settings',
-        title: '11. Zero-Cloud SQLite Portability & Theme',
-        body: 'All data is stored directly in your browser with automatic SQLite persistence. Export portable single-file backups (.json) anytime, or toggle between Light & Dark themes!'
+        title: '19. Zero-Cloud SQLite Portability & Theme',
+        body: 'All data is stored directly in your browser with automatic SQLite persistence. Export portable single-file backups (.json) anytime, or toggle between Light &amp; Dark themes!'
       }
     ]);
   }

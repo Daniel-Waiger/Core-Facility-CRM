@@ -1,11 +1,11 @@
 {
   "version": "0.0.1",
+  "autoPort": true,
   "configurations": [
     {
       "name": "static-server",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8734"],
-      "port": 8734
+      "runtimeArgs": ["-c", "import os,http.server;http.server.ThreadingHTTPServer(('',int(os.environ.get('PORT',8000))),http.server.SimpleHTTPRequestHandler).serve_forever()"]
     }
   ]
 }

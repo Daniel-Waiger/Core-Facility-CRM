@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Core Facility Tracker — Release Notes</title>
+<meta name="description" content="Release notes and visual feature guide for Core Facility Tracker.">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<style>
+  :root{
+    --bg:#f6f7fb; --surface:#ffffff; --surface-2:#f1f3f9; --border:#e4e7ef;
+    --text:#1f2430; --muted:#5b6472; --faint:#8a93a4;
+    --primary:#4f46e5; --primary-soft:#eef2ff;
+    --mint:#10b981; --mint-soft:#d1fae5; --mint-ink:#04241a;
+    --shadow:0 1px 3px rgba(17,24,39,.06), 0 8px 24px rgba(17,24,39,.06);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b0f17; --surface:#121826; --surface-2:#0f1420; --border:#222b3b;
+      --text:#e9edf5; --muted:#a3adbf; --faint:#71809a;
+      --primary:#818cf8; --primary-soft:#1e1b4b;
+      --mint:#34d399; --mint-soft:#04302c; --mint-ink:#04241a;
+      --shadow:0 1px 3px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--primary); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:960px; margin:0 auto; padding:0 20px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em;
+       background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:1px 6px}
+
+  /* Hero */
+  header.hero{padding:56px 0 40px; border-bottom:1px solid var(--border); background:
+     radial-gradient(1200px 400px at 20% -10%, var(--primary-soft), transparent 60%);}
+  .eyebrow{display:inline-flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700;
+     letter-spacing:.06em; text-transform:uppercase; color:var(--primary);
+     background:var(--primary-soft); border:1px solid color-mix(in srgb,var(--primary) 25%,transparent);
+     padding:5px 11px; border-radius:999px}
+  h1{font-size:clamp(30px,5vw,46px); line-height:1.1; margin:16px 0 10px; letter-spacing:-.02em}
+  .lede{font-size:clamp(16px,2.3vw,19px); color:var(--muted); max-width:60ch; margin:0 0 24px}
+  .cta{display:flex; flex-wrap:wrap; gap:10px}
+  .btn{display:inline-flex; align-items:center; gap:8px; font-weight:600; font-size:14.5px;
+     padding:10px 16px; border-radius:10px; border:1px solid transparent; cursor:pointer}
+  .btn-primary{background:var(--primary); color:#fff}
+  .btn-primary:hover{filter:brightness(1.06); text-decoration:none}
+  .btn-ghost{background:var(--surface); color:var(--text); border-color:var(--border)}
+  .btn-ghost:hover{background:var(--surface-2); text-decoration:none}
+  .meta{margin-top:18px; color:var(--faint); font-size:13px}
+
+  /* Highlights grid */
+  section{padding:44px 0}
+  h2{font-size:clamp(22px,3.2vw,28px); letter-spacing:-.01em; margin:0 0 6px}
+  .section-sub{color:var(--muted); margin:0 0 26px}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px}
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+     padding:18px; box-shadow:var(--shadow)}
+  .card .ic{width:38px; height:38px; border-radius:10px; display:grid; place-items:center;
+     background:var(--primary-soft); color:var(--primary); margin-bottom:12px; font-size:20px}
+  .card h3{margin:0 0 6px; font-size:16px}
+  .card p{margin:0; color:var(--muted); font-size:14px}
+
+  /* Feature blocks */
+  .feature{display:grid; grid-template-columns:1fr; gap:22px; padding:30px 0; border-top:1px solid var(--border)}
+  .feature:first-of-type{border-top:0}
+  .feature .txt h3{font-size:20px; margin:0 0 8px; display:flex; align-items:center; gap:10px}
+  .tag{font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+     padding:3px 8px; border-radius:999px; background:var(--mint-soft); color:var(--mint);
+     border:1px solid color-mix(in srgb,var(--mint) 35%,transparent)}
+  .feature .txt p{color:var(--muted); margin:0 0 10px}
+  .feature ul{margin:8px 0 0; padding-left:18px; color:var(--muted)}
+  .feature ul li{margin:4px 0}
+  kbd{font-family:ui-monospace,monospace; font-size:.8em; background:var(--surface-2);
+     border:1px solid var(--border); border-bottom-width:2px; border-radius:6px; padding:1px 6px}
+
+  /* Screenshot figure with graceful placeholder */
+  .shot{margin:0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;
+     background:var(--surface-2); box-shadow:var(--shadow)}
+  .shot img{display:block; width:100%; height:auto}
+  .shot .ph{display:none; min-height:200px; flex-direction:column; align-items:center; justify-content:center;
+     gap:8px; padding:34px 20px; text-align:center; color:var(--faint)}
+  .shot .ph .badge{font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+     color:var(--primary)}
+  .shot.pending img{display:none}
+  .shot.pending .ph{display:flex}
+  .shot figcaption{padding:10px 14px; font-size:12.5px; color:var(--faint); border-top:1px solid var(--border);
+     background:var(--surface)}
+
+  @media (min-width:760px){
+    .feature{grid-template-columns:1fr 1.15fr; align-items:center; gap:34px}
+    .feature.reverse .txt{order:2}
+  }
+
+  /* Callout */
+  .callout{background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--mint);
+     border-radius:12px; padding:20px 22px; box-shadow:var(--shadow)}
+  .callout h3{margin:0 0 6px}
+  .callout p{margin:0; color:var(--muted)}
+
+  footer{border-top:1px solid var(--border); padding:34px 0 60px; color:var(--faint); font-size:13.5px}
+  footer .row{display:flex; flex-wrap:wrap; gap:14px 22px; align-items:center; justify-content:space-between}
+  hr.soft{border:0; border-top:1px solid var(--border); margin:0}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">Release 1.2.0 · 29 Aug 2026</span>
+    <h1>Core Facility Tracker — what’s new</h1>
+    <p class="lede">A big pass over data entry and scale: booking now uses dropdown pickers instead of walls of chips, people carry a proper Department, meeting notes are rich text, nothing scrolls sideways, and the guided tour walks you through every dialog.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
+      <a class="btn btn-ghost" href="../CHANGELOG.md">Full changelog</a>
+      <a class="btn btn-ghost" href="https://github.com/Daniel-Waiger/Core-Facility-CRM">GitHub repo</a>
+    </div>
+    <div class="meta">Local-first · SQLite in the browser · no accounts, no cloud.</div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Highlights</h2>
+    <p class="section-sub">The headline changes in this release.</p>
+    <div class="cards">
+      <div class="card"><div class="ic">🏷️</div><h3>Scalable pickers</h3><p>People &amp; instruments are dropdowns that fill up with removable badges — they no longer list your whole inventory as chips.</p></div>
+      <div class="card"><div class="ic">🏢</div><h3>Department field</h3><p>Lab / Group and Department are separate fields and columns, each with a quick “+ Add New”.</p></div>
+      <div class="card"><div class="ic">✍️</div><h3>Rich-text notes</h3><p>Bold, italics, bullets and font sizes in meeting notes — preserved in Word &amp; PDF exports.</p></div>
+      <div class="card"><div class="ic">↔️</div><h3>No side-scrolling</h3><p>Tables and modals lay out within the window; wide content wraps instead of scrolling.</p></div>
+      <div class="card"><div class="ic">🌿</div><h3>Register mid-flow</h3><p>A mint “Register New Person” button opens the full form without leaving your booking.</p></div>
+      <div class="card"><div class="ic">🧭</div><h3>Dialog-aware tour</h3><p>A 19-step walkthrough opens every real modal and glides between steps.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>In detail</h2>
+    <p class="section-sub">Each change, with a snapshot.</p>
+
+    <!-- Booking pickers -->
+    <div class="feature">
+      <div class="txt">
+        <h3>Scalable booking pickers <span class="tag">new</span></h3>
+        <p>The New / Edit Booking dialog no longer renders your entire roster as toggle chips. People and Instruments are dropdowns; picking one drops a removable badge above the list and shrinks the menu.</p>
+        <ul>
+          <li>A small <code>×</code> on the left of each badge removes it.</li>
+          <li>Hover a person badge for their role; an instrument badge for its modality.</li>
+          <li>Notes are a rich-text editor (see below); the old Meeting Link field is gone — paste links into notes.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/15-booking-pickers.png" alt="New Booking dialog with dropdown pickers, removable badges, mint Register New Person button and rich-text notes" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/15-booking-pickers.png</code></span></div>
+        <figcaption>New Booking — dropdown pickers, removable badges, mint “Register New Person”, rich-text notes.</figcaption>
+      </figure>
+    </div>
+
+    <!-- Register person + department -->
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Register Person &amp; Department <span class="tag">new</span></h3>
+        <p>Register a researcher from the standard form — now with <strong>separate Lab / Group and Department</strong> dropdowns instead of one comma-packed field. Each dropdown has a “+ Add New” mini-dialog for values you don’t have yet, and the inline avatar is small and gender-neutral.</p>
+        <ul>
+          <li>From the booking dialog, the mint <strong>Register New Person</strong> button opens this form and drops the new person straight into the picker — add several in a row.</li>
+          <li>Department shows as its own column in People and its own field in every export.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/16-register-person.png" alt="Register Researcher / Staff dialog with Position, Lab/Group and Department dropdowns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/16-register-person.png</code></span></div>
+        <figcaption>Register Researcher / Staff — Lab / Group and Department are separate dropdowns.</figcaption>
+      </figure>
+    </div>
+
+    <!-- People table with department -->
+    <div class="feature">
+      <div class="txt">
+        <h3>People directory, wider &amp; wrapped <span class="tag">changed</span></h3>
+        <p>The People, Labs &amp; Researchers table gains a Department column and lays out fully within the window — no horizontal scrollbar. Long values wrap; the row actions stay pinned.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/17-people-department.png" alt="People table showing separate Lab/Group and Department columns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/17-people-department.png</code></span></div>
+        <figcaption>People &amp; Labs — Lab / Group and Department as separate columns, no side-scroll.</figcaption>
+      </figure>
+    </div>
+
+    <!-- Add New mini dialog -->
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>“+ Add New” everywhere <span class="tag">changed</span></h3>
+        <p>Lab / Group, Department, and the vocabulary dropdowns (Modality, Funding, Sample, Role) all share the same pattern: a select of known values plus a “+ Add New” button that opens a small dialog and injects your new value, selected, back into the form.</p>
+        <p>Nested dialogs now close the <em>topmost</em> one on Cancel / Save — so registering a new lab never dismisses the form underneath.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/18-add-new-value.png" alt="Small Add New dialog for a lab or department stacked over a form" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/18-add-new-value.png</code></span></div>
+        <figcaption>The quick “Add New Lab / Group” dialog, stacked over the person form.</figcaption>
+      </figure>
+    </div>
+
+    <!-- Rich text notes -->
+    <div class="feature">
+      <div class="txt">
+        <h3>Rich-text meeting notes <span class="tag">new</span></h3>
+        <p>Meeting notes support light formatting in the app’s own font: bullet lists, <strong>bold</strong> (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>B</kbd>), <em>italics</em> (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>I</kbd>), and preset sizes (Small / Normal / Large / Huge).</p>
+        <ul>
+          <li>Formatting is preserved in Word (.docx) and PDF exports; Excel / CSV get clean plain text.</li>
+          <li>Stored as a safe HTML subset; legacy plain-text notes still display correctly.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/19-rich-notes.png" alt="A saved meeting showing bold text and a bullet list in the notes" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/19-rich-notes.png</code></span></div>
+        <figcaption>Meeting notes rendered with bold and bullets, in-app.</figcaption>
+      </figure>
+    </div>
+
+    <!-- Guided tour -->
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Guided tour walks every dialog <span class="tag">changed</span></h3>
+        <p>The walkthrough grew from a screen tour into a full 19-step guide that opens each real dialog — New Project, Add Milestone, Custom Field, Attach File, Register Person, Add Instrument, New Booking, and Today’s Agenda — so you see the actual forms. Steps glide with a soft cross-fade instead of a hard cut, and any dialog a step opens is dismissed automatically when you advance.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/20-guided-tour.png" alt="Guided tour spotlighting the New Project dialog with an explanatory bubble" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/20-guided-tour.png</code></span></div>
+        <figcaption>The tour spotlighting a live dialog, with its explanatory bubble alongside.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>Take the tour yourself</h3>
+      <p>Open the app and click <strong>Tour</strong> in the sidebar — it now opens every dialog for you. Everything runs locally in your browser; nothing is uploaded.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The rest of the app</h2>
+    <p class="section-sub">Screens that carry over from earlier releases.</p>
+    <div class="cards">
+      <figure class="shot"><img src="screenshots/02-dashboard.png" alt="Dashboard" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/02-dashboard.png</code></span></div><figcaption>Dashboard</figcaption></figure>
+      <figure class="shot"><img src="screenshots/03-projects-registry.png" alt="Projects registry" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/03-projects-registry.png</code></span></div><figcaption>Projects registry</figcaption></figure>
+      <figure class="shot"><img src="screenshots/12-instruments.png" alt="Instruments" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/12-instruments.png</code></span></div><figcaption>Core instruments</figcaption></figure>
+      <figure class="shot"><img src="screenshots/13-calendar.png" alt="Calendar" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/13-calendar.png</code></span></div><figcaption>Schedule &amp; calendar</figcaption></figure>
+      <figure class="shot"><img src="screenshots/14-settings.png" alt="Settings" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/14-settings.png</code></span></div><figcaption>Settings &amp; backups</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap row">
+    <div>Core Facility Tracker · v1.2.0 · Bioimaging Facility</div>
+    <div><a href="../index.html">Open the app</a> · <a href="../CHANGELOG.md">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
+  </div>
+</footer>
+
+</body>
+</html>
