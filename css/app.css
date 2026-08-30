@@ -452,6 +452,13 @@ textarea.input { resize: vertical; min-height: 74px; }
 @keyframes slidein { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- Crisp Tour Focus (NO Blur on Target) ---------- */
+/* Full-screen catcher: the app underneath is inert while the tour runs (no clicks, no text
+   selection). Sits below the spotlight box and the bubble, above everything else incl. modals. */
+.tour-blocker {
+  position: fixed; inset: 0; z-index: 999;
+  background: transparent; cursor: default;
+  -webkit-user-select: none; user-select: none;
+}
 .tour-box {
   position: fixed; z-index: 1000; border-radius: 10px;
   border: 2.5px solid var(--primary);

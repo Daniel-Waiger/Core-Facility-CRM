@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.3] — 2026-08-30
+
+### Added
+- **The app is inert during the guided tour** — clicks, typing, and text selection on the page behind the tour are blocked so you can't accidentally change data or fill in a form while looking around. Only the tour bubble (Back / Skip / Next) responds; `Esc` exits the tour.
+
 ## [1.2.2] — 2026-08-30
 
 ### Added

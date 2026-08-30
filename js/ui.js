@@ -199,22 +199,42 @@
   let tourTrackRAF = 0;
   const TOUR_SETTLE = 90;
 
+  // Events that could change app state / enter data. Blocked (except from the tour bubble, and
+  // Escape) for the whole tour so nobody types into a form while just looking around.
+  const TOUR_BLOCKED_EVENTS = ['pointerdown', 'mousedown', 'click', 'dblclick', 'contextmenu',
+    'keydown', 'keypress', 'keyup', 'input', 'beforeinput', 'paste', 'submit', 'dragstart'];
+  function tourEventGuard(e) {
+    if (!tourState || !tourEls) return;
+    if (tourEls.bubble.contains(e.target)) return;                 // the tour's own controls
+    if (e.type === 'keydown' && e.key === 'Escape') {              // Esc exits the whole tour
+      e.stopImmediatePropagation();
+      if (e.cancelable) e.preventDefault();
+      stopTour();
+      return;
+    }
+    e.stopImmediatePropagation();
+    if (e.cancelable) e.preventDefault();
+  }
+
   function startTour(steps) {
     stopTour();
     tourState = { steps, i: 0 };
     window.addEventListener('scroll', onTourScroll, { passive: true });
     window.addEventListener('resize', onTourResize);
+    TOUR_BLOCKED_EVENTS.forEach((t) => document.addEventListener(t, tourEventGuard, true));
     renderTour();
   }
 
   function ensureTourEls() {
     if (tourEls && document.body.contains(tourEls.box) && document.body.contains(tourEls.bubble)) return tourEls;
+    const blocker = document.createElement('div');
+    blocker.className = 'tour-blocker';                            // eats pointer events + text selection
     const box = document.createElement('div');
     box.className = 'tour-box is-entering';
     const bubble = document.createElement('div');
     bubble.className = 'tour-bubble is-entering';
-    document.body.append(box, bubble);
-    tourEls = { box, bubble };
+    document.body.append(blocker, box, bubble);
+    tourEls = { blocker, box, bubble };
     return tourEls;
   }
 
@@ -281,6 +301,10 @@
     };
     const skip = bubble.querySelector('[data-tour="skip"]');
     if (skip) skip.onclick = stopTour;
+
+    // Drop focus from anything in the app so a pre-focused input can't take keystrokes / show a caret.
+    const af = document.activeElement;
+    if (af && af !== document.body && !bubble.contains(af)) { try { af.blur(); } catch (_) {} }
 
     const target = stepTarget(step);
     if (target && !target.closest('.modal-dim')) scrollTargetIntoView(target);
@@ -373,10 +397,11 @@
     tourState = null; tourEls = null;
     window.removeEventListener('scroll', onTourScroll);
     window.removeEventListener('resize', onTourResize);
+    TOUR_BLOCKED_EVENTS.forEach((t) => document.removeEventListener(t, tourEventGuard, true));
     closeTourModals();
     stopTourDom();
   }
-  function stopTourDom() { document.querySelectorAll('.tour-dim, .tour-box, .tour-bubble').forEach((e) => e.remove()); }
+  function stopTourDom() { document.querySelectorAll('.tour-dim, .tour-blocker, .tour-box, .tour-bubble').forEach((e) => e.remove()); }
 
   /* ---------------- Icons (Lucide-style, inline) ---------------- */
   const ICONS = {
