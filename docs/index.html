@@ -92,6 +92,10 @@
   .shot.pending .ph{display:flex}
   .shot figcaption{padding:10px 14px; font-size:12.5px; color:var(--faint); border-top:1px solid var(--border);
      background:var(--surface)}
+  /* Gallery thumbnails: uniform crop so the cards line up regardless of source aspect ratio */
+  .shot-thumb{display:flex; flex-direction:column}
+  .shot-thumb img{height:190px; object-fit:cover; object-position:top left}
+  .shot-thumb figcaption{margin-top:auto}
 
   @media (min-width:760px){
     .feature{grid-template-columns:1fr 1.15fr; align-items:center; gap:34px}
@@ -253,11 +257,11 @@
     <h2>The rest of the app</h2>
     <p class="section-sub">Screens that carry over from earlier releases.</p>
     <div class="cards">
-      <figure class="shot"><img src="screenshots/02-dashboard.png" alt="Dashboard" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/02-dashboard.png</code></span></div><figcaption>Dashboard</figcaption></figure>
-      <figure class="shot"><img src="screenshots/03-projects-registry.png" alt="Projects registry" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/03-projects-registry.png</code></span></div><figcaption>Projects registry</figcaption></figure>
-      <figure class="shot"><img src="screenshots/12-instruments.png" alt="Instruments" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/12-instruments.png</code></span></div><figcaption>Core instruments</figcaption></figure>
-      <figure class="shot"><img src="screenshots/13-calendar.png" alt="Calendar" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/13-calendar.png</code></span></div><figcaption>Schedule &amp; calendar</figcaption></figure>
-      <figure class="shot"><img src="screenshots/14-settings.png" alt="Settings" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/14-settings.png</code></span></div><figcaption>Settings &amp; backups</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/02-dashboard.png" alt="Dashboard" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/02-dashboard.png</code></span></div><figcaption>Dashboard</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/03-projects-registry.png" alt="Projects registry" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/03-projects-registry.png</code></span></div><figcaption>Projects registry</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/12-instruments.png" alt="Instruments" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/12-instruments.png</code></span></div><figcaption>Core instruments</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/13-calendar.png" alt="Calendar" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/13-calendar.png</code></span></div><figcaption>Schedule &amp; calendar</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/14-settings.png" alt="Settings" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/14-settings.png</code></span></div><figcaption>Settings &amp; backups</figcaption></figure>
     </div>
   </div>
 </section>
