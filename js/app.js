@@ -2201,26 +2201,27 @@
     const firstProj = DB.row('SELECT id FROM projects ORDER BY id ASC LIMIT 1');
     const pid = firstProj ? firstProj.id : 1;
 
-    // Modal showcases open a real dialog so you see the actual form; the tour dismisses it
-    // automatically when you advance. Milestone / custom-field / file dialogs are opened while
-    // the project is in context (the steps before them route to the project view).
+    // Each step targets a real, stable element (data-tour anchors for project sub-sections;
+    // '.modal' for dialog showcases the tour opens then auto-dismisses on advance). Project
+    // sub-steps re-assert route:'project' so the milestone/field/file dialogs always have a
+    // project in context.
     UI.startTour([
       {
-        sel: '#view',
         route: 'dashboard',
+        sel: '.grid.cols-4',
         title: '1. Facility Dashboard',
-        body: 'Welcome to Core Facility Tracker! Your dashboard provides real-time counts for Active Projects, PIs, Core Instruments, and upcoming milestone deliverables at a single glance.'
+        body: 'Welcome to Core Facility Tracker! These tiles give you live counts — total and active projects, overdue milestones, and completed work — with the lists below showing what is due soon.'
       },
       {
         sel: '#app-sidebar',
         title: '2. Sidebar Navigation & Collapse',
-        body: 'Quickly switch between Projects, People &amp; Labs, Core Instruments, Calendar, and Settings. Click the collapse icon at top to expand your working canvas.'
+        body: 'Switch between Projects, People &amp; Labs, Instruments, Calendar, and Settings. The chevron at the top collapses the sidebar to widen your working canvas.'
       },
       {
-        sel: '#view',
         route: 'projects',
+        sel: '.filter-bar',
         title: '3. Projects Registry & Filters',
-        body: 'Search across titles, PIs, tags, and grant numbers. Filter projects by Modality (Multiphoton, STED, Lightsheet), Lifecycle Status, and Priority level.'
+        body: 'Search across titles, codes, PIs, tags, and funding. Filter by Status, Priority, and Modality — and start a new project or export every project to one spreadsheet from here.'
       },
       {
         route: 'projects',
@@ -2230,16 +2231,18 @@
         body: 'Initiate a project: title, status, priority, and PI — or register a brand-new PI inline. Editable dropdowns (Modality, Funding, Sample) each carry a "+ Add New" option that saves a facility-wide term on the spot.'
       },
       {
-        sel: '#view',
         route: 'project',
         projectId: pid,
+        sel: '.project-header-card',
         title: '5. Project Details & Grant Metadata',
-        body: 'Each project consolidates Principal Investigator affiliations, funding accounts, optical modalities, tissue/sample conditions, and progress metrics.'
+        body: 'The header consolidates the PI, project code, timeline, status, and priority. The quick-status bar below flips a project through its lifecycle in one click.'
       },
       {
-        sel: '.ms',
-        title: '6. Milestones & Timeline Deliverables',
-        body: 'Track project milestones with status indicators (done, in-progress, pending, overdue), due dates, assigned researcher owners, and required microscopes.'
+        route: 'project',
+        projectId: pid,
+        sel: '[data-tour="proj-milestones"]',
+        title: '6. Milestones & Deliverables',
+        body: 'Each milestone shows its status (done, in-progress, pending, overdue), due date, assigned owners, and required instruments. Click a status dot or badge to cycle it.'
       },
       {
         action: () => addMilestone(),
@@ -2248,9 +2251,11 @@
         body: 'Add a deliverable with a due date, then assign responsible people and the instruments it needs. Edits reuse this same dialog.'
       },
       {
-        sel: '.grid.cols-2',
-        title: '8. Collaborators, Hardware & Meetings',
-        body: 'Log team member roles, linked instruments, consultation meeting minutes with action items, and custom metadata fields (e.g. Laser Wavelength, BSL level).'
+        route: 'project',
+        projectId: pid,
+        sel: '[data-tour="proj-team"]',
+        title: '8. Team & Collaborators',
+        body: 'Add PIs, postdocs, students, and technicians with their role on the project. The cards around this one cover assigned instruments, meeting minutes, files, and custom metadata fields.'
       },
       {
         action: () => addKV(),
@@ -2265,15 +2270,17 @@
         body: 'Link a protocol, a dataset on the NAS, or any external URL. Links render as tidy buttons on the project page.'
       },
       {
-        sel: '.row button[data-act="export-pdf"]',
+        route: 'project',
+        projectId: pid,
+        sel: '[data-tour="proj-exports"]',
         title: '11. One-Click Report Generation',
-        body: 'Export official documentation in 1 click: multi-page paginated PDF reports (with headers and page numbers), Word (.docx) documents, and Excel (.xlsx) spreadsheets.'
+        body: 'The XLSX, DOCX, and PDF buttons export official documentation in one click — multi-page paginated PDF reports with headers and page numbers, Word documents, and spreadsheets. Duplicate clones the whole project as a template.'
       },
       {
-        sel: '#view',
         route: 'people',
-        title: '12. People, Labs & Researchers Directory',
-        body: 'Centralized registry of PIs, postdocs, students, and facility staff — with separate Lab / Group and Department columns, emails, and active project counts.'
+        sel: '.filter-bar',
+        title: '12. People, Labs & Researchers',
+        body: 'A central registry of PIs, postdocs, students, and staff. The table below carries separate Lab / Group and Department columns, emails, and each person’s active project count.'
       },
       {
         action: () => addPerson(),
@@ -2282,10 +2289,10 @@
         body: 'Register a researcher: Position / Role plus separate Lab / Group and Department dropdowns, each with a quick "+ Add New" mini-dialog for values you don\'t have yet.'
       },
       {
-        sel: '#view',
         route: 'instruments',
+        sel: '.filter-bar',
         title: '14. Core Instruments Inventory',
-        body: 'Monitor microscope hardware status (Available, In-use, Maintenance, Down), imaging modalities, location, and active research projects.'
+        body: 'Track microscopes and workstations — status (Available, In-use, Maintenance, Down), modality, location, and which projects currently use them. Filter by status or modality here.'
       },
       {
         action: () => addInstrument(),
@@ -2294,10 +2301,10 @@
         body: 'Register a microscope or workstation with its modality, status, physical location, and configuration notes.'
       },
       {
-        sel: '#view',
         route: 'calendar',
+        sel: '.cal-grid',
         title: '16. Schedule & Milestone Calendar',
-        body: 'A monthly calendar combining experiment milestone deadlines and scheduled facility consultations. Click any day to book on it.'
+        body: 'A monthly grid combining milestone deadlines and scheduled facility consultations. Click any day to create a booking on it; use Prev / Next to move months.'
       },
       {
         action: () => newBooking(UI.today()),
@@ -2313,10 +2320,10 @@
         body: 'A focused view of everything due or scheduled today — milestones and consultations — for a quick morning stand-up.'
       },
       {
-        sel: '#view',
         route: 'settings',
-        title: '19. Zero-Cloud SQLite Portability & Theme',
-        body: 'All data is stored directly in your browser with automatic SQLite persistence. Export portable single-file backups (.json) anytime, or toggle between Light &amp; Dark themes!'
+        sel: '[data-tour="settings-backup"]',
+        title: '19. Portable Data & Backups',
+        body: 'Your whole facility database lives in this browser. Export a single-file JSON backup anytime, restore one, enable automatic daily backups, or point them at a silent folder. Theme and sample-data controls are on this page too.'
       }
     ]);
   }

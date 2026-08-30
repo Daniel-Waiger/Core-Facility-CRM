@@ -188,24 +188,29 @@
      The highlight box and bubble are created ONCE and reused across steps, so their CSS transitions
      animate the move/resize between steps (a soft glide + cross-fade) instead of the old
      destroy-and-recreate flicker. A step may:
-       - route: '<view>'      navigate to a view first
+       - route: '<view>'      navigate to a view first (page is scrolled to the top after)
        - action: fn           run something before highlighting (e.g. open a modal to showcase it)
        - sel: '<css>'         element to spotlight ('.modal' spotlights a just-opened dialog)
-     Any modal a step opens is auto-dismissed when the tour advances to the next step. */
+     Positioning always runs AFTER an instant scroll settles (no smooth-scroll race), and a
+     passive scroll/resize listener keeps the spotlight glued to its target for the whole step.
+     Any modal a step opens is auto-dismissed when the tour advances. */
   let tourState = null;
   let tourEls = null;
-  const TOUR_FADE = 150;
+  let tourTrackRAF = 0;
+  const TOUR_SETTLE = 90;
 
   function startTour(steps) {
     stopTour();
     tourState = { steps, i: 0 };
+    window.addEventListener('scroll', onTourScroll, { passive: true });
+    window.addEventListener('resize', onTourResize);
     renderTour();
   }
 
   function ensureTourEls() {
     if (tourEls && document.body.contains(tourEls.box) && document.body.contains(tourEls.bubble)) return tourEls;
     const box = document.createElement('div');
-    box.className = 'tour-box';
+    box.className = 'tour-box is-entering';
     const bubble = document.createElement('div');
     bubble.className = 'tour-bubble is-entering';
     document.body.append(box, bubble);
@@ -217,6 +222,10 @@
     document.querySelectorAll('.modal-dim').forEach((d) => d.remove());
   }
 
+  function stepTarget(step) {
+    return step && step.sel ? document.querySelector(step.sel) : null;
+  }
+
   function renderTour() {
     if (!tourState) return;
     const step = tourState.steps[tourState.i];
@@ -226,25 +235,27 @@
 
     if (step.route && global.App && global.App.route) {
       global.App.route(step.route, step.projectId);
+      window.scrollTo(0, 0);                 // a fresh view starts at the top, not wherever we were
     }
     if (typeof step.action === 'function') {
       try { step.action(); } catch (_) { /* showcase is best-effort */ }
     }
 
-    const { box, bubble } = ensureTourEls();
-    // Fade the bubble down while the new target settles, then reposition, swap content, fade back up.
-    bubble.classList.add('is-moving');
-    setTimeout(() => {
+    const { bubble } = ensureTourEls();
+    bubble.classList.add('is-moving');       // fade out while the new target renders + settles
+
+    // rAF + a short settle lets the routed view / opened modal lay out before we measure.
+    requestAnimationFrame(() => setTimeout(() => {
       if (!tourState) return;
-      const cur = tourState.steps[tourState.i];
-      const target = cur.sel ? document.querySelector(cur.sel) : null;
-      positionTour(box, bubble, target, cur);
-      requestAnimationFrame(() => bubble.classList.remove('is-moving', 'is-entering'));
-    }, TOUR_FADE);
+      layoutStep();
+    }, TOUR_SETTLE));
   }
 
-  function positionTour(box, bubble, target, step) {
+  function layoutStep() {
+    const step = tourState.steps[tourState.i];
+    const { box, bubble } = tourEls;
     const isLast = tourState.i >= tourState.steps.length - 1;
+
     bubble.innerHTML =
       '<div class="t">' + step.title + '</div>' +
       '<div class="b">' + step.body + '</div>' +
@@ -263,29 +274,38 @@
     const skip = bubble.querySelector('[data-tour="skip"]');
     if (skip) skip.onclick = stopTour;
 
+    const target = stepTarget(step);
+    if (target && !target.closest('.modal-dim')) scrollTargetIntoView(target);
+    placeSpotlight(box, bubble, target, true);
+
+    requestAnimationFrame(() => { box.classList.remove('is-entering'); bubble.classList.remove('is-moving', 'is-entering'); });
+  }
+
+  // Instant (no smooth-scroll race) scroll so `target` sits comfortably below the sticky topbar.
+  function scrollTargetIntoView(target) {
+    const topbar = document.querySelector('.topbar');
+    const topGap = (topbar ? topbar.getBoundingClientRect().height : 0) + 18;
+    const r = target.getBoundingClientRect();
+    const viewH = window.innerHeight;
+    const docTop = r.top + window.scrollY;
+    let dest;
+    if (r.height >= viewH - topGap - 32) {
+      dest = docTop - topGap;                                   // taller than the space → pin its top
+    } else {
+      const room = viewH - topGap;
+      dest = docTop - topGap - Math.max(0, (room - r.height) / 2 - 12);
+    }
+    window.scrollTo(0, Math.max(0, Math.round(dest)));
+  }
+
+  function placeSpotlight(box, bubble, target, animate) {
     const winW = window.innerWidth, winH = window.innerHeight;
     const bw = Math.min(360, winW - 32);
     bubble.style.maxWidth = bw + 'px';
+    box.classList.toggle('no-anim', !animate);
+    bubble.classList.toggle('no-anim', !animate);
 
-    if (target) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-      const r = target.getBoundingClientRect();
-      const pad = 6;
-      box.classList.remove('bare');
-      box.style.left = Math.max(0, r.left - pad) + 'px';
-      box.style.top = Math.max(0, r.top - pad) + 'px';
-      box.style.width = (r.width + pad * 2) + 'px';
-      box.style.height = (r.height + pad * 2) + 'px';
-
-      const bh = bubble.offsetHeight || 160;
-      let bx = r.right + 16;
-      if (bx + bw > winW - 16) bx = r.left - bw - 16;          // flip to the left of the target
-      if (bx < 16) bx = Math.max(16, Math.round((winW - bw) / 2)); // still won't fit → center
-      let by = Math.max(16, Math.min(r.top, winH - bh - 16));
-      bubble.style.left = bx + 'px';
-      bubble.style.top = by + 'px';
-    } else {
-      // No spotlight target: dim the whole screen (0×0 box drives the backdrop) and centre the bubble.
+    if (!target) {                                              // pure orientation: dim + centre bubble
       box.classList.add('bare');
       box.style.left = Math.round(winW / 2) + 'px';
       box.style.top = Math.round(winH / 2) + 'px';
@@ -294,16 +314,61 @@
       const bh = bubble.offsetHeight || 160;
       bubble.style.left = Math.round((winW - bw) / 2) + 'px';
       bubble.style.top = Math.round((winH - bh) / 2) + 'px';
+      return;
     }
+
+    box.classList.remove('bare');
+    const r = target.getBoundingClientRect();
+    const pad = 6;
+    // Clamp to the viewport so a target taller than the screen still frames cleanly.
+    const t = Math.max(4, r.top - pad);
+    const l = Math.max(4, r.left - pad);
+    const b = Math.min(winH - 4, r.bottom + pad);
+    const rt = Math.min(winW - 4, r.right + pad);
+    box.style.left = l + 'px';
+    box.style.top = t + 'px';
+    box.style.width = Math.max(0, rt - l) + 'px';
+    box.style.height = Math.max(0, b - t) + 'px';
+
+    // Bubble: prefer to the right of the target, then left, then below, then above, then centred.
+    const bh = bubble.offsetHeight || 160;
+    const gap = 16;
+    const clampY = (y) => Math.max(12, Math.min(y, winH - bh - 12));
+    const clampX = (x) => Math.max(12, Math.min(x, winW - bw - 12));
+    let bx, by;
+    if (r.right + gap + bw <= winW - 8) { bx = r.right + gap; by = clampY(r.top); }
+    else if (r.left - gap - bw >= 8) { bx = r.left - gap - bw; by = clampY(r.top); }
+    else if (b + gap + bh <= winH - 8) { bx = clampX(r.left); by = b + gap; }
+    else if (t - gap - bh >= 8) { bx = clampX(r.left); by = t - gap - bh; }
+    else { bx = (winW - bw) / 2; by = winH - bh - 14; }
+    bubble.style.left = Math.round(bx) + 'px';
+    bubble.style.top = Math.round(by) + 'px';
   }
 
-  function stopTour() { tourState = null; tourEls = null; closeTourModals(); stopTourDom(); }
-  function stopTourDom() { document.querySelectorAll('.tour-dim, .tour-box, .tour-bubble').forEach((e) => e.remove()); }
-  window.addEventListener('resize', () => {
+  // Keep the spotlight on its target if anything scrolls/shifts mid-step (no re-scroll, no glide).
+  function onTourScroll() {
+    if (!tourState || !tourEls || tourTrackRAF) return;
+    tourTrackRAF = requestAnimationFrame(() => {
+      tourTrackRAF = 0;
+      if (!tourState || !tourEls) return;
+      placeSpotlight(tourEls.box, tourEls.bubble, stepTarget(tourState.steps[tourState.i]), false);
+    });
+  }
+  function onTourResize() {
     if (!tourState || !tourEls) return;
-    const step = tourState.steps[tourState.i];
-    positionTour(tourEls.box, tourEls.bubble, step.sel ? document.querySelector(step.sel) : null, step);
-  });
+    const target = stepTarget(tourState.steps[tourState.i]);
+    if (target && !target.closest('.modal-dim')) scrollTargetIntoView(target);
+    placeSpotlight(tourEls.box, tourEls.bubble, target, false);
+  }
+
+  function stopTour() {
+    tourState = null; tourEls = null;
+    window.removeEventListener('scroll', onTourScroll);
+    window.removeEventListener('resize', onTourResize);
+    closeTourModals();
+    stopTourDom();
+  }
+  function stopTourDom() { document.querySelectorAll('.tour-dim, .tour-box, .tour-bubble').forEach((e) => e.remove()); }
 
   /* ---------------- Icons (Lucide-style, inline) ---------------- */
   const ICONS = {

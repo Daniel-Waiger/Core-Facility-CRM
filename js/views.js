@@ -237,7 +237,7 @@
             <span><strong>Timeline:</strong> ${fmt(p.start_date)} → ${fmt(p.end_date)}</span>
           </div>
         </div>
-        <div class="row" style="gap:8px;flex-wrap:wrap">
+        <div class="row" style="gap:8px;flex-wrap:wrap" data-tour="proj-exports">
           <button class="btn btn-primary btn-sm" data-act="edit-project" data-id="${p.id}">${ic('edit')} Edit Project</button>
           <button class="btn btn-secondary btn-sm" data-act="duplicate-project" data-id="${p.id}" title="Duplicate as a new project template">${ic('layers')} Duplicate</button>
           <button class="btn btn-secondary btn-sm" data-act="export-xlsx" title="Export Spreadsheet">${ic('file')} XLSX</button>
@@ -303,7 +303,7 @@
       </div>
 
       <!-- Team Card -->
-      <div class="card">
+      <div class="card" data-tour="proj-team">
         <div class="row mb-8">
           <div class="grow"><span class="card-title">${ic('users')} Team &amp; Collaborators</span></div>
           <button class="btn btn-ghost btn-sm" data-act="add-project-person">${ic('plus')} Add Member</button>
@@ -345,7 +345,7 @@
     </div>
 
     <!-- Milestones Timeline Card -->
-    <div class="card mb-16">
+    <div class="card mb-16" data-tour="proj-milestones">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('target')} Milestones &amp; Deliverables</span></div>
         <button class="btn btn-primary btn-sm" data-act="add-milestone">${ic('plus')} Add Milestone</button>
@@ -744,7 +744,7 @@
       </div>
     </div>
 
-    <div class="card mb-16">
+    <div class="card mb-16" data-tour="settings-backup">
       <div class="card-title">${ic('folder')} Portable Data &amp; Backups</div>
       <div class="card-body">
         <div class="row mb-8">

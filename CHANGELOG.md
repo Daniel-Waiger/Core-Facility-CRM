@@ -3,6 +3,13 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-08-30
+
+### Fixed
+- **Guided tour targeting.** The walkthrough now spotlights stable, correct elements on every step: Project Details frames the project header (PI, code, timeline, status), Milestones frames the whole milestones card, Team frames the collaborators card, and Report Generation frames the export buttons — previously these landed on the wrong element or a row deep inside the page.
+- **Tour scroll race.** Positioning now runs *after* an instant scroll settles instead of racing a smooth-scroll animation, so the spotlight is always on target even if you had scrolled the page before starting the tour. A passive scroll/resize listener keeps the spotlight glued to its element for the whole step.
+- View steps route to the top of the page so the sticky title bar stays in view, and the highlight box is always clamped within the viewport.
+
 ## [1.2.0] — 2026-08-29
 
 ### Added

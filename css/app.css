@@ -458,22 +458,28 @@ textarea.input { resize: vertical; min-height: 74px; }
   box-shadow: 0 0 0 9999px rgba(15,23,42,.65);
   pointer-events: none;
   /* Reused across steps → these props glide when they change (soft move/resize). */
-  transition: left .32s cubic-bezier(.4,0,.2,1), top .32s cubic-bezier(.4,0,.2,1),
-              width .32s cubic-bezier(.4,0,.2,1), height .32s cubic-bezier(.4,0,.2,1),
-              border-color .2s ease;
+  transition: left .34s cubic-bezier(.4,0,.2,1), top .34s cubic-bezier(.4,0,.2,1),
+              width .34s cubic-bezier(.4,0,.2,1), height .34s cubic-bezier(.4,0,.2,1),
+              border-color .2s ease, opacity .2s ease;
 }
 .tour-box.bare { border-color: transparent; }   /* no spotlight target: just the dim backdrop */
+.tour-box.is-entering { opacity: 0; transition: opacity .2s ease; }   /* snap into place, then fade in */
 .tour-bubble {
   position: fixed; z-index: 1001; max-width: 320px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; box-shadow: var(--shadow-lg); padding: 16px;
   font-size: 13px;
   transition: left .3s cubic-bezier(.4,0,.2,1), top .3s cubic-bezier(.4,0,.2,1),
-              opacity .16s ease, transform .16s ease;
+              opacity .17s ease, transform .17s ease;
 }
 /* Faded/offset while the next step's target settles, then eased back in. */
 .tour-bubble.is-moving { opacity: 0; transform: translateY(6px); }
-.tour-bubble.is-entering { opacity: 0; }
+.tour-bubble.is-entering { opacity: 0; transition: opacity .17s ease; }
+/* Suppress the glide while a scroll/resize is dragging the spotlight frame-by-frame. */
+.tour-box.no-anim, .tour-bubble.no-anim { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tour-box, .tour-bubble { transition: opacity .12s ease; }
+}
 .tour-bubble .t { font-weight: 600; font-size: 14.5px; margin-bottom: 4px; color: var(--primary); }
 .tour-bubble .b { color: var(--text-muted); line-height: 1.45; }
 .tour-bubble .foot { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
