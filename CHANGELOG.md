@@ -3,6 +3,14 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.4] — 2026-08-30
+
+### Added
+- **Release Notes button** in the sidebar — opens the hosted release-notes page (`/docs/`).
+
+### Changed
+- The release-notes page now renders the **full changelog inline as HTML** instead of linking to the raw Markdown file.
+
 ## [1.2.3] — 2026-08-30
 
 ### Added

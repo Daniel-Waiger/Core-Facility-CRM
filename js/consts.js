@@ -1,5 +1,5 @@
 /* consts.js — shared vocabularies (keep in sync with UI) */
-window.APP_VERSION = '1.2.3';
+window.APP_VERSION = '1.2.4';
 window.CONST = {
   STATUS: ['Initiated', 'Active', 'On-hold', 'Completed', 'Archived'],
   PRIORITY: ['Low', 'Medium', 'High'],

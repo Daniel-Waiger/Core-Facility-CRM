@@ -140,6 +140,7 @@ body {
 .nav-spacer { flex: 1; }
 .sidebar-foot { border-top: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .sidebar-foot .btn { justify-content: center; text-align: center; gap: 8px; }
+.sidebar-foot a.btn, .sidebar-foot a.btn:hover { text-decoration: none; }
 .sidebar-foot .btn.active {
   background: var(--primary-soft);
   color: var(--primary);
@@ -295,6 +296,29 @@ body {
   border-color: #047857;
 }
 [data-theme="dark"] .btn-mint svg { stroke: #04241a; }
+
+/* ---------- Mango Action Button (vibrant golden-yellow, for the Release Notes link) ---------- */
+.btn-mango {
+  background: linear-gradient(135deg, #ffc24b 0%, #f9a825 55%, #e08e00 100%);
+  color: #3d2600 !important;
+  font-weight: 700 !important;
+  border: 1px solid #d98700;
+  box-shadow: 0 1px 3px rgba(249, 168, 37, 0.35);
+}
+.btn-mango:hover {
+  background: linear-gradient(135deg, #ffd27a 0%, #ffc24b 55%, #f9a825 100%);
+  color: #2e1c00 !important;
+  box-shadow: 0 2px 8px rgba(249, 168, 37, 0.45);
+  transform: translateY(-1px);
+}
+.btn-mango svg { stroke: #3d2600; stroke-width: 2.1; }
+[data-theme="dark"] .btn-mango {
+  background: linear-gradient(135deg, #ffc24b 0%, #f9a825 55%, #e08e00 100%);
+  color: #2e1c00 !important;
+  font-weight: 800 !important;
+  border-color: #c97b00;
+}
+[data-theme="dark"] .btn-mango svg { stroke: #2e1c00; }
 
 /* ---------- Theme Switch Button (Previews Next Theme Colors) ---------- */
 .sidebar-theme-btn {

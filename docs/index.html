@@ -111,18 +111,31 @@
   footer{border-top:1px solid var(--border); padding:34px 0 60px; color:var(--faint); font-size:13.5px}
   footer .row{display:flex; flex-wrap:wrap; gap:14px 22px; align-items:center; justify-content:space-between}
   hr.soft{border:0; border-top:1px solid var(--border); margin:0}
+
+  /* Changelog (rendered from CHANGELOG.md) */
+  .changelog{max-width:760px}
+  .changelog .cl-ver{font-size:18px; letter-spacing:-.01em; margin:30px 0 4px; padding-top:20px;
+     border-top:1px solid var(--border)}
+  .changelog .cl-ver:first-child{border-top:0; padding-top:0; margin-top:6px}
+  .changelog .cl-cat{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em;
+     color:var(--muted); margin:16px 0 6px}
+  .changelog ul{margin:0 0 4px; padding-left:20px}
+  .changelog li{margin:6px 0; color:var(--muted); line-height:1.55}
+  .changelog li strong{color:var(--text)}
+  .changelog p{color:var(--faint); font-size:13.5px; margin:6px 0}
+  .changelog code{font-size:.85em}
 </style>
 </head>
 <body>
 
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.2.1 · 30 Aug 2026</span>
+    <span class="eyebrow">Release 1.2.3 · 30 Aug 2026</span>
     <h1>Core Facility Tracker — what’s new</h1>
     <p class="lede">A big pass over data entry and scale: booking now uses dropdown pickers instead of walls of chips, people carry a proper Department, meeting notes are rich text, nothing scrolls sideways, and the guided tour walks you through every dialog.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
-      <a class="btn btn-ghost" href="../CHANGELOG.md">Full changelog</a>
+      <a class="btn btn-ghost" href="#changelog">Full changelog</a>
       <a class="btn btn-ghost" href="https://github.com/Daniel-Waiger/Core-Facility-CRM">GitHub repo</a>
     </div>
     <div class="meta">Local-first · SQLite in the browser · no accounts, no cloud.</div>
@@ -266,12 +279,55 @@
   </div>
 </section>
 
+<section id="changelog">
+  <div class="wrap">
+    <h2>Full changelog</h2>
+    <p class="section-sub">Every version, newest first.</p>
+    <div class="changelog" id="cl-body"><p>Loading…</p></div>
+  </div>
+</section>
+
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · v1.2.1 · Bioimaging Facility</div>
-    <div><a href="../index.html">Open the app</a> · <a href="../CHANGELOG.md">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
+    <div>Core Facility Tracker · v1.2.3 · Bioimaging Facility</div>
+    <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>
+
+<script>
+  (function () {
+    var CL_GH = 'https://github.com/Daniel-Waiger/Core-Facility-CRM/blob/main/CHANGELOG.md';
+    function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function inline(s){
+      return esc(s)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    }
+    function render(md){
+      var out = '', inList = false;
+      function closeList(){ if (inList){ out += '</ul>'; inList = false; } }
+      md.replace(/\r/g, '').split('\n').forEach(function (raw){
+        var line = raw.replace(/\s+$/, '');
+        if (/^#\s+/.test(line)) { closeList(); return; }                    // drop the "# Changelog" title
+        if (/^##\s+/.test(line)) { closeList(); out += '<h3 class="cl-ver">' + inline(line.replace(/^##\s+/, '')) + '</h3>'; return; }
+        if (/^###\s+/.test(line)) { closeList(); out += '<h4 class="cl-cat">' + inline(line.replace(/^###\s+/, '')) + '</h4>'; return; }
+        if (/^[-*]\s+/.test(line)) { if (!inList){ out += '<ul>'; inList = true; } out += '<li>' + inline(line.replace(/^[-*]\s+/, '')) + '</li>'; return; }
+        closeList();
+        if (!line.trim()) return;
+        if (/documented here|Semantic Versioning/i.test(line)) return;       // skip the intro boilerplate
+        out += '<p>' + inline(line) + '</p>';
+      });
+      closeList();
+      return out;
+    }
+    var body = document.getElementById('cl-body');
+    fetch('../CHANGELOG.md').then(function (r){ if (!r.ok) throw 0; return r.text(); })
+      .then(function (md){ body.innerHTML = render(md); })
+      .catch(function (){ body.innerHTML = '<p>Couldn’t load the changelog here — <a href="' + CL_GH + '" target="_blank" rel="noopener">read it on GitHub</a>.</p>'; });
+  })();
+</script>
 
 </body>
 </html>
