@@ -482,7 +482,9 @@ textarea.input { resize: vertical; min-height: 74px; }
 }
 .tour-bubble .t { font-weight: 600; font-size: 14.5px; margin-bottom: 4px; color: var(--primary); }
 .tour-bubble .b { color: var(--text-muted); line-height: 1.45; }
-.tour-bubble .foot { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
+.tour-bubble .foot { margin-top: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tour-bubble .foot .grow { flex: 1 1 auto; min-width: 0; }
+.tour-bubble .foot .btn { flex: 0 0 auto; }
 .tour-bubble .foot .step { font-size: 11.5px; color: var(--text-faint); }
 
 /* ---------- Modal ---------- */

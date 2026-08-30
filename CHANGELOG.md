@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] — 2026-08-30
+
+### Added
+- **Back button in the guided tour** — step backwards to revisit an earlier step (shown from step 2 onward).
+
 ## [1.2.1] — 2026-08-30
 
 ### Fixed

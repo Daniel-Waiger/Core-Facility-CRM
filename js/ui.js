@@ -256,12 +256,14 @@
     const { box, bubble } = tourEls;
     const isLast = tourState.i >= tourState.steps.length - 1;
 
+    const hasBack = tourState.i > 0;
     bubble.innerHTML =
       '<div class="t">' + step.title + '</div>' +
       '<div class="b">' + step.body + '</div>' +
       '<div class="foot">' +
         '<span class="step">' + (tourState.i + 1) + ' / ' + tourState.steps.length + '</span>' +
         '<div class="grow"></div>' +
+        (hasBack ? '<button class="btn btn-ghost btn-sm" data-tour="back">Back</button>' : '') +
         '<button class="btn btn-ghost btn-sm" data-tour="skip">Skip</button>' +
         '<button class="btn btn-tour btn-sm" data-tour="next">' + (isLast ? 'Finish' : 'Next') + '</button>' +
       '</div>';
@@ -270,6 +272,12 @@
       tourState.i++;
       if (tourState.i >= tourState.steps.length) stopTour();
       else renderTour();
+    };
+    const back = bubble.querySelector('[data-tour="back"]');
+    if (back) back.onclick = () => {
+      if (!tourState || tourState.i === 0) return;
+      tourState.i--;
+      renderTour();
     };
     const skip = bubble.querySelector('[data-tour="skip"]');
     if (skip) skip.onclick = stopTour;
