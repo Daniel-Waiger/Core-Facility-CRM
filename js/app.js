@@ -890,6 +890,7 @@
       case 'booking-edit-save': return bookingEditSave(el.dataset.id);
       case 'meeting-del': return deleteMeeting(el.dataset.id);
       case 'booking-del': return deleteBookingFromModal(el.dataset.id);
+      case 'email-attendees': return emailAttendees(el.dataset.id);
 
       // Custom KV Fields CRUD
       case 'kv-add': return addKV();
@@ -1863,6 +1864,7 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-danger" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('trash')} Delete</button>
+        <button class="btn btn-secondary" data-act="email-attendees" data-id="${mt.id}">${ic('mail')} Email Attendees</button>
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-edit-save" data-id="${mt.id}">Save Changes</button>
       </div>`, (m) => mountBookingModal(m, { noteId: 'bke-note', owners: currentOwners, insts: currentInsts, note: mt.note }));
@@ -1906,6 +1908,54 @@
     DB.run('DELETE FROM meetings WHERE id=?', [id]);
     UI.toast('Booking removed');
     refresh();
+  }
+
+  // Build a mailto: link from a meeting's attendees and open the user's own email client
+  // pre-filled (recipients in BCC so attendees don't see each other's addresses). The app has
+  // no backend, so it can't send mail itself — this hands off to whatever mail client the OS uses.
+  function emailAttendees(id) {
+    const mt = DB.row('SELECT * FROM meetings WHERE id=?', [id]);
+    if (!mt) return;
+
+    const people = DB.rows(
+      'SELECT p.name, p.email FROM meeting_people mp JOIN people p ON p.id = mp.person_id WHERE mp.meeting_id=?',
+      [id]
+    );
+    const withEmail = people.filter((p) => p.email && p.email.trim());
+    const withoutEmail = people.filter((p) => !p.email || !p.email.trim());
+
+    if (!withEmail.length) {
+      UI.toast(people.length ? 'No attendee has an email address' : 'This meeting has no attendees', 'error');
+      return;
+    }
+
+    // Notes are a rich-text HTML subset — flatten to plain text for the email body.
+    const noteText = mt.note ? (function (html) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      return (tmp.textContent || '').trim();
+    })(mt.note) : '';
+
+    const bodyLines = [];
+    if (mt.date) bodyLines.push('Date: ' + mt.date);
+    const names = people.map((p) => p.name).join(', ');
+    if (names) bodyLines.push('Attendees: ' + names);
+    if (noteText) bodyLines.push('', 'Notes:', noteText);
+    if (mt.actions) bodyLines.push('', 'Next Steps / Action Items:', mt.actions);
+
+    const bcc = withEmail.map((p) => p.email.trim()).join(',');
+    const subject = (mt.date ? '[' + mt.date + '] ' : '') + mt.title;
+    const mailto = 'mailto:?bcc=' + encodeURIComponent(bcc) +
+      '&subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(bodyLines.join('\n'));
+
+    window.location.href = mailto;
+
+    if (withoutEmail.length) {
+      UI.toast(withoutEmail.length + ' attendee(s) skipped — no email on file', 'warn');
+    } else {
+      UI.toast('Opening your email client…');
+    }
   }
 
   // A booking with no project (facility-wide) only ever appears on the calendar / in its own

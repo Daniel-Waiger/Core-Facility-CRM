@@ -392,6 +392,7 @@
               <div class="row">
                 <span class="font-medium grow">${esc(m.title)}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
+                <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email attendees">${ic('mail')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="meeting-del" data-id="${m.id}" title="Delete meeting">${ic('trash')}</button>
               </div>
