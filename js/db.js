@@ -693,6 +693,18 @@
       'Maya to prepare test 24-well plate for PSF and resolution calibration next week.'
     ]);
 
+    // The `attendees` column above is a denormalized display string only — meeting_people is
+    // the join table features (e.g. emailing attendees) actually read from, so it needs the
+    // same rows the milestone_owners seeding above already provides for milestones.
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (1, 1)'); // Elena Rostova
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (1, 4)'); // Alex Chen
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (1, 6)'); // David Kim
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (2, 4)'); // Alex Chen
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (2, 6)'); // David Kim
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 2)'); // Marcus Thorne
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 5)'); // Maya Patel
+    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 6)'); // David Kim
+
     // 8. Custom KV Metadata
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Biosafety Level", "BSL-2 (Murine Live In-Vivo)")');
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Laser Wavelength", "920nm Ti:Sapphire 80MHz")');
