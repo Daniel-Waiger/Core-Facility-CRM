@@ -33,9 +33,11 @@
     const kv = DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     const mtgs = DB.rows('SELECT * FROM meetings WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
     const files = DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
+    const history = DB.rows('SELECT * FROM status_history WHERE project_id=? ORDER BY id ASC', [id]);
+    const comments = DB.rows('SELECT * FROM project_comments WHERE project_id=? ORDER BY id ASC', [id]);
     const prog = DB.projectProgress(id);
 
-    return { p, ppl, inst, ms, kv, mtgs, files, prog };
+    return { p, ppl, inst, ms, kv, mtgs, files, history, comments, prog };
   }
 
   function blobDownload(blob, filename) {
@@ -280,6 +282,24 @@
     const ws6 = XLSX.utils.aoa_to_sheet(fRows);
     ws6['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 40 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws6, 'Files');
+
+    // Sheet 7: Status History
+    const histRows = [['Date', 'From', 'To', 'Actor', 'Side', 'Note']];
+    d.history.forEach((h) => {
+      histRows.push([h.created_at, h.from_status || '—', h.to_status, h.actor || '—', h.side || '—', h.note || '']);
+    });
+    const ws7 = XLSX.utils.aoa_to_sheet(histRows);
+    ws7['!cols'] = [{ wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 22 }, { wch: 10 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, ws7, 'Status History');
+
+    // Sheet 8: Discussion
+    const commentRows = [['Date', 'Author', 'Side', 'Comment']];
+    d.comments.forEach((c) => {
+      commentRows.push([c.created_at, c.author || '—', c.side || '—', htmlToPlainText(c.body)]);
+    });
+    const ws8 = XLSX.utils.aoa_to_sheet(commentRows);
+    ws8['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 10 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, ws8, 'Discussion');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${d.p.code}_${d.p.title.replace(/[^a-z0-9_-]/gi, '_')}.xlsx`);

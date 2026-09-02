@@ -8,12 +8,21 @@
   let _personSavedCallback = null;
   const autoBackupFolderStatus = { supported: false, name: null, granted: false };
 
+  /* ---------------- Lab / Facility mode & identity ----------------
+     Per-install preference (advisory, not security — anyone on this device can switch it).
+     Drives which TRANSITIONS buttons show, dashboard framing, and the side/actor stamped on
+     status changes, comments, and exported containers. */
+  function appSide() { return UI.storage.getItem('crm-side') || ''; }
+  function actorName() { return UI.storage.getItem('crm-actor-name') || ''; }
+  function orgName() { return UI.storage.getItem('crm-org-name') || ''; }
+
   global.App = {
     boot: boot,
     route: route,
     refresh: refresh,
     get project() { return ctx.project; },
     get autoBackupFolderStatus() { return autoBackupFolderStatus; },
+    get side() { return appSide(); },
     onSaving() { UI.setSavedState('pending'); },
     onSaved() { UI.setSavedState('saved'); },
   };
@@ -404,6 +413,59 @@
     return !!(r && r.c);
   }
 
+  /* ---------------- First-run: choose Lab vs Facility mode ----------------
+     Advisory-only, per-install preference (see appSide() above) — asked once on first boot
+     (including for existing pre-1.3.0 users after the update), changeable later in Settings. */
+  function openModeModal(afterChoice) {
+    let ran = false;
+    const runAfter = () => { if (ran) return; ran = true; if (afterChoice) return afterChoice(); };
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('users')} Which side are you on?</span></div>
+      <div class="body"><div class="stack">
+        <p class="faint small mt-0">This tailors which workflow actions show up (submitting vs. reviewing) and labels your comments and status changes. It's a per-device convenience, not a login — anyone using this device can change it anytime in Settings.</p>
+        <div class="grid cols-2" style="gap:10px">
+          <div class="card mode-tile" data-mode-tile="lab" style="cursor:pointer;padding:14px;text-align:center">
+            <div style="font-size:22px">${ic('folder')}</div>
+            <div style="font-weight:600;margin-top:6px">Research Lab</div>
+            <div class="faint small">Drafts and submits projects to a core facility.</div>
+          </div>
+          <div class="card mode-tile" data-mode-tile="facility" style="cursor:pointer;padding:14px;text-align:center">
+            <div style="font-size:22px">${ic('cpu')}</div>
+            <div style="font-weight:600;margin-top:6px">Core Facility</div>
+            <div class="faint small">Reviews, schedules, and runs submitted projects.</div>
+          </div>
+        </div>
+        <div class="field mt-8"><label>Your Name</label><input class="input" id="mode-actor-name" placeholder="e.g. Dr. Elena Rostova" /></div>
+        <div class="field"><label>Lab / Facility Name (optional)</label><input class="input" id="mode-org-name" placeholder="e.g. Bio-Photonics Lab" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Skip for now</button>
+        <button class="btn btn-primary" id="mode-save" disabled>Continue</button>
+      </div>`, (m, dim) => {
+      let picked = '';
+      const saveBtn = m.querySelector('#mode-save');
+      m.querySelectorAll('[data-mode-tile]').forEach((t) => {
+        t.onclick = () => {
+          m.querySelectorAll('[data-mode-tile]').forEach((x) => x.classList.remove('selected'));
+          t.classList.add('selected');
+          picked = t.dataset.modeTile;
+          saveBtn.disabled = false;
+        };
+      });
+      saveBtn.onclick = () => {
+        if (!picked) return;
+        UI.storage.setItem('crm-side', picked);
+        UI.storage.setItem('crm-actor-name', m.querySelector('#mode-actor-name').value.trim());
+        UI.storage.setItem('crm-org-name', m.querySelector('#mode-org-name').value.trim());
+        UI.closeDim(dim);
+        UI.toast(`Workspace set to ${picked === 'lab' ? 'Research Lab' : 'Core Facility'} mode`);
+        renderShell();
+        refresh();
+        runAfter();
+      };
+    }, () => runAfter());
+  }
+
   /* ---------------- Automatic Backup ---------------- */
   const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -743,10 +805,18 @@
     const showNotice = () => (noticeParts.show ? showDeviceNotice(noticeParts) : Promise.resolve());
 
     const hideStartup = UI.storage.getItem('crm-hide-startup-modal') === '1';
-    if (!hideStartup) {
-      openStartupModal(showNotice); // notice pops after the welcome modal, not before it
+    const afterMode = () => {
+      if (!hideStartup) {
+        openStartupModal(showNotice); // notice pops after the welcome modal, not before it
+      } else {
+        return showNotice();
+      }
+    };
+
+    if (!appSide()) {
+      openModeModal(afterMode); // first-run: choose Lab vs Facility before anything else pops up
     } else {
-      await showNotice();
+      await afterMode();
     }
   }
 
@@ -842,6 +912,31 @@
       case 'set-project-status': return setProjectStatus(el.dataset.status);
       case 'duplicate-project': return duplicateProject(el.dataset.id || ctx.project);
       case 'delete-project': return deleteProject();
+
+      // Workflow: guided status transitions, manual override, history
+      case 'advance-status': return advanceStatus(el.dataset.to, el.dataset.label);
+      case 'status-change-save': return statusChangeSave(el.dataset.to);
+      case 'override-status': return overrideStatus();
+      case 'override-status-save': return overrideStatusSave();
+
+      // Review & Discussion
+      case 'add-comment': return addComment();
+      case 'comment-save': return commentSave();
+      case 'comment-del': return commentDel(el.dataset.id);
+
+      // Project container export / import (lab <-> facility handoff)
+      case 'export-container': return exportContainer();
+      case 'import-container': return importContainer();
+
+      // Settings: Workspace Mode & Identity
+      case 'set-mode': return setModeFromSettings();
+
+      // Dashboard: submission pipeline card links into the filtered Projects list
+      case 'dash-goto-status': {
+        route('projects');
+        Views.setProjectFilter({ status: el.dataset.status });
+        return;
+      }
 
       // Clipboard
       case 'copy': return UI.copyToClipboard(el.dataset.copy, el.dataset.copyLabel || 'Copied to clipboard');
@@ -1047,6 +1142,10 @@
     if (piId && inserted) {
       DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [inserted.id, piId, 'Principal Investigator']);
     }
+    if (inserted) {
+      DB.run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (?,?,?,?,?,?,?)',
+        [inserted.id, DB.newUid(), '', status, actorName(), appSide(), 'Project created']);
+    }
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Project created successfully');
     route('project', inserted ? inserted.id : null);
@@ -1133,6 +1232,8 @@
     const tags = m.querySelector('#ep-tags').value.trim();
     const notes = m.querySelector('#ep-notes').value.trim();
 
+    const prior = DB.row('SELECT status FROM projects WHERE id=?', [id]);
+
     try {
       DB.run(`
         UPDATE projects
@@ -1145,6 +1246,13 @@
       return;
     }
 
+    // Status changed via the Edit modal's free-form select bypasses the guided workflow, but
+    // still needs to land in the history log (CLAUDE.md: keep the log honest / gap-free).
+    if (prior && prior.status !== status) {
+      DB.run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (?,?,?,?,?,?,?)',
+        [id, DB.newUid(), prior.status, status, actorName(), appSide(), 'via Edit Project']);
+    }
+
     if (piId) {
       DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [id, piId, 'Principal Investigator']);
     }
@@ -1153,10 +1261,222 @@
     refresh();
   }
 
-  function setProjectStatus(status) {
+  /* ---------------- Workflow: status transitions, override, and history ---------------- */
+  function setProjectStatus(status, opts) {
     if (!ctx.project) return;
-    DB.run("UPDATE projects SET status=?, updated_at=datetime('now') WHERE id=?", [status, ctx.project]);
+    DB.setStatus(ctx.project, status, opts || {});
     UI.toast(`Status updated to ${status}`);
+    refresh();
+  }
+
+  function advanceStatus(to, label) {
+    if (!ctx.project) return;
+    const p = DB.row('SELECT status FROM projects WHERE id=?', [ctx.project]);
+    if (!p) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('target')} ${esc(label || 'Change Status')}</span></div>
+      <div class="body"><div class="stack">
+        <div class="row" style="gap:8px;align-items:center">
+          <span class="badge neutral">${esc(p.status)}</span>
+          <span class="faint">&rarr;</span>
+          <span class="badge primary">${esc(to)}</span>
+        </div>
+        <div class="field"><label>Your Name</label><input class="input" id="sc-actor" value="${esc(actorName())}" placeholder="Who is making this change?" /></div>
+        <div class="field"><label>Note (optional)</label><textarea class="input" id="sc-note" placeholder="Context for this change..."></textarea></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="status-change-save" data-to="${esc(to)}">Confirm</button>
+      </div>`, (m) => { const i = m.querySelector('#sc-actor'); if (i) i.focus(); });
+  }
+
+  function statusChangeSave(to) {
+    const m = document.querySelector('.modal');
+    const actor = m.querySelector('#sc-actor').value.trim();
+    const note = m.querySelector('#sc-note').value.trim();
+    if (actor) UI.storage.setItem('crm-actor-name', actor);
+    DB.setStatus(ctx.project, to, { actor, side: appSide(), note });
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast(`Status updated to ${to}`);
+    refresh();
+  }
+
+  function overrideStatus() {
+    if (!ctx.project) return;
+    const p = DB.row('SELECT status FROM projects WHERE id=?', [ctx.project]);
+    if (!p) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Set Status Manually</span></div>
+      <div class="body"><div class="stack">
+        <p class="faint small mt-0" style="color:var(--danger)">${ic('alert')} This bypasses the normal Lab/Facility workflow buttons — outside normal workflow, but still recorded in the project's history below.</p>
+        <div class="field"><label>New Status</label><select class="input" id="os-status">${C.STATUS.map((s) => `<option value="${s}" ${s === p.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+        <div class="field"><label>Your Name</label><input class="input" id="os-actor" value="${esc(actorName())}" /></div>
+        <div class="field"><label>Note (optional)</label><textarea class="input" id="os-note" placeholder="Why is this being set manually?"></textarea></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="override-status-save">Set Status</button>
+      </div>`);
+  }
+
+  function overrideStatusSave() {
+    const m = document.querySelector('.modal');
+    const to = m.querySelector('#os-status').value;
+    const actor = m.querySelector('#os-actor').value.trim();
+    const note = m.querySelector('#os-note').value.trim() || 'Set outside normal workflow';
+    if (actor) UI.storage.setItem('crm-actor-name', actor);
+    DB.setStatus(ctx.project, to, { actor, side: appSide(), note });
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast(`Status manually set to ${to}`);
+    refresh();
+  }
+
+  /* ---------------- Review & Discussion comments ---------------- */
+  function addComment() {
+    if (!ctx.project) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('mail')} Add Comment</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Your Name</label><input class="input" id="cm-author" value="${esc(actorName())}" /></div>
+        ${rteField('cm-body')}
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="comment-save">Post Comment</button>
+      </div>`, (m) => mountRichText(m, 'cm-body'));
+  }
+
+  function commentSave() {
+    const m = document.querySelector('.modal');
+    const author = m.querySelector('#cm-author').value.trim();
+    const body = readNote(m, 'cm-body');
+    if (!body) { UI.toast('Comment cannot be empty', 'error'); return; }
+    if (author) UI.storage.setItem('crm-actor-name', author);
+    DB.run('INSERT INTO project_comments (project_id, uid, author, side, body) VALUES (?,?,?,?,?)',
+      [ctx.project, DB.newUid(), author || 'Anonymous', appSide() || 'lab', body]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Comment posted');
+    refresh();
+  }
+
+  function commentDel(id) {
+    DB.run('DELETE FROM project_comments WHERE id=?', [id]);
+    UI.toast('Comment deleted');
+    refresh();
+  }
+
+  /* ---------------- Project container export / import ----------------
+     The lab<->facility handoff channel: a single-project JSON snapshot self-contained enough to
+     travel between two independent installs. See ROADMAP.md / CLAUDE.md for the full rationale. */
+  function exportContainer() {
+    if (!ctx.project) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('external')} Export Project Container</span></div>
+      <div class="body"><div class="stack">
+        <p class="faint small mt-0">Creates a single JSON file with this project's team, milestones, meetings, files, discussion, and status history — meant to be imported into the other side's install (lab &harr; facility).</p>
+        <label class="row" style="gap:8px;cursor:pointer">
+          <input type="checkbox" id="ec-uploads" checked />
+          <span class="small font-medium">Include uploaded file contents</span>
+        </label>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" id="ec-go">${ic('file')} Export</button>
+      </div>`, (m, dim) => {
+      m.querySelector('#ec-go').onclick = async () => {
+        const includeUploads = m.querySelector('#ec-uploads').checked;
+        try {
+          const data = await DB.buildProjectContainer(ctx.project, { includeUploads });
+          const json = JSON.stringify(data);
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `project-${data.project.code}-container-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          UI.closeDim(dim);
+          UI.toast('Project container exported');
+          refresh();
+        } catch (e) {
+          UI.toast('Could not export: ' + (e.message || 'unknown error'), 'error');
+        }
+      };
+    });
+  }
+
+  function importContainer() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.onchange = async () => {
+      const f = input.files[0];
+      if (!f) return;
+      let data;
+      try { data = JSON.parse(await f.text()); } catch (e) { UI.toast('Could not read file: ' + (e.message || 'invalid JSON'), 'error'); return; }
+      if (!data || data.kind !== C.CONTAINER_KIND) {
+        UI.toast('This is not a project container file (use Restore Backup instead for a full-database backup).', 'error');
+        return;
+      }
+      if ((data.container_version || 1) > C.CONTAINER_VERSION) {
+        UI.toast('This container was exported by a newer version of the app — please update the app before importing it.', 'error');
+        return;
+      }
+      showImportPreview(data);
+    };
+    input.click();
+  }
+
+  function showImportPreview(data) {
+    const proj = data.project || {};
+    const existing = proj.container_uid ? DB.row('SELECT * FROM projects WHERE container_uid=?', [proj.container_uid]) : null;
+    const verdict = existing ? 'update' : 'create';
+    const exp = data.exported_by || {};
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('external')} Import Project Container</span></div>
+      <div class="body"><div class="stack">
+        <div class="card" style="background:var(--surface-2);padding:10px">
+          <div><strong>From:</strong> ${esc(exp.name || 'Unknown')}${exp.org ? ' (' + esc(exp.org) + ')' : ''}${exp.side ? ' — ' + esc(exp.side) : ''}</div>
+          <div class="faint small">Exported: ${esc(data.exported_at ? new Date(data.exported_at).toLocaleString() : '—')}</div>
+        </div>
+        <p>${verdict === 'create'
+          ? `This will <strong>create a new project</strong>: "${esc(proj.title || 'Untitled')}" (${esc(proj.code || '')}).`
+          : `This will <strong>update the existing project</strong> "${esc(existing.title)}" — status and scalar fields refresh from this file.`}</p>
+        <ul class="faint small" style="padding-left:18px;line-height:1.7;margin:0">
+          <li>${(data.milestones || []).length} milestone(s), ${(data.meetings || []).length} meeting(s), ${(data.files || []).length} file(s) from the sender replace their own previously-sent rows here — anything created on this side is never touched or deleted.</li>
+          <li>${(data.comments || []).length} discussion comment(s) and ${(data.status_history || []).length} history entries merge in — nothing already here is ever removed.</li>
+          <li>${(data.people || []).length} people and ${(data.instruments || []).length} instrument(s) match by email/name, creating only what isn't already on file.</li>
+        </ul>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" id="ic-go">${ic('check')} Apply Import</button>
+      </div>`, (m, dim) => {
+      m.querySelector('#ic-go').onclick = async () => {
+        try {
+          const summary = await DB.importProjectContainer(data);
+          UI.closeDim(dim);
+          UI.toast(`Import complete — ${summary.created ? 'created new project' : 'updated project'}${summary.codeCollision ? ' (code renamed to avoid a collision)' : ''}`);
+          route('project', summary.projectId);
+        } catch (e) {
+          UI.toast('Import failed: ' + (e.message || 'unknown error'), 'error');
+        }
+      };
+    });
+  }
+
+  /* ---------------- Settings: Workspace Mode & Identity card ---------------- */
+  function setModeFromSettings() {
+    const picked = document.querySelector('input[name="settings-mode"]:checked');
+    if (!picked) { UI.toast('Choose Lab or Facility', 'error'); return; }
+    UI.storage.setItem('crm-side', picked.value);
+    const nameEl = document.getElementById('settings-actor-name');
+    const orgEl = document.getElementById('settings-org-name');
+    if (nameEl) UI.storage.setItem('crm-actor-name', nameEl.value.trim());
+    if (orgEl) UI.storage.setItem('crm-org-name', orgEl.value.trim());
+    UI.toast('Workspace mode & identity updated');
+    renderShell();
     refresh();
   }
 
@@ -1190,7 +1510,7 @@
       DB.run(`
         INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [src.title + ' (Copy)', newCode, 'Initiated', src.priority, src.pi_id, src.modality, src.funding, src.sample, src.flags, null, null, src.tags, src.notes]
+        [src.title + ' (Copy)', newCode, 'Draft', src.priority, src.pi_id, src.modality, src.funding, src.sample, src.flags, null, null, src.tags, src.notes]
       );
     } catch (e) {
       UI.toast('Could not duplicate project: ' + (e.message || 'unknown error'), 'error');
@@ -1220,6 +1540,11 @@
       DB.rows('SELECT instrument_id FROM milestone_instruments WHERE milestone_id=?', [m.id]).forEach((mi) =>
         DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [newMid, mi.instrument_id]));
     });
+
+    // A duplicate is a fresh project template — container_uid stays blank (assigned lazily on
+    // first export, same as any new project), and no comments/history are copied over.
+    DB.run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (?,?,?,?,?,?,?)',
+      [newId, DB.newUid(), '', 'Draft', actorName(), appSide(), 'Duplicated from ' + src.code]);
 
     UI.toast('Project duplicated');
     route('project', newId);

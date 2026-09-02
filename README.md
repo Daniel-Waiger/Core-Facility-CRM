@@ -2,7 +2,7 @@
 
 A portable, standalone web application tailored for microscopy, bioimaging, flow cytometry, and scientific image-analysis core facilities.
 
-Track research projects from initiation to completion with full lifecycle tracking, milestone deliverables, equipment allocation, team management, consultation notes, and one-click report exports (XLSX, DOCX, and multi-page PDF).
+Track research projects from initiation to completion with full lifecycle tracking, milestone deliverables, equipment allocation, team management, consultation notes, and one-click report exports (XLSX, DOCX, and multi-page PDF). Runs as independent installs on both sides of a lab &harr; core-facility relationship, connected by a portable project-container handoff file — see [`ROADMAP.md`](ROADMAP.md) for the vision and design rationale.
 
 ---
 
@@ -15,7 +15,8 @@ Track research projects from initiation to completion with full lifecycle tracki
   - **Seeded Example & Walkthrough:** Load a realistic bioimaging facility dataset (Multiphoton, STED, Lightsheet, etc.) with an interactive step-by-step tour.
   - **Start Fresh (Empty Workspace):** One-click initialization of a clean, empty database ready for direct entry.
 - **Full CRUD Capabilities:**
-  - **Projects:** Title, unique project code generation (`PRJ-YYMM-###`), status lifecycle (`Initiated` → `Active` → `On-hold` → `Completed` → `Archived`), priority, funding sources, modality/techniques, sample types, risk flags, timelines, tags, and notes. Includes inline researcher/PI registration.
+  - **Projects:** Title, unique project code generation (`PRJ-YYMM-###`), a guided Lab &harr; Facility submission workflow (`Draft` → `Submitted` → `Under Review` → `Revisions Requested` / `Kick-off Scheduled` → `Active` → `On-hold` → `Completed` → `Archived`, plus a manual-override escape hatch) with a full status history log, priority, funding sources, modality/techniques, sample types, risk flags, timelines, tags, and notes. Includes inline researcher/PI registration and a per-project Review & Discussion thread.
+  - **Project Containers:** Export a single project (team, milestones, meetings, files, discussion, status history) as one portable JSON file and import it into another install — the handoff channel between a lab's and a facility's separate installs. See [`ROADMAP.md`](ROADMAP.md).
   - **Milestones:** Deliverables with due dates, notes, assigned staff/collaborators, assigned instruments, and single-click status cycling (`pending` → `in-progress` → `done`). Overall project progress is automatically derived.
   - **Team & Lab Registry:** Principal Investigators, lab members, postdoctoral fellows, students, and core technicians with Lab/Group/Company affiliations.
   - **Core Instruments:** Microscopes, cytometers, workstations, and equipment tracking with operational status (`Available`, `In-use`, `Maintenance`, `Down`).

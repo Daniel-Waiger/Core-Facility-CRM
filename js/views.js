@@ -16,6 +16,7 @@
     for (const r of stRows) counts[r.status] = r.n;
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     const active = counts['Active'] || 0;
+    const side = global.App.side;
 
     const win = new Date(); win.setDate(win.getDate() + 30);
     const winStr = win.toISOString().slice(0, 10);
@@ -31,13 +32,40 @@
       WHERE m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
       ORDER BY m.due_date ASC LIMIT 10`, [now]);
 
+    // Mode-based fourth stat tile: facility framing = review backlog, lab framing = own next-action
+    // backlog. Unset mode (side === '') keeps the original neutral "Completed" tile.
+    const awaitingReview = (counts['Submitted'] || 0) + (counts['Under Review'] || 0);
+    const awaitingFacility = (counts['Submitted'] || 0) + (counts['Under Review'] || 0) + (counts['Kick-off Scheduled'] || 0);
+    const needsRevisions = counts['Revisions Requested'] || 0;
+    const modeTile = side === 'facility'
+      ? `<div class="card stat"><span class="n" style="color:var(--warning)">${awaitingReview}</span><span class="l">Awaiting review</span></div>`
+      : side === 'lab'
+      ? `<div class="card stat"><span class="n" style="color:var(--danger)">${needsRevisions}</span><span class="l">Needs your revisions</span></div>`
+      : `<div class="card stat"><span class="n" style="color:var(--success)">${counts['Completed'] || 0}</span><span class="l">Completed</span></div>`;
+
     return `
     <div class="grid cols-4 mb-16">
       <div class="card stat"><span class="n">${total}</span><span class="l">Total projects</span></div>
       <div class="card stat"><span class="n" style="color:var(--primary)">${active}</span><span class="l">Active</span></div>
       <div class="card stat"><span class="n" style="color:var(--danger)">${overdue.length}</span><span class="l">Overdue milestones</span></div>
-      <div class="card stat"><span class="n" style="color:var(--success)">${counts['Completed'] || 0}</span><span class="l">Completed</span></div>
+      ${modeTile}
     </div>
+
+    ${side ? `
+    <div class="card mb-16">
+      <div class="card-title">${ic('target')} Submission pipeline</div>
+      <div class="card-body">
+        <div class="grid cols-3" style="gap:8px">
+          ${(side === 'lab' ? ['Draft', 'Submitted', 'Revisions Requested', 'Kick-off Scheduled'] : ['Submitted', 'Under Review', 'Revisions Requested', 'Kick-off Scheduled']).map((s) => `
+            <div class="row clickable" data-act="dash-goto-status" data-status="${esc(s)}" style="justify-content:space-between;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+              <span class="small">${esc(s)}</span>
+              <span class="badge ${(C.STATUS_META[s] || {}).badge || 'neutral'}">${counts[s] || 0}</span>
+            </div>`).join('')}
+        </div>
+        ${side === 'lab' ? `<div class="faint small mt-8">${awaitingFacility} project(s) currently with the facility (submitted, under review, or awaiting kick-off).</div>` : ''}
+      </div>
+    </div>` : ''}
+
     <div class="grid cols-2">
       <div class="card">
         <div class="card-title">${ic('target')} Upcoming milestones (Next 30 days)</div>
@@ -115,6 +143,7 @@
           <option value="">All Modalities</option>
           ${C.MODALITY.map((m) => `<option value="${m}" ${projectFilter.modality === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
+        <button class="btn btn-secondary" data-act="import-container" title="Import a lab/facility handoff container">${ic('external')} Import Container</button>
         <button class="btn btn-secondary" data-act="export-all-xlsx" title="Export all projects to one spreadsheet">${ic('file')} Export All</button>
         <button class="btn btn-primary" data-act="new-project">${ic('plus')} New Project</button>
       </div>
@@ -186,8 +215,21 @@
   }
 
   function statusBadge(s) {
-    const map = { 'Initiated': 'neutral', 'Active': 'primary', 'On-hold': 'warning', 'Completed': 'success', 'Archived': 'neutral' };
-    return `<span class="badge ${map[s] || 'neutral'}">${esc(s)}</span>`;
+    const meta = (C.STATUS_META && C.STATUS_META[s]) || {};
+    return `<span class="badge ${meta.badge || 'neutral'}">${esc(meta.label || s)}</span>`;
+  }
+
+  /* ---------------- Workflow: pipeline strip + allowed transition buttons ---------------- */
+  function pipelineStrip(currentStatus) {
+    return `<div class="pipeline-strip">` + C.STATUS.map((s, i) => `
+      ${i > 0 ? '<span class="pipe-sep">&rarr;</span>' : ''}
+      <span class="pipe-step ${s === currentStatus ? 'current' : ''}">${esc(s)}</span>
+    `).join('') + `</div>`;
+  }
+
+  function transitionButtons(status) {
+    const side = global.App.side; // '' (mode not chosen) shows every transition, as if any side
+    return (C.TRANSITIONS || []).filter((t) => t.from === status && (t.side === 'any' || !side || t.side === side));
   }
 
   /* ---------------- Project detail ---------------- */
@@ -218,8 +260,11 @@
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     const mtgs = global.DB.rows('SELECT * FROM meetings WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
     const files = global.DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
+    const history = global.DB.rows('SELECT * FROM status_history WHERE project_id=? ORDER BY id DESC', [id]);
+    const comments = global.DB.rows('SELECT * FROM project_comments WHERE project_id=? ORDER BY id ASC', [id]);
     const prog = global.DB.projectProgress(p.id);
     const flags = (p.flags || '').split(',').filter(Boolean);
+    const transitions = transitionButtons(p.status);
 
     return `
     <div class="card mb-16 project-header-card">
@@ -240,6 +285,7 @@
         <div class="row" style="gap:8px;flex-wrap:wrap" data-tour="proj-exports">
           <button class="btn btn-primary btn-sm" data-act="edit-project" data-id="${p.id}">${ic('edit')} Edit Project</button>
           <button class="btn btn-secondary btn-sm" data-act="duplicate-project" data-id="${p.id}" title="Duplicate as a new project template">${ic('layers')} Duplicate</button>
+          <button class="btn btn-secondary btn-sm" data-act="export-container" title="Export a lab/facility handoff container">${ic('external')} Container</button>
           <button class="btn btn-secondary btn-sm" data-act="export-xlsx" title="Export Spreadsheet">${ic('file')} XLSX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-docx" title="Export Word Document">${ic('file')} DOCX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-pdf" title="Export Formatted PDF">${ic('file')} PDF</button>
@@ -247,16 +293,16 @@
         </div>
       </div>
 
-      <!-- Quick Status Lifecycle Bar -->
+      <!-- Workflow: pipeline strip + guided transition buttons -->
       <div class="lifecycle-bar mt-16">
-        <span class="faint small font-medium">Quick Status:</span>
-        <div class="row" style="gap:6px;flex-wrap:wrap">
-          ${C.STATUS.map((st) => `
-            <button class="btn btn-sm ${p.status === st ? 'btn-primary' : 'btn-ghost'}" data-act="set-project-status" data-status="${st}">
-              ${st}
-            </button>
-          `).join('')}
-        </div>
+        <span class="faint small font-medium">Pipeline:</span>
+        ${pipelineStrip(p.status)}
+      </div>
+      <div class="row mt-8" style="gap:6px;flex-wrap:wrap;align-items:center">
+        ${transitions.length ? transitions.map((t) => `
+          <button class="btn btn-sm btn-primary" data-act="advance-status" data-to="${esc(t.to)}" data-label="${esc(t.label)}">${esc(t.label)}</button>
+        `).join('') : '<span class="faint small">No workflow action available in the current mode for this status.</span>'}
+        <button class="btn btn-ghost btn-sm" data-act="override-status" title="Set status outside the normal workflow">${ic('edit')} Set status manually&hellip;</button>
       </div>
     </div>
 
@@ -400,6 +446,50 @@
               ${m.note ? `<div class="small muted mt-8 rte-content">${global.UI.noteHtml(m.note)}</div>` : ''}
               ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
             </div>`).join('') : emptyState('calendar', 'No meetings recorded', 'Log sync meetings, consultation notes, and action items.')}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid cols-2 mt-16">
+      <!-- Status History Card -->
+      <div class="card">
+        <div class="row mb-8">
+          <div class="grow"><span class="card-title">${ic('clock')} Status History</span></div>
+        </div>
+        <div class="card-body">
+          ${history.length ? history.map((h) => `
+            <div class="row" style="padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;align-items:center">
+              <span class="mono small faint">${fmt(h.created_at)}</span>
+              <span class="badge neutral">${esc(h.from_status || '—')}</span>
+              <span class="faint">&rarr;</span>
+              <span class="badge primary">${esc(h.to_status)}</span>
+              ${h.actor ? `<span class="small">${esc(h.actor)}</span>` : ''}
+              ${h.side ? `<span class="badge ${h.side === 'facility' ? 'warning' : 'neutral'}" style="font-size:10px">${esc(h.side)}</span>` : ''}
+              ${h.note ? `<div class="faint small" style="width:100%">${esc(h.note)}</div>` : ''}
+            </div>`).join('') : emptyState('clock', 'No history yet', 'Status changes will be recorded here.')}
+        </div>
+      </div>
+
+      <!-- Review & Discussion Card -->
+      <div class="card">
+        <div class="row mb-8">
+          <div class="grow"><span class="card-title">${ic('mail')} Review &amp; Discussion</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="add-comment">${ic('plus')} Add Comment</button>
+        </div>
+        <div class="card-body">
+          ${comments.length ? comments.map((c) => `
+            <div class="row" style="padding:8px 0;border-bottom:1px solid var(--border);align-items:flex-start;gap:8px">
+              <div class="avatar">${esc((c.author || '?')[0] || '?')}</div>
+              <div class="grow">
+                <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+                  <span class="font-medium">${esc(c.author || 'Anonymous')}</span>
+                  <span class="badge ${c.side === 'facility' ? 'warning' : 'neutral'}" style="font-size:10px">${esc(c.side || 'lab')}</span>
+                  <span class="faint small mono">${fmt(c.created_at)}</span>
+                </div>
+                <div class="small mt-8 rte-content">${global.UI.noteHtml(c.body)}</div>
+              </div>
+              <span class="del" data-act="comment-del" data-id="${c.id}" title="Delete comment">${ic('x')}</span>
+            </div>`).join('') : emptyState('mail', 'No discussion yet', 'Start the conversation between the lab and the facility.')}
         </div>
       </div>
     </div>`;
@@ -709,8 +799,35 @@
     const lastAutoBackup = UI.storage.getItem('last-auto-backup-at');
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
     const folderStatus = global.App.autoBackupFolderStatus;
+    const curSide = UI.storage.getItem('crm-side') || '';
+    const curActor = UI.storage.getItem('crm-actor-name') || '';
+    const curOrg = UI.storage.getItem('crm-org-name') || '';
 
     return `
+    <div class="card mb-16">
+      <div class="card-title">${ic('users')} Workspace Mode &amp; Identity</div>
+      <div class="card-body">
+        <p class="faint small mt-0">Tailors which workflow actions show up (submitting vs. reviewing) and labels your comments and status changes. This is a per-device convenience, not a login or security boundary — anyone using this device/browser can change it.</p>
+        <div class="grid cols-2" style="gap:10px">
+          <label class="card mode-tile ${curSide === 'lab' ? 'selected' : ''}" style="cursor:pointer;padding:12px;text-align:center;display:block">
+            <input type="radio" name="settings-mode" value="lab" ${curSide === 'lab' ? 'checked' : ''} style="margin-bottom:6px" />
+            <div style="font-weight:600">Research Lab</div>
+            <div class="faint small">Drafts and submits projects to a core facility.</div>
+          </label>
+          <label class="card mode-tile ${curSide === 'facility' ? 'selected' : ''}" style="cursor:pointer;padding:12px;text-align:center;display:block">
+            <input type="radio" name="settings-mode" value="facility" ${curSide === 'facility' ? 'checked' : ''} style="margin-bottom:6px" />
+            <div style="font-weight:600">Core Facility</div>
+            <div class="faint small">Reviews, schedules, and runs submitted projects.</div>
+          </label>
+        </div>
+        <div class="grid cols-2 mt-8">
+          <div class="field"><label>Your Name</label><input class="input" id="settings-actor-name" value="${esc(curActor)}" placeholder="e.g. Dr. Elena Rostova" /></div>
+          <div class="field"><label>Lab / Facility Name (optional)</label><input class="input" id="settings-org-name" value="${esc(curOrg)}" placeholder="e.g. Bio-Photonics Lab" /></div>
+        </div>
+        <button class="btn btn-primary btn-sm mt-8" data-act="set-mode">${ic('check')} Save</button>
+      </div>
+    </div>
+
     <div class="card mb-16">
       <div class="card-title">${ic('settings')} Preferences</div>
       <div class="card-body">
@@ -754,10 +871,12 @@
             <div class="faint small">Your entire facility database lives securely in your browser's persistent storage. Export a portable JSON backup anytime for safekeeping or to transfer to another workstation.</div>
           </div>
         </div>
-        <div class="row mt-8" style="gap:10px">
+        <div class="row mt-8" style="gap:10px;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" data-act="backup">${ic('file')} Export Backup (.json)</button>
           <button class="btn btn-secondary btn-sm" data-act="restore">${ic('external')} Restore from Backup</button>
+          <button class="btn btn-secondary btn-sm" data-act="import-container">${ic('external')} Import Project Container</button>
         </div>
+        <div class="faint small mt-8">A <strong>Backup</strong> is your whole database; a <strong>Project Container</strong> is a single project handed off between a lab and a facility install (export one from a project's detail page).</div>
         <div class="divider"></div>
         <div class="row mb-8">
           <div class="grow">

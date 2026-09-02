@@ -9,7 +9,7 @@
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     code TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL DEFAULT 'Initiated',
+    status TEXT NOT NULL DEFAULT 'Draft',
     priority TEXT DEFAULT 'Medium',
     funding TEXT DEFAULT '',
     modality TEXT DEFAULT '',
@@ -20,6 +20,7 @@
     start_date TEXT,
     end_date TEXT,
     notes TEXT DEFAULT '',
+    container_uid TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -60,6 +61,8 @@
     due_date TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     note TEXT DEFAULT '',
+    uid TEXT DEFAULT '',
+    origin_side TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -82,6 +85,8 @@
     link TEXT DEFAULT '',
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
+    uid TEXT DEFAULT '',
+    origin_side TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -101,6 +106,28 @@
     name TEXT NOT NULL,
     kind TEXT DEFAULT 'upload',
     path TEXT DEFAULT '',
+    uid TEXT DEFAULT '',
+    origin_side TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS status_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    uid TEXT DEFAULT '',
+    from_status TEXT DEFAULT '',
+    to_status TEXT NOT NULL,
+    actor TEXT DEFAULT '',
+    side TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS project_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    uid TEXT DEFAULT '',
+    author TEXT DEFAULT '',
+    side TEXT DEFAULT 'lab',
+    body TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS kv (
@@ -119,6 +146,9 @@
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
   CREATE INDEX IF NOT EXISTS ix_files_project ON files(project_id);
   CREATE INDEX IF NOT EXISTS ix_kv_project ON kv(project_id);
+  CREATE INDEX IF NOT EXISTS ix_status_history_project ON status_history(project_id);
+  CREATE INDEX IF NOT EXISTS ix_project_comments_project ON project_comments(project_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_container_uid ON projects(container_uid) WHERE container_uid <> '';
   `;
 
   /* ---------------- sql.js bootstrap ---------------- */
@@ -191,6 +221,80 @@
         `);
       }
     } catch (e) { console.warn('meetings.project_id migration skipped:', e); }
+
+    /* ---- v1.3.0: Lab <-> Facility workflow (statuses, container export/import, uids) ---- */
+    try { db.exec("ALTER TABLE projects ADD COLUMN container_uid TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE milestones ADD COLUMN uid TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE milestones ADD COLUMN origin_side TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN uid TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN origin_side TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE files ADD COLUMN uid TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE files ADD COLUMN origin_side TEXT DEFAULT ''"); } catch (_) {}
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS status_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          uid TEXT DEFAULT '',
+          from_status TEXT DEFAULT '',
+          to_status TEXT NOT NULL,
+          actor TEXT DEFAULT '',
+          side TEXT DEFAULT '',
+          note TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS project_comments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          uid TEXT DEFAULT '',
+          author TEXT DEFAULT '',
+          side TEXT DEFAULT 'lab',
+          body TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS ix_status_history_project ON status_history(project_id);
+        CREATE INDEX IF NOT EXISTS ix_project_comments_project ON project_comments(project_id);
+      `);
+    } catch (_) {}
+    try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_container_uid ON projects(container_uid) WHERE container_uid <> ''"); } catch (_) {}
+
+    // 'Initiated' (pre-1.3.0 initial status) becomes 'Draft' — the new workflow's starting point.
+    try { db.exec("UPDATE projects SET status='Draft' WHERE status='Initiated'"); } catch (_) {}
+
+    // Backfill container_uid on every project that doesn't have one yet, so every project can
+    // be exported as a container without needing a save first.
+    try {
+      const mySide = (function () {
+        try { return global.UI && global.UI.storage.getItem('crm-side') || ''; } catch (_) { return ''; }
+      })();
+      const missing = rows("SELECT id FROM projects WHERE container_uid IS NULL OR container_uid=''");
+      for (const r of missing) {
+        run('UPDATE projects SET container_uid=? WHERE id=?', [newUid(), r.id]);
+      }
+      for (const table of ['milestones', 'meetings', 'files']) {
+        const need = rows(`SELECT id FROM ${table} WHERE uid IS NULL OR uid=''`);
+        for (const r of need) run(`UPDATE ${table} SET uid=? WHERE id=?`, [newUid(), r.id]);
+        // Pre-1.3 rows are treated as owned by whichever side this install currently is (or
+        // left blank pre-mode, which import treats as "protected/local" — see importProjectContainer).
+        run(`UPDATE ${table} SET origin_side=? WHERE origin_side IS NULL OR origin_side=''`, [mySide]);
+      }
+
+      // Synthetic first history row for any project that has none yet, so the history card
+      // is never empty for pre-1.3 data and the upgrade is visible in the log.
+      const noHistory = rows(`SELECT id, status FROM projects WHERE id NOT IN (SELECT DISTINCT project_id FROM status_history)`);
+      for (const p of noHistory) {
+        run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (?,?,?,?,?,?,?)',
+          [p.id, newUid(), '', p.status, '', '', 'Recorded at upgrade']);
+      }
+    } catch (e) { console.warn('v1.3.0 backfill skipped:', e); }
+  }
+
+  /* ---------------- Identity ---------------- */
+  function newUid() {
+    try {
+      if (global.crypto && global.crypto.randomUUID) return global.crypto.randomUUID();
+    } catch (_) {}
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   }
 
   async function boot() {
@@ -417,6 +521,321 @@
   async function saveUpload(name, blob) { await idbSet(UPLOAD_KEY + ':' + name, blob); }
   async function getUpload(name) { return idbGet(UPLOAD_KEY + ':' + name); }
 
+  /* ---------------- Status: the single writer for projects.status + status_history ---------------- */
+  function setStatus(projectId, to, opts = {}) {
+    const { actor = '', side = '', note = '' } = opts;
+    const cur = row('SELECT status FROM projects WHERE id=?', [projectId]);
+    const from = cur ? cur.status : '';
+    run("UPDATE projects SET status=?, updated_at=datetime('now') WHERE id=?", [to, projectId]);
+    run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (?,?,?,?,?,?,?)',
+      [projectId, newUid(), from, to, actor, side, note]);
+    return { from, to };
+  }
+
+  function currentIdentity() {
+    try {
+      return {
+        name: (global.UI && global.UI.storage.getItem('crm-actor-name')) || '',
+        side: (global.UI && global.UI.storage.getItem('crm-side')) || '',
+        org: (global.UI && global.UI.storage.getItem('crm-org-name')) || ''
+      };
+    } catch (_) { return { name: '', side: '', org: '' }; }
+  }
+
+  /* ---------------- Project container: single-project export/import ----------------
+     Self-contained JSON snapshot of one project designed to travel between two independent
+     installs (a lab's and a facility's) — see CLAUDE.md / ROADMAP.md for the full rationale.
+     People/instruments are embedded and referenced by array INDEX (not local row id, which is
+     meaningless on the other install) so identity resolution happens entirely at import time. */
+  async function buildProjectContainer(projectId, opts = {}) {
+    const includeUploads = opts.includeUploads !== false;
+    let p = row('SELECT * FROM projects WHERE id=?', [projectId]);
+    if (!p) throw new Error('Project not found');
+    if (!p.container_uid) {
+      run('UPDATE projects SET container_uid=? WHERE id=?', [newUid(), projectId]);
+      p = row('SELECT * FROM projects WHERE id=?', [projectId]);
+    }
+
+    const msRows = rows('SELECT * FROM milestones WHERE project_id=? ORDER BY id', [projectId]);
+    const mtRows = rows('SELECT * FROM meetings WHERE project_id=? ORDER BY id', [projectId]);
+    const fileRows = rows('SELECT * FROM files WHERE project_id=? ORDER BY id', [projectId]);
+    const kvRows = rows('SELECT key, value FROM kv WHERE project_id=? ORDER BY id', [projectId]);
+    const teamRows = rows('SELECT person_id, role FROM project_people WHERE project_id=?', [projectId]);
+    const commentRows = rows('SELECT * FROM project_comments WHERE project_id=? ORDER BY id', [projectId]);
+    const historyRows = rows('SELECT * FROM status_history WHERE project_id=? ORDER BY id', [projectId]);
+    const projInst = rows('SELECT instrument_id FROM project_instruments WHERE project_id=?', [projectId]).map((r) => r.instrument_id);
+
+    const msOwners = {}, msInst = {};
+    for (const m of msRows) {
+      msOwners[m.id] = rows('SELECT person_id FROM milestone_owners WHERE milestone_id=?', [m.id]).map((r) => r.person_id);
+      msInst[m.id] = rows('SELECT instrument_id FROM milestone_instruments WHERE milestone_id=?', [m.id]).map((r) => r.instrument_id);
+    }
+    const mtPeople = {}, mtInst = {};
+    for (const m of mtRows) {
+      mtPeople[m.id] = rows('SELECT person_id FROM meeting_people WHERE meeting_id=?', [m.id]).map((r) => r.person_id);
+      mtInst[m.id] = rows('SELECT instrument_id FROM meeting_instruments WHERE meeting_id=?', [m.id]).map((r) => r.instrument_id);
+    }
+
+    // People: union of team + PI + milestone owners + meeting attendees, indexed by array position.
+    const personIds = new Set();
+    teamRows.forEach((r) => personIds.add(r.person_id));
+    if (p.pi_id) personIds.add(p.pi_id);
+    Object.values(msOwners).forEach((arr) => arr.forEach((id) => personIds.add(id)));
+    Object.values(mtPeople).forEach((arr) => arr.forEach((id) => personIds.add(id)));
+    const personIdList = [...personIds];
+    const personIndex = new Map(personIdList.map((id, i) => [id, i]));
+    const teamRoleByPerson = new Map(teamRows.map((r) => [r.person_id, r.role]));
+    const people = personIdList.map((id) => {
+      const person = row('SELECT * FROM people WHERE id=?', [id]) || {};
+      return {
+        name: person.name || '', type: person.type || '', organization: person.organization || '',
+        department: person.department || '', email: person.email || '', note: person.note || '',
+        project_role: teamRoleByPerson.get(id) || ''
+      };
+    });
+
+    // Instruments: union of project + milestone + meeting instruments, indexed by array position.
+    const instIds = new Set(projInst);
+    Object.values(msInst).forEach((arr) => arr.forEach((id) => instIds.add(id)));
+    Object.values(mtInst).forEach((arr) => arr.forEach((id) => instIds.add(id)));
+    const instIdList = [...instIds];
+    const instIndex = new Map(instIdList.map((id, i) => [id, i]));
+    const instruments = instIdList.map((id) => {
+      const inst = row('SELECT * FROM instruments WHERE id=?', [id]) || {};
+      return { name: inst.name || '', kind: inst.kind || '', status: inst.status || '', location: inst.location || '', note: inst.note || '' };
+    });
+
+    const milestones = msRows.map((m) => ({
+      uid: m.uid || newUid(), origin_side: m.origin_side || '', name: m.name, due_date: m.due_date,
+      status: m.status, note: m.note,
+      owners: (msOwners[m.id] || []).map((id) => personIndex.get(id)).filter((i) => i != null),
+      instruments: (msInst[m.id] || []).map((id) => instIndex.get(id)).filter((i) => i != null),
+      created_at: m.created_at, updated_at: m.updated_at
+    }));
+    const meetings = mtRows.map((m) => ({
+      uid: m.uid || newUid(), origin_side: m.origin_side || '', title: m.title, date: m.date, link: m.link,
+      note: m.note, actions: m.actions,
+      people: (mtPeople[m.id] || []).map((id) => personIndex.get(id)).filter((i) => i != null),
+      instruments: (mtInst[m.id] || []).map((id) => instIndex.get(id)).filter((i) => i != null),
+      created_at: m.created_at, updated_at: m.updated_at
+    }));
+
+    const files = [];
+    for (const f of fileRows) {
+      const entry = { uid: f.uid || newUid(), origin_side: f.origin_side || '', name: f.name, kind: f.kind, path: f.path, created_at: f.created_at };
+      if (includeUploads && f.kind === 'upload') {
+        try {
+          const blob = await getUpload(f.path);
+          if (blob) entry.data = await blobToBase64(blob);
+        } catch (_) { /* skip content, metadata row still travels */ }
+      }
+      files.push(entry);
+    }
+
+    const comments = commentRows.map((c) => ({ uid: c.uid || newUid(), author: c.author, side: c.side, body: c.body, created_at: c.created_at }));
+    const status_history = historyRows.map((h) => ({ uid: h.uid || newUid(), from_status: h.from_status, to_status: h.to_status, actor: h.actor, side: h.side, note: h.note, created_at: h.created_at }));
+
+    return {
+      kind: global.CONST.CONTAINER_KIND,
+      container_version: global.CONST.CONTAINER_VERSION,
+      exported_at: new Date().toISOString(),
+      exported_by: currentIdentity(),
+      project: {
+        title: p.title, code: p.code, status: p.status, priority: p.priority, funding: p.funding,
+        modality: p.modality, sample: p.sample, flags: p.flags, tags: p.tags,
+        pi: p.pi_id != null && personIndex.has(p.pi_id) ? personIndex.get(p.pi_id) : null,
+        start_date: p.start_date, end_date: p.end_date, notes: p.notes,
+        container_uid: p.container_uid, created_at: p.created_at, updated_at: p.updated_at
+      },
+      people, instruments, milestones, meetings, kv: kvRows, files, comments, status_history
+    };
+  }
+
+  // Ownership-protected merge: only rows this container's exporting side owns (origin_side ===
+  // its side, or whose uid it carries — i.e. an update) are replaced; rows owned by the
+  // receiving side are never touched. Comments/status_history are unioned by uid and never
+  // deleted, in either direction — see CLAUDE.md / ROADMAP.md for the rationale.
+  async function importProjectContainer(data) {
+    if (!data || data.kind !== global.CONST.CONTAINER_KIND) throw new Error('Not a valid project container file.');
+    if ((data.container_version || 1) > global.CONST.CONTAINER_VERSION) {
+      throw new Error('This container was exported by a newer version of the app — please update the app before importing it.');
+    }
+    const side = (data.exported_by && data.exported_by.side) || '';
+    const summary = {
+      created: false, projectId: null, codeCollision: false,
+      people: { matched: 0, created: 0 }, instruments: { matched: 0, created: 0 },
+      milestones: { added: 0 }, meetings: { added: 0 }, files: { added: 0 },
+      comments: { added: 0 }, history: { added: 0 }
+    };
+
+    // ---- People: match by email, then unique name (prefer same org on ties); else create ----
+    const personLocalId = [];
+    (data.people || []).forEach((pp) => {
+      let local = null;
+      const email = (pp.email || '').trim().toLowerCase();
+      if (email) local = row('SELECT * FROM people WHERE lower(email)=?', [email]);
+      if (!local && pp.name) {
+        const nameMatches = rows('SELECT * FROM people WHERE lower(trim(name))=?', [String(pp.name).trim().toLowerCase()]);
+        if (nameMatches.length === 1) local = nameMatches[0];
+        else if (nameMatches.length > 1) {
+          local = (pp.organization && nameMatches.find((m) => (m.organization || '').toLowerCase() === pp.organization.toLowerCase())) || nameMatches[0];
+        }
+      }
+      if (local) {
+        summary.people.matched++;
+        const updates = {};
+        if (!local.email && email) updates.email = pp.email;
+        if (!local.organization && pp.organization) updates.organization = pp.organization;
+        if (!local.department && pp.department) updates.department = pp.department;
+        const keys = Object.keys(updates);
+        if (keys.length) run(`UPDATE people SET ${keys.map((k) => k + '=?').join(',')} WHERE id=?`, [...keys.map((k) => updates[k]), local.id]);
+        personLocalId.push(local.id);
+      } else {
+        summary.people.created++;
+        run('INSERT INTO people (name, type, organization, department, email, note) VALUES (?,?,?,?,?,?)',
+          [pp.name || '', pp.type || 'Other', pp.organization || '', pp.department || '', pp.email || '', pp.note || '']);
+        personLocalId.push(row('SELECT last_insert_rowid() as id').id);
+      }
+    });
+
+    // ---- Instruments: match by name; create if missing; never update existing ----
+    const instLocalId = [];
+    (data.instruments || []).forEach((ii) => {
+      const local = row('SELECT * FROM instruments WHERE lower(name)=?', [String(ii.name || '').trim().toLowerCase()]);
+      if (local) { summary.instruments.matched++; instLocalId.push(local.id); }
+      else {
+        summary.instruments.created++;
+        run('INSERT INTO instruments (name, kind, status, location, note) VALUES (?,?,?,?,?)',
+          [ii.name || '', ii.kind || '', ii.status || 'Available', ii.location || '', ii.note || '']);
+        instLocalId.push(row('SELECT last_insert_rowid() as id').id);
+      }
+    });
+
+    // ---- Project: upsert by container_uid ----
+    const proj = data.project || {};
+    const existing = proj.container_uid ? row('SELECT * FROM projects WHERE container_uid=?', [proj.container_uid]) : null;
+    const piLocal = (proj.pi != null && personLocalId[proj.pi] != null) ? personLocalId[proj.pi] : null;
+    let pid;
+
+    if (!existing) {
+      summary.created = true;
+      const wantCode = proj.code || ('PRJ-IMPORT-' + newUid().slice(0, 6));
+      let finalCode = wantCode, n = 2;
+      while (row('SELECT id FROM projects WHERE code=?', [finalCode])) { finalCode = wantCode + '-' + n; n++; }
+      if (finalCode !== wantCode) summary.codeCollision = true;
+      run(`INSERT INTO projects (title, code, status, priority, funding, modality, sample, flags, tags, pi_id, start_date, end_date, notes, container_uid)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [proj.title || 'Untitled', finalCode, proj.status || 'Draft', proj.priority || 'Medium', proj.funding || '',
+          proj.modality || '', proj.sample || '', proj.flags || '', proj.tags || '', piLocal, proj.start_date || null,
+          proj.end_date || null, proj.notes || '', proj.container_uid || newUid()]);
+      pid = row('SELECT id FROM projects WHERE code=?', [finalCode]).id;
+    } else {
+      pid = existing.id;
+      let finalCode = existing.code;
+      if (proj.code && proj.code !== existing.code) {
+        const collide = row('SELECT id FROM projects WHERE code=? AND id!=?', [proj.code, pid]);
+        if (!collide) finalCode = proj.code; else summary.codeCollision = true;
+      }
+      run(`UPDATE projects SET title=?, code=?, status=?, priority=?, funding=?, modality=?, sample=?, flags=?, tags=?, pi_id=?, start_date=?, end_date=?, notes=?, updated_at=datetime('now') WHERE id=?`,
+        [proj.title || existing.title, finalCode, proj.status || existing.status, proj.priority || existing.priority,
+          proj.funding || '', proj.modality || '', proj.sample || '', proj.flags || '', proj.tags || '', piLocal,
+          proj.start_date || null, proj.end_date || null, proj.notes || '', pid]);
+    }
+    summary.projectId = pid;
+
+    // ---- project_people / kv: replace wholesale (project-level metadata, last-writer-wins) ----
+    run('DELETE FROM project_people WHERE project_id=?', [pid]);
+    (data.people || []).forEach((pp, i) => {
+      if (pp.project_role) run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [pid, personLocalId[i], pp.project_role]);
+    });
+    if (piLocal) run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [pid, piLocal, 'Principal Investigator']);
+    run('DELETE FROM kv WHERE project_id=?', [pid]);
+    (data.kv || []).forEach((k) => run('INSERT INTO kv (project_id, key, value) VALUES (?,?,?)', [pid, k.key, k.value]));
+
+    // project_instruments: union in anything referenced by the container (never removes locals)
+    const instUsed = new Set(instLocalId);
+    (data.milestones || []).forEach((m) => (m.instruments || []).forEach((i) => instUsed.add(instLocalId[i])));
+    (data.meetings || []).forEach((m) => (m.instruments || []).forEach((i) => instUsed.add(instLocalId[i])));
+    instUsed.forEach((id) => { if (id != null) run('INSERT OR IGNORE INTO project_instruments (project_id, instrument_id) VALUES (?,?)', [pid, id]); });
+
+    // ---- Milestones: replace only what the sender owns (origin_side===side, or an updated uid) ----
+    const incomingMsUids = new Set((data.milestones || []).map((m) => m.uid).filter(Boolean));
+    rows('SELECT * FROM milestones WHERE project_id=?', [pid])
+      .filter((m) => (m.origin_side && m.origin_side === side) || (m.uid && incomingMsUids.has(m.uid)))
+      .forEach((m) => {
+        run('DELETE FROM milestone_owners WHERE milestone_id=?', [m.id]);
+        run('DELETE FROM milestone_instruments WHERE milestone_id=?', [m.id]);
+        run('DELETE FROM milestones WHERE id=?', [m.id]);
+      });
+    (data.milestones || []).forEach((m) => {
+      run('INSERT INTO milestones (project_id, name, due_date, status, note, uid, origin_side, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        [pid, m.name || '', m.due_date || null, m.status || 'pending', m.note || '', m.uid || newUid(), side,
+          m.created_at || new Date().toISOString(), m.updated_at || new Date().toISOString()]);
+      const mid = row('SELECT last_insert_rowid() as id').id;
+      (m.owners || []).forEach((i) => { const lid = personLocalId[i]; if (lid != null) run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [mid, lid]); });
+      (m.instruments || []).forEach((i) => { const lid = instLocalId[i]; if (lid != null) run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [mid, lid]); });
+      summary.milestones.added++;
+    });
+
+    // ---- Meetings: same ownership-protected replace, rebuild denormalized attendees string ----
+    const incomingMtUids = new Set((data.meetings || []).map((m) => m.uid).filter(Boolean));
+    rows('SELECT * FROM meetings WHERE project_id=?', [pid])
+      .filter((m) => (m.origin_side && m.origin_side === side) || (m.uid && incomingMtUids.has(m.uid)))
+      .forEach((m) => {
+        run('DELETE FROM meeting_people WHERE meeting_id=?', [m.id]);
+        run('DELETE FROM meeting_instruments WHERE meeting_id=?', [m.id]);
+        run('DELETE FROM meetings WHERE id=?', [m.id]);
+      });
+    (data.meetings || []).forEach((m) => {
+      const peopleIds = (m.people || []).map((i) => personLocalId[i]).filter((x) => x != null);
+      const attendees = peopleIds.length
+        ? rows(`SELECT name FROM people WHERE id IN (${peopleIds.map(() => '?').join(',')})`, peopleIds).map((r) => r.name).join(', ')
+        : '';
+      const note = (global.UI && global.UI.sanitizeHtml) ? global.UI.sanitizeHtml(m.note || '') : (m.note || '');
+      run('INSERT INTO meetings (project_id, title, date, attendees, link, note, actions, uid, origin_side, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [pid, m.title || '', m.date || null, attendees, m.link || '', note, m.actions || '', m.uid || newUid(), side,
+          m.created_at || new Date().toISOString(), m.updated_at || new Date().toISOString()]);
+      const mid = row('SELECT last_insert_rowid() as id').id;
+      peopleIds.forEach((lid) => run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, lid]));
+      (m.instruments || []).forEach((i) => { const lid = instLocalId[i]; if (lid != null) run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [mid, lid]); });
+      summary.meetings.added++;
+    });
+
+    // ---- Files: same ownership-protected replace; uploads keep the container's opaque path key ----
+    const incomingFileUids = new Set((data.files || []).map((f) => f.uid).filter(Boolean));
+    rows('SELECT * FROM files WHERE project_id=?', [pid])
+      .filter((f) => (f.origin_side && f.origin_side === side) || (f.uid && incomingFileUids.has(f.uid)))
+      .forEach((f) => run('DELETE FROM files WHERE id=?', [f.id]));
+    for (const f of (data.files || [])) {
+      run('INSERT INTO files (project_id, name, kind, path, uid, origin_side, created_at) VALUES (?,?,?,?,?,?,?)',
+        [pid, f.name || '', f.kind || 'link', f.path || '', f.uid || newUid(), side, f.created_at || new Date().toISOString()]);
+      summary.files.added++;
+      if (f.data && typeof f.data === 'object' && typeof f.data.data === 'string' && f.path) {
+        try { await idbSet(UPLOAD_KEY + ':' + f.path, base64ToBlob(f.data)); } catch (_) { /* metadata row still imported */ }
+      }
+    }
+
+    // ---- Comments & status history: union by uid, never delete (lossless in both directions) ----
+    const existingCommentUids = new Set(rows('SELECT uid FROM project_comments WHERE project_id=?', [pid]).map((r) => r.uid).filter(Boolean));
+    (data.comments || []).forEach((c) => {
+      if (c.uid && existingCommentUids.has(c.uid)) return;
+      const body = (global.UI && global.UI.sanitizeHtml) ? global.UI.sanitizeHtml(c.body || '') : (c.body || '');
+      run('INSERT INTO project_comments (project_id, uid, author, side, body, created_at) VALUES (?,?,?,?,?,?)',
+        [pid, c.uid || newUid(), c.author || '', c.side || 'lab', body, c.created_at || new Date().toISOString()]);
+      summary.comments.added++;
+    });
+    const existingHistUids = new Set(rows('SELECT uid FROM status_history WHERE project_id=?', [pid]).map((r) => r.uid).filter(Boolean));
+    (data.status_history || []).forEach((h) => {
+      if (h.uid && existingHistUids.has(h.uid)) return;
+      run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note, created_at) VALUES (?,?,?,?,?,?,?,?)',
+        [pid, h.uid || newUid(), h.from_status || '', h.to_status || '', h.actor || '', h.side || '', h.note || '', h.created_at || new Date().toISOString()]);
+      summary.history.added++;
+    });
+
+    markDirty();
+    return summary;
+  }
+
   /* ---------------- Silent auto-backup folder handle (IndexedDB) ---------------- */
   const AUTO_BACKUP_DIR_KEY = 'auto-backup-dir-handle';
   async function saveAutoBackupDirHandle(handle) { await idbSet(AUTO_BACKUP_DIR_KEY, handle); }
@@ -525,6 +944,8 @@
       DELETE FROM meetings;
       DELETE FROM files;
       DELETE FROM kv;
+      DELETE FROM status_history;
+      DELETE FROM project_comments;
       DELETE FROM projects;
       DELETE FROM people;
       DELETE FROM instruments;
@@ -533,7 +954,7 @@
       // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
       // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
-      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv')");
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','status_history','project_comments')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     markDirty();
   }
@@ -585,12 +1006,12 @@
       'Real-time tracking of chimeric antigen receptor T-cell kinetics and tumor cell lysis rates across 4D spatial volumes.'
     ]);
 
-    // Project 2: Initiated
+    // Project 2: Submitted (lab has submitted to the facility, awaiting review)
     run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       'Super-Resolution Mapping of Synaptic Density Compounds',
       'PRJ-2026-002',
-      'Initiated',
+      'Submitted',
       'Medium',
       2, // Prof. Marcus Thorne
       'Super-Resolution',
@@ -725,6 +1146,29 @@
     run('INSERT INTO files (project_id, name, kind, path) VALUES (2, "STED_Resolution_Calibration_Guide.pdf", "link", "https://core-facility.internal/docs/sted-calib.pdf")');
     run('INSERT INTO files (project_id, name, kind, path) VALUES (3, "Pancreatic_Islets_3D_Summary.xlsx", "link", "https://core-facility.internal/reports/islets-2026.xlsx")');
 
+    // 10. Lab <-> Facility workflow demo data (v1.3.0): container identity, per-row ownership,
+    // status history, and a discussion thread. Backfilled in one pass rather than threading uid/
+    // origin_side/container_uid through every INSERT above.
+    rows('SELECT id FROM projects').forEach((p) => run('UPDATE projects SET container_uid=? WHERE id=?', [newUid(), p.id]));
+    ['milestones', 'meetings', 'files'].forEach((table) => {
+      rows(`SELECT id FROM ${table}`).forEach((r) => run(`UPDATE ${table} SET uid=?, origin_side='lab' WHERE id=?`, [newUid(), r.id]));
+    });
+    // One facility-owned milestone, to demonstrate the ownership-protection rule on import/export.
+    run("UPDATE milestones SET origin_side='facility' WHERE id=6");
+
+    // Status history (last row per project must match the project's current status).
+    run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (1, ?, "", "Kick-off Scheduled", "David Kim", "facility", "Recorded at upgrade")', [newUid()]);
+    run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (1, ?, "Kick-off Scheduled", "Active", "David Kim", "facility", "Recorded at upgrade")', [newUid()]);
+    run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (2, ?, "", "Draft", "Prof. Marcus Thorne", "lab", "Project created")', [newUid()]);
+    run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (2, ?, "Draft", "Submitted", "Prof. Marcus Thorne", "lab", "Ready for facility review")', [newUid()]);
+    run('INSERT INTO status_history (project_id, uid, from_status, to_status, actor, side, note) VALUES (3, ?, "", "Completed", "David Kim", "facility", "Recorded at upgrade")', [newUid()]);
+
+    // Discussion thread (one comment per side).
+    run('INSERT INTO project_comments (project_id, uid, author, side, body) VALUES (2, ?, "Prof. Marcus Thorne", "lab", ?)',
+      [newUid(), '<p>Submitting for facility review — STED parameters are finalized on our end.</p>']);
+    run('INSERT INTO project_comments (project_id, uid, author, side, body) VALUES (1, ?, "David Kim", "facility", ?)',
+      [newUid(), '<p>Laser safety paperwork confirmed — cleared for the intravital imaging sessions.</p>']);
+
     markDirty();
   }
 
@@ -750,7 +1194,11 @@
     vocabList,
     addVocab,
     seedSampleData,
-    clearAllData
+    clearAllData,
+    newUid,
+    setStatus,
+    buildProjectContainer,
+    importProjectContainer
   };
 
 })(window);

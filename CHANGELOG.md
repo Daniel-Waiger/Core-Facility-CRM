@@ -3,6 +3,46 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-09-02
+
+### Added
+- **Lab &harr; Facility workflow.** Projects now move through a real submission pipeline —
+  `Draft` &rarr; `Submitted` &rarr; `Under Review` &rarr; `Revisions Requested` / `Kick-off Scheduled` &rarr; `Active` &rarr;
+  `On-hold` &rarr; `Completed` &rarr; `Archived` — with guided transition buttons (only the ones valid for
+  the current status and workspace mode), a read-only pipeline strip, and a "Set status
+  manually…" escape hatch for anything outside the normal flow. Every change — guided,
+  overridden, made from the Edit modal, or recorded at upgrade — is logged to a new **Status
+  History** card (date, from/to, actor, side, note).
+- **Workspace Mode & Identity.** A first-run prompt (and a Settings card) lets each install
+  declare itself Lab or Facility, with a name/org for attribution. This is advisory only —
+  anyone on the device can change it — and it tailors which workflow buttons appear, the
+  dashboard framing, and who a status change/comment/export is attributed to.
+- **Review & Discussion** — a rich-text comment thread per project (author, side badge, date),
+  for lab/facility back-and-forth that isn't a meeting note.
+- **Project Container export/import** — the lab &harr; facility handoff channel. Export a single
+  project (team, milestones, meetings, files, discussion, status history) to one self-contained
+  JSON file from its detail page, with uploaded file contents included behind a checkbox
+  (on by default). Import it on the other side's install (Projects toolbar or Settings) through
+  a preview modal that shows who exported it, whether it will create or update a project, and a
+  before-you-apply summary of what changes. Re-importing an unchanged container is a no-op.
+  Ownership-protected merge: each side's own milestones/meetings/files are only ever replaced by
+  that same side's later export — the other side's rows are never touched or deleted — while
+  discussion comments and status history are unioned by a stable per-row id and never removed,
+  so feedback travels losslessly in both directions. People and instruments match by
+  email/name so re-importing doesn't create duplicates.
+- **Dashboard submission pipeline card** (shown once a workspace mode is set) — per-status
+  counts that link straight into the filtered Projects list, plus mode-aware framing of the
+  4th stat tile (facility: Awaiting review; lab: Needs your revisions).
+- **XLSX export**: two new sheets, "Status History" and "Discussion".
+- `ROADMAP.md` — the longer-term vision for the Lab/Facility workflow and where a future
+  backend would plug into the same container format.
+
+### Changed
+- The `Initiated` project status is retired — existing projects migrate to `Draft`, the new
+  workflow's starting point.
+- `Duplicate Project` now resets the new copy to `Draft` with a fresh (blank) container
+  identity and no copied comments/history, matching its existing milestone/meeting behavior.
+
 ## [1.2.8] — 2026-09-02
 
 ### Added
