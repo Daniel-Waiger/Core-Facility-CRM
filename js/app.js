@@ -1910,9 +1910,15 @@
     refresh();
   }
 
+  // mailto: URLs are capped by the OS/browser protocol-handler (commonly ~2000-2048 chars
+  // total, e.g. Windows' command-line limit and Outlook's own mailto ceiling) — go over it and
+  // the body silently gets cut off or the compose window fails to open, with no error shown.
+  // Recipients must never be silently dropped, so the cap is enforced by trimming the body only.
+  const MAILTO_MAX_LEN = 1800;
+
   // Build a mailto: link from a meeting's attendees and open the user's own email client
-  // pre-filled (recipients in BCC so attendees don't see each other's addresses). The app has
-  // no backend, so it can't send mail itself — this hands off to whatever mail client the OS uses.
+  // pre-filled. The app has no backend, so it can't send mail itself — this hands off to
+  // whatever mail client the OS uses.
   function emailAttendees(id) {
     const mt = DB.row('SELECT * FROM meetings WHERE id=?', [id]);
     if (!mt) return;
@@ -1943,15 +1949,31 @@
     if (noteText) bodyLines.push('', 'Notes:', noteText);
     if (mt.actions) bodyLines.push('', 'Next Steps / Action Items:', mt.actions);
 
-    const bcc = withEmail.map((p) => p.email.trim()).join(',');
+    const cc = withEmail.map((p) => p.email.trim()).join(',');
     const subject = (mt.date ? '[' + mt.date + '] ' : '') + mt.title;
-    const mailto = 'mailto:?bcc=' + encodeURIComponent(bcc) +
+
+    // Fixed part (recipients + subject) is never trimmed; only the body shrinks to fit.
+    const fixedLen = 'mailto:?cc='.length + encodeURIComponent(cc).length +
+      '&subject='.length + encodeURIComponent(subject).length + '&body='.length;
+    let body = bodyLines.join('\n');
+    let truncated = false;
+    while (fixedLen + encodeURIComponent(body).length > MAILTO_MAX_LEN && body.length > 0) {
+      body = body.slice(0, Math.max(0, body.length - 200));
+      truncated = true;
+    }
+    if (truncated) {
+      body = body.trim() + '\n\n[Message truncated — see the full notes and action items in the app]';
+    }
+
+    const mailto = 'mailto:?cc=' + encodeURIComponent(cc) +
       '&subject=' + encodeURIComponent(subject) +
-      '&body=' + encodeURIComponent(bodyLines.join('\n'));
+      '&body=' + encodeURIComponent(body);
 
     window.location.href = mailto;
 
-    if (withoutEmail.length) {
+    if (truncated) {
+      UI.toast('Notes were too long and got trimmed — full details are in the app', 'warn');
+    } else if (withoutEmail.length) {
       UI.toast(withoutEmail.length + ' attendee(s) skipped — no email on file', 'warn');
     } else {
       UI.toast('Opening your email client…');
