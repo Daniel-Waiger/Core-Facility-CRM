@@ -891,6 +891,7 @@
       case 'meeting-del': return deleteMeeting(el.dataset.id);
       case 'booking-del': return deleteBookingFromModal(el.dataset.id);
       case 'email-attendees': return emailAttendees(el.dataset.id);
+      case 'email-open-blank': return void (window.location.href = 'mailto:');
 
       // Custom KV Fields CRUD
       case 'kv-add': return addKV();
@@ -1910,15 +1911,14 @@
     refresh();
   }
 
-  // mailto: URLs are capped by the OS/browser protocol-handler (commonly ~2000-2048 chars
-  // total, e.g. Windows' command-line limit and Outlook's own mailto ceiling) — go over it and
-  // the body silently gets cut off or the compose window fails to open, with no error shown.
-  // Recipients must never be silently dropped, so the cap is enforced by trimming the body only.
-  const MAILTO_MAX_LEN = 1800;
-
-  // Build a mailto: link from a meeting's attendees and open the user's own email client
-  // pre-filled. The app has no backend, so it can't send mail itself — this hands off to
-  // whatever mail client the OS uses.
+  // mailto: URLs hand off to the OS's mail client, and the browser gets no way back into that
+  // program afterward — it can't wait for it to open and inject fields into it. Putting the
+  // recipients/subject/body IN the mailto URL also has two problems: those URLs are capped by
+  // the OS/browser protocol handler (commonly ~2000-2048 chars) so long notes get silently cut
+  // off, and it puts attendee emails + meeting notes into a URL that briefly touches browser
+  // history / OS process args. So instead: show the composed message in a modal with a copy
+  // button per field, and open a completely bare `mailto:` (no params, nothing to truncate or
+  // expose) so the user pastes the fields into the blank compose window themselves.
   function emailAttendees(id) {
     const mt = DB.row('SELECT * FROM meetings WHERE id=?', [id]);
     if (!mt) return;
@@ -1944,40 +1944,47 @@
 
     const bodyLines = [];
     if (mt.date) bodyLines.push('Date: ' + mt.date);
-    const names = people.map((p) => p.name).join(', ');
-    if (names) bodyLines.push('Attendees: ' + names);
     if (noteText) bodyLines.push('', 'Notes:', noteText);
     if (mt.actions) bodyLines.push('', 'Next Steps / Action Items:', mt.actions);
 
-    const cc = withEmail.map((p) => p.email.trim()).join(',');
-    const subject = (mt.date ? '[' + mt.date + '] ' : '') + mt.title;
+    const attendeesText = withEmail.map((p) => p.email.trim()).join(', ');
+    const subjectText = (mt.date ? '[' + mt.date + '] ' : '') + mt.title;
+    const bodyText = bodyLines.join('\n');
 
-    // Fixed part (recipients + subject) is never trimmed; only the body shrinks to fit.
-    const fixedLen = 'mailto:?cc='.length + encodeURIComponent(cc).length +
-      '&subject='.length + encodeURIComponent(subject).length + '&body='.length;
-    let body = bodyLines.join('\n');
-    let truncated = false;
-    while (fixedLen + encodeURIComponent(body).length > MAILTO_MAX_LEN && body.length > 0) {
-      body = body.slice(0, Math.max(0, body.length - 200));
-      truncated = true;
-    }
-    if (truncated) {
-      body = body.trim() + '\n\n[Message truncated — see the full notes and action items in the app]';
-    }
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('mail')} Email Attendees</span></div>
+      <div class="body"><div class="stack">
+        <div class="field">
+          <label>Attendees</label>
+          <div class="row" style="align-items:flex-start">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(attendeesText)}" data-copy-label="Attendees copied" title="Copy attendees">${ic('copy')}</button>
+            <input class="input grow" readonly value="${esc(attendeesText)}" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Subject</label>
+          <div class="row" style="align-items:flex-start">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(subjectText)}" data-copy-label="Subject copied" title="Copy subject">${ic('copy')}</button>
+            <input class="input grow" readonly value="${esc(subjectText)}" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Body</label>
+          <div class="row" style="align-items:flex-start">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(bodyText)}" data-copy-label="Body copied" title="Copy body">${ic('copy')}</button>
+            <textarea class="input grow" readonly rows="6">${esc(bodyText)}</textarea>
+          </div>
+        </div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Close</button>
+        <button class="btn btn-primary" data-act="email-open-blank">${ic('mail')} Open Email App</button>
+      </div>`);
 
-    const mailto = 'mailto:?cc=' + encodeURIComponent(cc) +
-      '&subject=' + encodeURIComponent(subject) +
-      '&body=' + encodeURIComponent(body);
-
-    window.location.href = mailto;
-
-    if (truncated) {
-      UI.toast('Notes were too long and got trimmed — full details are in the app', 'warn');
-    } else if (withoutEmail.length) {
-      UI.toast(withoutEmail.length + ' attendee(s) skipped — no email on file', 'warn');
-    } else {
-      UI.toast('Opening your email client…');
-    }
+    UI.toast(
+      (withoutEmail.length ? withoutEmail.length + ' attendee(s) skipped — no email on file. ' : '') +
+      'Copy each field below, then paste it into the blank email that opens.'
+    );
   }
 
   // A booking with no project (facility-wide) only ever appears on the calendar / in its own
