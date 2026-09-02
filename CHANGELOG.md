@@ -3,6 +3,14 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.8] — 2026-09-02
+
+### Added
+- **Email Attendees** on a meeting/booking — opens a modal listing the attendee emails, subject, and body (date, notes, action items), each with its own copy button, plus an "Open Email App" button that launches a blank `mailto:` compose window to paste them into. Available on each meeting in a project's Meetings & Syncs card, and in the Edit Booking modal footer (for facility-wide bookings with no card row of their own).
+
+### Fixed
+- **Seed/demo data** — the sample meetings only ever set the denormalized `attendees` display text, never the actual `meeting_people` link rows, so any real per-attendee feature (like Email Attendees) saw "no attendees" on demo data despite names being shown. Meetings now get the same join-table rows the seed data already gives milestones.
+
 ## [1.2.4] — 2026-08-30
 
 ### Added
