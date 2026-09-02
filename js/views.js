@@ -11,7 +11,7 @@
   function dashboard() {
     const now = today();
     const counts = {};
-    for (const s of C.STATUS) counts[s] = 0;
+    for (const s of global.DB.vocabList('STATUS')) counts[s] = 0;
     const stRows = global.DB.rows('SELECT status, COUNT(*) as n FROM projects GROUP BY status');
     for (const r of stRows) counts[r.status] = r.n;
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -105,7 +105,7 @@
         </div>
         <select class="input select-filter" id="proj-status-filter" style="width:140px">
           <option value="">All Statuses</option>
-          ${C.STATUS.map((s) => `<option value="${s}" ${projectFilter.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+          ${global.DB.vocabList('STATUS').map((s) => `<option value="${s}" ${projectFilter.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
         <select class="input select-filter" id="proj-priority-filter" style="width:130px">
           <option value="">All Priorities</option>
@@ -186,7 +186,11 @@
   }
 
   function statusBadge(s) {
-    const map = { 'Initiated': 'neutral', 'Active': 'primary', 'On-hold': 'warning', 'Completed': 'success', 'Archived': 'neutral' };
+    const map = {
+      'Initiated': 'neutral', 'Submitted for review': 'warning', 'Under review': 'warning',
+      'Kickoff scheduled': 'primary', 'Active': 'primary', 'On-hold': 'warning',
+      'Completed': 'success', 'Invoiced': 'warning', 'Paid': 'success', 'Archived': 'neutral'
+    };
     return `<span class="badge ${map[s] || 'neutral'}">${esc(s)}</span>`;
   }
 
@@ -217,6 +221,7 @@
 
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     const mtgs = global.DB.rows('SELECT * FROM meetings WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
+    const costCur = global.DB.getConfig('currency', '$');
     const files = global.DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     const prog = global.DB.projectProgress(p.id);
     const flags = (p.flags || '').split(',').filter(Boolean);
@@ -251,11 +256,12 @@
       <div class="lifecycle-bar mt-16">
         <span class="faint small font-medium">Quick Status:</span>
         <div class="row" style="gap:6px;flex-wrap:wrap">
-          ${C.STATUS.map((st) => `
+          ${global.DB.vocabList('STATUS').map((st) => `
             <button class="btn btn-sm ${p.status === st ? 'btn-primary' : 'btn-ghost'}" data-act="set-project-status" data-status="${st}">
               ${st}
             </button>
           `).join('')}
+          <button class="btn btn-sm btn-secondary" data-act="vocab-add" data-cat="STATUS" data-target="" data-label="Status" data-tooltip="Add a custom project status">${ic('plus')} Add status</button>
         </div>
       </div>
     </div>
@@ -352,6 +358,35 @@
       </div>
       <div class="card-body">
         ${ms.length ? ms.map((r) => milestoneRow(r, p.id)).join('') : emptyState('target', 'No milestones yet', 'Add deliverables and track due dates and progress.')}
+      </div>
+    </div>
+
+    <!-- Project Costs Card — a running list of every booking's stored cost snapshot (see
+         computeBookingBOM in app.js for how each figure below was originally computed; these
+         are the numbers as saved at booking time, not recalculated live). -->
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('tag')} Project Costs</span></div>
+        <span class="mono font-medium">${esc(costCur)}${mtgs.reduce((s, m) => s + (m.total_cost || 0), 0).toFixed(2)} total</span>
+      </div>
+      <div class="card-body">
+        ${mtgs.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Booking</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
+            <tbody>
+              ${mtgs.map((m) => `
+                <tr>
+                  <td class="font-medium small">${esc(m.title)}</td>
+                  <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
+                  <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
+                  <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>
+                  <td class="mono font-medium" style="text-align:right">${esc(costCur)}${(m.total_cost || 0).toFixed(2)}</td>
+                  <td style="text-align:right"><button class="btn btn-ghost btn-xs" data-act="edit-booking" data-id="${m.id}" title="View full cost breakdown">${ic('eye')}</button></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('tag', 'No bookings yet', 'Costs from instrument/staff bookings will appear here once you add one.')}
       </div>
     </div>
 
@@ -485,8 +520,9 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:16%"><col style="width:11%"><col style="width:17%"><col style="width:14%">
-            <col style="width:16%"><col style="width:14%"><col style="width:56px"><col style="width:78px">
+            <col style="width:15%"><col style="width:10%"><col style="width:15%"><col style="width:12%">
+            <col style="width:14%"><col style="width:10%"><col style="width:56px"><col style="width:60px">
+            <col style="width:78px"><col style="width:78px">
           </colgroup>
           <thead>
             <tr>
@@ -497,6 +533,8 @@
               <th>Email</th>
               <th>Notes</th>
               <th title="Active projects">Proj.</th>
+              <th title="Billable on instrument bookings">Staff</th>
+              <th>Rate/hr</th>
               <th style="text-align:right">Actions</th>
             </tr>
           </thead>
@@ -510,6 +548,8 @@
                 <td class="muted small">${esc(r.email || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td><span class="badge primary" title="${r.proj_count} active project${r.proj_count === 1 ? '' : 's'}">${r.proj_count}</span></td>
+                <td>${r.is_staff ? `<span class="badge success" data-tooltip="Billable core staff">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
+                <td class="mono small">${r.is_staff ? esc(r.rate || 0) : '—'}</td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
                   <button class="btn btn-ghost btn-xs" data-act="delete-person" data-id="${r.id}" title="Delete Person">${ic('trash')}</button>
@@ -573,10 +613,10 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:20%"><col style="width:16%"><col style="width:10%"><col style="width:12%">
-            <col style="width:24%"><col style="width:10%"><col style="width:8%">
+            <col style="width:16%"><col style="width:12%"><col style="width:8%"><col style="width:10%">
+            <col style="width:17%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:78px">
           </colgroup>
-          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr>
@@ -585,6 +625,8 @@
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
                 <td class="faint small">${esc(r.location || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
+                <td class="mono small">${esc(r.cost || 0)}</td>
+                <td class="muted small">${esc(r.cost_unit || 'time')}</td>
                 <td><span class="badge neutral">${r.proj_count} projects</span></td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
@@ -629,7 +671,7 @@
       WHERE m.due_date >= ? AND m.due_date <= ?`, [startStr, endStr]);
 
     const mtgs = global.DB.rows(`
-      SELECT m.id, m.date, m.title, p.id as project_id, p.title as project_title
+      SELECT m.id, m.date, m.start_time, m.end_time, m.title, p.id as project_id, p.title as project_title
       FROM meetings m
       LEFT JOIN projects p ON p.id = m.project_id
       WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
@@ -650,8 +692,21 @@
         id: mt.id,
         name: mt.title,
         kind: 'mt',
+        start_time: mt.start_time || '',
+        end_time: mt.end_time || '',
         project_id: mt.project_id,
         project_title: mt.project_title
+      });
+    }
+    // Timed bookings first (earliest to latest), untimed ones after — milestones have no time
+    // of their own so they sort alongside the untimed group in whatever order the query returned.
+    for (const day of Object.keys(byDay)) {
+      byDay[day].sort((a, b) => {
+        const at = a.start_time || '', bt = b.start_time || '';
+        if (!at && !bt) return 0;
+        if (!at) return 1;
+        if (!bt) return -1;
+        return at < bt ? -1 : at > bt ? 1 : 0;
       });
     }
 
@@ -679,8 +734,8 @@
           ${evs.map((e) => `
             <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''}"
                  data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
-                 title="${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
-              ${e.kind === 'mt' ? '📅 ' : '🎯 '}${esc(e.name)}
+                 title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
+              ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
             </div>`).join('')}
         </div>
       </div>`;
@@ -709,6 +764,8 @@
     const lastAutoBackup = UI.storage.getItem('last-auto-backup-at');
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
     const folderStatus = global.App.autoBackupFolderStatus;
+    const adminOn = UI.storage.getItem('admin-mode') === '1';
+    const orgs = global.DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization").map((r) => r.organization);
 
     return `
     <div class="card mb-16">
@@ -794,6 +851,48 @@
             }
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-title">${ic('tag')} Billing Rates</div>
+      <div class="card-body">
+        <div class="faint small mb-8">These apply to every booking's cost breakdown: both overhead percentages are added together, then tax is applied on top of that. See a booking's "Cost &amp; Time Breakdown" for the full walkthrough.</div>
+        <div class="grid cols-4">
+          <div class="field"><label>Internal Overhead %</label><input type="number" min="0" step="any" class="input" id="cfg-overhead-internal" value="${esc(global.DB.getConfigNum('overhead_internal', 0))}" /></div>
+          <div class="field"><label>External Overhead %</label><input type="number" min="0" step="any" class="input" id="cfg-overhead-external" value="${esc(global.DB.getConfigNum('overhead_external', 0))}" /></div>
+          <div class="field"><label>Tax %</label><input type="number" min="0" step="any" class="input" id="cfg-tax" value="${esc(global.DB.getConfigNum('tax_pct', 0))}" /></div>
+          <div class="field"><label>Currency Symbol</label><input class="input" id="cfg-currency" value="${esc(global.DB.getConfig('currency', '$'))}" maxlength="4" /></div>
+        </div>
+        <button class="btn btn-primary btn-sm mt-8" data-act="save-billing-rates">${ic('check')} Save Rates</button>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-title">${ic('settings')} Admin Mode</div>
+      <div class="card-body">
+        <div class="row mb-8">
+          <div class="grow">
+            <div style="font-weight:600">Admin Mode (this browser only)</div>
+            <div class="faint small">Reveals the Group Discounts editor below and the manual per-booking discount override. This app has no accounts or login, so this is a local convenience switch, not real access control — anyone using this browser can turn it on.</div>
+          </div>
+          <label class="row" style="cursor:pointer;gap:8px">
+            <input type="checkbox" id="pref-admin-mode" ${adminOn ? 'checked' : ''} data-act="toggle-admin-mode" />
+            <span class="small font-medium">${adminOn ? 'On' : 'Off'}</span>
+          </label>
+        </div>
+        ${adminOn ? `
+        <div class="divider"></div>
+        <div style="font-weight:600" class="mb-8">Group (Lab / Organization) Discounts</div>
+        <div class="faint small mb-8">A standing discount percent per lab, auto-applied on a booking whose project's PI belongs to that lab (see the booking's Cost &amp; Time Breakdown). Applies to time-billed instrument cost only.</div>
+        ${orgs.length ? orgs.map((org) => `
+          <div class="row mb-8" style="gap:8px;align-items:center">
+            <span class="grow small">${esc(org)}</span>
+            <input type="number" min="0" max="100" step="1" class="input group-discount-input" data-org="${esc(org)}" value="${esc(global.DB.getGroupDiscount(org))}" style="width:90px" />
+            <span class="faint small">%</span>
+          </div>`).join('') : '<div class="faint small">No labs/organizations on record yet — add people with a Lab / Group / Company to set discounts for them.</div>'}
+        ${orgs.length ? `<button class="btn btn-primary btn-sm mt-8" data-act="save-group-discounts">${ic('check')} Save Group Discounts</button>` : ''}
+        ` : ''}
       </div>
     </div>
 

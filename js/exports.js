@@ -9,14 +9,14 @@
     if (!p) return null;
 
     const ppl = DB.rows(`
-      SELECT pp.role, pe.name, pe.type, pe.organization, pe.department, pe.email
+      SELECT pp.role, pe.name, pe.type, pe.organization, pe.department, pe.email, pe.is_staff, pe.rate
       FROM project_people pp
       JOIN people pe ON pe.id = pp.person_id
       WHERE pp.project_id=?
       ORDER BY pe.name`, [id]);
 
     const inst = DB.rows(`
-      SELECT i.name, i.kind, i.status
+      SELECT i.name, i.kind, i.status, i.cost, i.cost_unit
       FROM project_instruments pi
       JOIN instruments i ON i.id = pi.instrument_id
       WHERE pi.project_id=?
@@ -246,30 +246,30 @@
     XLSX.utils.book_append_sheet(wb, ws2, 'Milestones');
 
     // Sheet 3: Team
-    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email']];
+    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Core Staff', 'Rate/hr']];
     d.ppl.forEach((pe) => {
-      teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—']);
+      teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
     const ws3 = XLSX.utils.aoa_to_sheet(teamRows);
-    ws3['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 22 }, { wch: 30 }];
+    ws3['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, ws3, 'Team');
 
     // Sheet 4: Instruments
-    const instRows = [['Instrument Name', 'Kind / Modality', 'Status']];
+    const instRows = [['Instrument Name', 'Kind / Modality', 'Status', 'Cost', 'Unit']];
     d.inst.forEach((i) => {
-      instRows.push([i.name, i.kind || '—', i.status || '—']);
+      instRows.push([i.name, i.kind || '—', i.status || '—', i.cost || 0, i.cost_unit || 'time']);
     });
     const ws4 = XLSX.utils.aoa_to_sheet(instRows);
-    ws4['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 15 }];
+    ws4['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
-    const mtRows = [['Meeting Title', 'Date', 'Attendees', 'Notes', 'Action Items']];
+    const mtRows = [['Meeting Title', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
-      mtRows.push([m.title, m.date || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '']);
+      mtRows.push([m.title, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, m.total_cost || 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
 
     // Sheet 6: Files
@@ -339,7 +339,7 @@
     if (d.ppl.length) {
       d.ppl.forEach((pe) => {
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}` }));
+        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Core Staff, ' + (pe.rate || 0) + '/hr' : ''}` }));
       });
     } else {
       children.push(new Paragraph({ text: 'No team members assigned.' }));
@@ -349,7 +349,7 @@
     children.push(new Paragraph({ text: 'Assigned Instruments', heading: HeadingLevel.HEADING_2 }));
     if (d.inst.length) {
       d.inst.forEach((i) => {
-        children.push(new Paragraph({ text: `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status}` }));
+        children.push(new Paragraph({ text: `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${i.cost || 0} per ${i.cost_unit || 'time'}` }));
       });
     } else {
       children.push(new Paragraph({ text: 'No instruments assigned.' }));
@@ -359,10 +359,12 @@
     children.push(new Paragraph({ text: 'Meetings & Discussions', heading: HeadingLevel.HEADING_2 }));
     if (d.mtgs.length) {
       d.mtgs.forEach((m) => {
-        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}: ${m.title}`, heading: HeadingLevel.HEADING_3 }));
+        const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
+        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}`, heading: HeadingLevel.HEADING_3 }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
+        if (m.total_cost) children.push(new Paragraph({ text: `Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, bold: true }));
       });
     } else {
       children.push(new Paragraph({ text: 'No meetings logged.' }));
@@ -497,7 +499,7 @@
       d.ppl.forEach((pe) => {
         checkPage(6);
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}`, margin, y);
+        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Core Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
         y += 5;
       });
     } else {
@@ -512,7 +514,7 @@
       pdf.setFontSize(9);
       d.inst.forEach((i) => {
         checkPage(6);
-        pdf.text(`• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status}`, margin, y);
+        pdf.text(`• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${i.cost || 0} per ${i.cost_unit || 'time'}`, margin, y);
         y += 5;
       });
     } else {
@@ -528,7 +530,8 @@
       d.mtgs.forEach((m) => {
         checkPage(14);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`${UI.fmtDate(m.date)}: ${m.title}`, margin, y);
+        const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
+        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (m.attendees) {
@@ -549,6 +552,13 @@
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
           pdf.text(`Actions: ${m.actions}`, margin + 4, y);
+          pdf.setFont('helvetica', 'normal');
+          y += 5;
+        }
+        if (m.total_cost) {
+          checkPage(6);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text(`Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
@@ -627,34 +637,53 @@
     XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
 
     // Sheet 3: People
-    const peopleRows = [['Name', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes']];
-    DB.rows('SELECT name, type, organization, department, email, note FROM people ORDER BY name').forEach((pe) => {
-      peopleRows.push([pe.name, pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '']);
+    const peopleRows = [['Name', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Core Staff', 'Rate/hr']];
+    DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate FROM people ORDER BY name').forEach((pe) => {
+      peopleRows.push([pe.name, pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
     const wsPe = XLSX.utils.aoa_to_sheet(peopleRows);
-    wsPe['!cols'] = [{ wch: 25 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }];
+    wsPe['!cols'] = [{ wch: 25 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsPe, 'People');
 
     // Sheet 4: Instruments
-    const instRows = [['Name', 'Kind / Modality', 'Status', 'Location', 'Notes']];
-    DB.rows('SELECT name, kind, status, location, note FROM instruments ORDER BY name').forEach((i) => {
-      instRows.push([i.name, i.kind || '—', i.status || '—', i.location || '—', i.note || '']);
+    const instRows = [['Name', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Cost', 'Unit']];
+    DB.rows('SELECT name, kind, status, location, note, cost, cost_unit FROM instruments ORDER BY name').forEach((i) => {
+      instRows.push([i.name, i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.cost || 0, i.cost_unit || 'time']);
     });
     const wsI = XLSX.utils.aoa_to_sheet(instRows);
-    wsI['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }];
+    wsI['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
-    const mtRows = [['Project Code', 'Project', 'Meeting', 'Date', 'Attendees', 'Link', 'Notes', 'Action Items']];
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.date || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
+      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
-    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings');
+
+    // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
+    // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
+    // computeBookingBOM in app.js at the time the booking was saved).
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Date', 'Start', 'End', 'Instruments', 'Core Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    DB.rows(`
+      SELECT mt.*, p.code as project_code, p.title as project_title,
+             (SELECT GROUP_CONCAT(i.name, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
+             (SELECT GROUP_CONCAT(pe.name, ', ') FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = mt.id) as staff
+      FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
+      ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
+      bcRows.push([
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.date || '—', m.start_time || '—', m.end_time || '—',
+        m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0, m.total_before_tax || 0, m.total_cost || 0
+      ]);
+    });
+    const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);

@@ -162,6 +162,11 @@
         select.insertBefore(opt, otherOpt || null);
       }
       select.dataset.prev = value;
+    } else {
+      // No parent <select> to inject into (e.g. the project page's "+ Add status" button,
+      // which isn't a dropdown) — refresh the page underneath so the new term shows up
+      // immediately (the modal itself is a separate overlay and is unaffected by this).
+      refresh();
     }
     UI.toast(`Added "${value}"`);
   }
@@ -806,6 +811,9 @@
       }
       case 'backup': return doBackup();
       case 'restore': return doRestore();
+      case 'toggle-admin-mode': return toggleAdminMode();
+      case 'save-billing-rates': return saveBillingRates();
+      case 'save-group-discounts': return saveGroupDiscounts();
       case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
       case 'disable-auto-backup-folder': return disableAutoBackupFolder();
       case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
@@ -934,10 +942,7 @@
           <input class="input" id="np-title" placeholder="e.g. Multiplex Confocal Imaging of Pancreatic Islets" />
         </div>
         <div class="grid cols-2">
-          <div class="field">
-            <label>Status</label>
-            <select class="input" id="np-status">${C.STATUS.map((s) => `<option value="${s}">${s}</option>`).join('')}</select>
-          </div>
+          ${vocabField({ category: 'STATUS', id: 'np-status', label: 'Status', selected: 'Initiated', placeholder: '-- Select Status --' })}
           <div class="field">
             <label>Priority</label>
             <select class="input" id="np-priority">${C.PRIORITY.map((pr) => `<option value="${pr}" ${pr === 'Medium' ? 'selected' : ''}>${pr}</option>`).join('')}</select>
@@ -1065,7 +1070,7 @@
         <div class="field"><label>Project Title *</label><input class="input" id="ep-title" value="${esc(p.title)}" /></div>
         <div class="grid cols-3">
           <div class="field"><label>Project Code</label><input class="input" id="ep-code" value="${esc(p.code)}" /></div>
-          <div class="field"><label>Status</label><select class="input" id="ep-status">${C.STATUS.map((s) => `<option value="${s}" ${s === p.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+          ${vocabField({ category: 'STATUS', id: 'ep-status', label: 'Status', selected: p.status, placeholder: '-- Select Status --' })}
           <div class="field"><label>Priority</label><select class="input" id="ep-priority">${C.PRIORITY.map((pr) => `<option value="${pr}" ${pr === p.priority ? 'selected' : ''}>${pr}</option>`).join('')}</select></div>
         </div>
         
@@ -1361,6 +1366,10 @@
           <div class="field"><label>Email Address</label><input type="email" class="input" id="p-email" placeholder="jane.doe@university.edu" /></div>
         </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
+        <div class="field">
+          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="p-is-staff" /> Core Staff (billable on instrument bookings)</label>
+        </div>
+        <div class="field"><label>Rate ($ per hour, core staff only)</label><input type="number" min="0" step="any" class="input" id="p-rate" placeholder="0" /></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1380,8 +1389,10 @@
     const dept = m.querySelector('#p-dept').value.trim();
     const email = m.querySelector('#p-email').value.trim();
     const note = m.querySelector('#p-note').value.trim();
+    const isStaff = m.querySelector('#p-is-staff').checked ? 1 : 0;
+    const rate = Number(m.querySelector('#p-rate').value) || 0;
 
-    DB.run('INSERT INTO people (name, type, organization, department, email, note) VALUES (?,?,?,?,?,?)', [name, type, org, dept, email, note]);
+    DB.run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', [name, type, org, dept, email, note, isStaff, rate]);
     const newPerson = DB.row('SELECT last_insert_rowid() as id');
     const newPersonId = newPerson ? newPerson.id : null;
 
@@ -1414,6 +1425,10 @@
           <div class="field"><label>Email Address</label><input type="email" class="input" id="pe-email" value="${esc(p.email || '')}" /></div>
         </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
+        <div class="field">
+          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="pe-is-staff" ${p.is_staff ? 'checked' : ''} /> Core Staff (billable on instrument bookings)</label>
+        </div>
+        <div class="field"><label>Rate ($ per hour, core staff only)</label><input type="number" min="0" step="any" class="input" id="pe-rate" value="${p.rate || 0}" /></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1430,8 +1445,10 @@
     const dept = m.querySelector('#pe-dept').value.trim();
     const email = m.querySelector('#pe-email').value.trim();
     const note = m.querySelector('#pe-note').value.trim();
+    const isStaff = m.querySelector('#pe-is-staff').checked ? 1 : 0;
+    const rate = Number(m.querySelector('#pe-rate').value) || 0;
 
-    DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=? WHERE id=?', [name, type, org, dept, email, note, id]);
+    DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Person updated');
     refresh();
@@ -1459,6 +1476,10 @@
           <div class="field"><label>Location</label><input class="input" id="i-location" placeholder="e.g. Room 204" /></div>
           <div class="field"><label>Configuration Notes</label><input class="input" id="i-note" placeholder="e.g. 405/488/561/633nm lasers" /></div>
         </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="i-cost" placeholder="0" /></div>
+          ${vocabField({ category: 'UNIT', id: 'i-cost-unit', label: 'Billed per', selected: 'time', placeholder: '-- Select Unit --' })}
+        </div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1470,8 +1491,9 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#i-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('INSERT INTO instruments (name, kind, status, location, note) VALUES (?,?,?,?,?)',
-      [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim()]);
+    DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)',
+      [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
+       Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time']);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument added');
     refresh();
@@ -1491,6 +1513,10 @@
           <div class="field"><label>Location</label><input class="input" id="ie-location" value="${esc(inst.location || '')}" /></div>
           <div class="field"><label>Configuration Notes</label><input class="input" id="ie-note" value="${esc(inst.note || '')}" /></div>
         </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="ie-cost" value="${inst.cost || 0}" /></div>
+          ${vocabField({ category: 'UNIT', id: 'ie-cost-unit', label: 'Billed per', selected: inst.cost_unit || 'time', placeholder: '-- Select Unit --' })}
+        </div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1502,8 +1528,9 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#ie-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=? WHERE id=?',
-      [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(), id]);
+    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=? WHERE id=?',
+      [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
+       Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time', id]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
     refresh();
@@ -1622,6 +1649,89 @@
     return DB.rows('SELECT id, name, kind FROM instruments ORDER BY name')
       .map((r) => ({ id: r.id, name: r.name, meta: r.kind || '', tip: r.kind || 'Instrument' }));
   }
+  // Core Staff are the billable-by-the-hour assignees (people.is_staff=1) — a separate picker
+  // from the plain "Assign People" attendee list above, which is never billed.
+  function bkStaffItems() {
+    return DB.rows('SELECT id, name, rate, organization, department FROM people WHERE is_staff=1 ORDER BY name')
+      .map((r) => ({ id: r.id, name: r.name, rate: r.rate || 0, meta: [r.organization, r.department].filter(Boolean).join(' · '), tip: 'Core Staff — ' + fmtMoney(r.rate || 0) + '/hr' }));
+  }
+
+  /* ---------------- Booking cost math (bill of materials) ----------------
+     Plain-language walkthrough of every number below, since this is money math that has to be
+     auditable, not just "works":
+       1. Booking hours = how long the instrument is reserved for, as a decimal number of hours
+          (9:00 to 11:30 is 2.5 hours). No start+end time on the booking → 0 hours.
+       2. Each instrument bills either by that duration (unit "time", e.g. $/hour) or by a
+          manually-typed amount (any other unit — $/sample, $/gram, etc).
+       3. Each core-staff assignee bills by their OWN window inside the booking (left blank =
+          the full booking window), but never less than 1 hour, and always rounded UP to a whole
+          hour beyond that — so 10 minutes bills as 1 hour, and 65 minutes bills as 2 hours.
+       4. Discounts — a standing per-lab percent plus a manual admin override, added together —
+          apply ONLY to the time-billed instrument cost, never to staff time or to per-unit/
+          per-weight instrument costs.
+       5. What's left after the discount then has BOTH overhead percentages (internal + external)
+          added on top of it — that "before tax" figure is what a facility would actually invoice
+          before any tax line — and finally the tax percentage is added on top of THAT to get the
+          final total. */
+  function fmtMoney(n) {
+    const cur = DB.getConfig('currency', '$');
+    return cur + (Number(n) || 0).toFixed(2);
+  }
+  // "HH:MM" -> minutes since midnight, or null if not a valid time.
+  function timeToMinutes(hhmm) {
+    const mm = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+    return mm ? Number(mm[1]) * 60 + Number(mm[2]) : null;
+  }
+  // Hours between two "HH:MM" times; missing or non-positive spans count as 0 hours.
+  function hoursBetween(start, end) {
+    const a = timeToMinutes(start), b = timeToMinutes(end);
+    if (a == null || b == null || b <= a) return 0;
+    return (b - a) / 60;
+  }
+  // The 1-hour floor: any staff time above zero bills at least 1 hour, and anything past that
+  // rounds UP to the next whole hour.
+  function billableStaffHours(rawHours) {
+    return rawHours > 0 ? Math.max(1, Math.ceil(rawHours)) : 0;
+  }
+  function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates }) {
+    const bookingHours = hoursBetween(start, end);
+    const ohInternal = (rates && rates.ohInternal) || 0;
+    const ohExternal = (rates && rates.ohExternal) || 0;
+    const taxPct = (rates && rates.taxPct) || 0;
+
+    let instrTime = 0, instrAmount = 0;
+    const instrumentLines = (instruments || []).map((it) => {
+      const isTime = (it.cost_unit || 'time') === 'time';
+      const line = isTime ? (it.cost || 0) * bookingHours : (it.cost || 0) * (Number(it.amount) || 0);
+      if (isTime) instrTime += line; else instrAmount += line;
+      return Object.assign({}, it, { isTime, line });
+    });
+
+    let staffTotal = 0;
+    const staffLines = (staff || []).map((p) => {
+      const rawHours = (p.start && p.end) ? hoursBetween(p.start, p.end) : bookingHours;
+      const billHours = billableStaffHours(rawHours);
+      const line = (p.rate || 0) * billHours;
+      staffTotal += line;
+      return Object.assign({}, p, { rawHours, billHours, line });
+    });
+
+    const subtotal = instrTime + instrAmount + staffTotal;
+    const discPct = Math.min(100, (groupPct || 0) + (manualPct || 0));
+    const discountAmt = instrTime * (discPct / 100);
+    const afterDiscount = subtotal - discountAmt;
+    const overheadPct = ohInternal + ohExternal;
+    const overheadAmt = afterDiscount * (overheadPct / 100);
+    const beforeTax = afterDiscount + overheadAmt;
+    const taxAmt = beforeTax * (taxPct / 100);
+    const total = beforeTax + taxAmt;
+
+    return {
+      bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
+      groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
+      ohInternal, ohExternal, overheadAmt, beforeTax, taxPct, taxAmt, total
+    };
+  }
 
   function tokenPickerField(kind, label, addLabel) {
     return `<div class="field"><label>${label}</label>
@@ -1651,7 +1761,7 @@
 
   /* Token-picker: <select> of not-yet-picked items + accumulating removable badges.
      Source of truth is the badge DOM; `wrap._setSelected(ids)` seeds it (edit mode). */
-  function mountTokenPicker(m, kind, items) {
+  function mountTokenPicker(m, kind, items, onChange) {
     const wrap = m.querySelector(`.token-picker[data-kind="${kind}"]`);
     if (!wrap) return;
     const list = wrap.querySelector('.token-list');
@@ -1671,6 +1781,9 @@
       sel.innerHTML = `<option value="">${esc(addLabel)}</option>` +
         avail.map((it) => `<option value="${it.id}">${esc(it.name)}${it.meta ? ' — ' + esc(it.meta) : ''}</option>`).join('');
       sel.value = '';
+      // Cost-relevant pickers (instruments/staff) pass this so the BOM re-renders whenever the
+      // selection itself changes; the attendees picker doesn't bother — it isn't billed.
+      if (onChange) onChange();
     }
     sel.addEventListener('change', () => { if (sel.value) { selected.add(sel.value); render(); } });
     list.addEventListener('click', (e) => {
@@ -1762,37 +1875,240 @@
     return UI.sanitizeHtml(m.querySelector('#' + id).innerHTML);
   }
 
+  /* ---------------- Booking cost breakdown (live BOM in the modal) ----------------
+     Row structure (which instruments/staff have a row at all) is only rebuilt when the
+     picker SELECTION changes — via the `onChange` hook on mountTokenPicker — so typing into
+     an amount/time input never gets wiped mid-keystroke. Every other change (booking time,
+     project, discount, or one of those inputs) just recomputes the numbers in place via
+     recomputeBomTotals. `m._bom` is the small piece of state that survives both: per-id
+     instrument amounts, per-id staff partial windows, and the manual discount. */
+  function bomSectionHtml(prefix, adminOn) {
+    return `
+    <div class="card mt-8" id="${prefix}-bom" style="background:var(--surface-2)">
+      <div class="card-title" style="font-size:13px">${ic('tag')} Cost & Time Breakdown</div>
+      <div class="faint small mb-8">Instruments</div>
+      <div id="${prefix}-bom-instruments"></div>
+      <div class="faint small mt-8 mb-8">Core Staff</div>
+      <div id="${prefix}-bom-staff"></div>
+      ${adminOn ? `
+      <div class="field mt-8" style="max-width:240px">
+        <label>Manual Discount % <span class="faint">(admin override, instrument time only)</span></label>
+        <input type="number" min="0" max="100" step="1" class="input" id="${prefix}-discount" value="0" />
+      </div>` : ''}
+      <div class="mt-8" id="${prefix}-bom-summary"></div>
+    </div>`;
+  }
+
+  function updateGroupDiscount(m, ids) {
+    const projectEl = m.querySelector('#' + ids.project);
+    const pid = projectEl && projectEl.value ? Number(projectEl.value) : null;
+    const r = pid ? DB.row('SELECT o.organization as org FROM projects p LEFT JOIN people o ON o.id = p.pi_id WHERE p.id=?', [pid]) : null;
+    const org = (r && r.org) || '';
+    m._bom.groupOrg = org;
+    m._bom.groupPct = DB.getGroupDiscount(org);
+  }
+
+  function renderBomRows(m, ids) {
+    const instIds = readTokenIds(m, 'inst');
+    const staffIds = readTokenIds(m, 'staff');
+    const instItems = instIds.length ? DB.rows(`SELECT id, name, cost, cost_unit FROM instruments WHERE id IN (${instIds.map(() => '?').join(',')})`, instIds) : [];
+    const staffItems = staffIds.length ? DB.rows(`SELECT id, name, rate FROM people WHERE id IN (${staffIds.map(() => '?').join(',')})`, staffIds) : [];
+
+    // Drop stashed values for ids that are no longer selected (their row is gone); keep the
+    // rest so amounts/partial-times typed for still-selected items survive this rebuild.
+    Object.keys(m._bom.instrAmounts).forEach((k) => { if (!instIds.includes(Number(k))) delete m._bom.instrAmounts[k]; });
+    Object.keys(m._bom.staffWindows).forEach((k) => { if (!staffIds.includes(Number(k))) delete m._bom.staffWindows[k]; });
+
+    const instHost = m.querySelector('#' + ids.prefix + '-bom-instruments');
+    if (instHost) {
+      instHost.innerHTML = !instItems.length ? '<div class="faint small">No instruments assigned yet.</div>' : instItems.map((it) => {
+        const isTime = (it.cost_unit || 'time') === 'time';
+        const amt = m._bom.instrAmounts[it.id] != null ? m._bom.instrAmounts[it.id] : 0;
+        return `<div class="row mb-8" style="gap:8px;align-items:center">
+          <span class="grow small">${esc(it.name)} <span class="faint">(${esc(it.cost_unit || 'time')})</span></span>
+          <span class="mono small faint" style="width:70px">${fmtMoney(it.cost)}${isTime ? '/hr' : ''}</span>
+          ${isTime
+            ? `<span class="mono small bom-hours" data-id="${it.id}" style="width:80px">0.00 hrs</span>`
+            : `<input type="number" min="0" step="any" class="input bom-amount" data-id="${it.id}" value="${amt}" placeholder="amount" style="width:90px" />`}
+          <span class="mono font-medium bom-line" data-id="${it.id}" style="width:90px;text-align:right">${fmtMoney(0)}</span>
+        </div>`;
+      }).join('');
+    }
+
+    const staffHost = m.querySelector('#' + ids.prefix + '-bom-staff');
+    if (staffHost) {
+      staffHost.innerHTML = !staffItems.length ? '<div class="faint small">No core staff assigned yet.</div>' : staffItems.map((p) => {
+        const win = m._bom.staffWindows[p.id] || {};
+        return `<div class="row mb-8" style="gap:8px;align-items:center">
+          <span class="grow small">${esc(p.name)}</span>
+          <span class="mono small faint" style="width:70px">${fmtMoney(p.rate)}/hr</span>
+          <input type="time" class="input bom-staff-start" data-id="${p.id}" value="${esc(win.start || '')}" placeholder="full booking" style="width:105px" data-tooltip="Leave blank to bill this person for the entire booking window" />
+          <input type="time" class="input bom-staff-end" data-id="${p.id}" value="${esc(win.end || '')}" placeholder="full booking" style="width:105px" />
+          <span class="mono small faint bom-billhours" data-id="${p.id}" style="width:110px">0 hrs</span>
+          <span class="mono font-medium bom-line" data-id="${p.id}" style="width:90px;text-align:right">${fmtMoney(0)}</span>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  function recomputeBomTotals(m, ids) {
+    const instIds = readTokenIds(m, 'inst');
+    const staffIds = readTokenIds(m, 'staff');
+    const instItems = instIds.length ? DB.rows(`SELECT id, name, cost, cost_unit FROM instruments WHERE id IN (${instIds.map(() => '?').join(',')})`, instIds) : [];
+    const staffItems = staffIds.length ? DB.rows(`SELECT id, name, rate FROM people WHERE id IN (${staffIds.map(() => '?').join(',')})`, staffIds) : [];
+
+    const start = (m.querySelector('#' + ids.start) || {}).value || '';
+    const end = (m.querySelector('#' + ids.end) || {}).value || '';
+
+    const instrumentsForCalc = instItems.map((it) => Object.assign({}, it, { amount: m._bom.instrAmounts[it.id] || 0 }));
+    const staffForCalc = staffItems.map((p) => {
+      const win = m._bom.staffWindows[p.id] || {};
+      return Object.assign({}, p, { start: win.start || '', end: win.end || '' });
+    });
+
+    const rates = {
+      ohInternal: DB.getConfigNum('overhead_internal', 0),
+      ohExternal: DB.getConfigNum('overhead_external', 0),
+      taxPct: DB.getConfigNum('tax_pct', 0)
+    };
+    const bom = computeBookingBOM({
+      start, end, instruments: instrumentsForCalc, staff: staffForCalc,
+      groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates
+    });
+    m._bom.last = bom; // read back at save time so the stored total matches what's on screen
+
+    bom.instrumentLines.forEach((line) => {
+      const hoursEl = m.querySelector(`.bom-hours[data-id="${line.id}"]`);
+      if (hoursEl) hoursEl.textContent = bom.bookingHours.toFixed(2) + ' hrs';
+      const lineEl = m.querySelector(`.bom-line[data-id="${line.id}"]`);
+      if (lineEl) lineEl.textContent = fmtMoney(line.line);
+    });
+    bom.staffLines.forEach((line) => {
+      const bhEl = m.querySelector(`.bom-billhours[data-id="${line.id}"]`);
+      if (bhEl) bhEl.textContent = line.billHours + (line.billHours === 1 ? ' hr' : ' hrs') + (line.rawHours > 0 && line.rawHours < 1 ? ' (1hr floor)' : '');
+      const lineEl = m.querySelector(`.bom-line[data-id="${line.id}"]`);
+      if (lineEl) lineEl.textContent = fmtMoney(line.line);
+    });
+
+    const summaryEl = m.querySelector('#' + ids.prefix + '-bom-summary');
+    if (summaryEl) {
+      const row = (label, value, opts2) => `<div class="row" style="justify-content:space-between${opts2 && opts2.strong ? ';border-top:1px solid var(--border);padding-top:4px;margin-top:4px' : ''}"><span class="${opts2 && opts2.strong ? 'font-medium' : 'faint'} small">${label}</span><span class="mono${opts2 && opts2.strong ? ' font-medium' : ''}" ${opts2 && opts2.big ? 'style="font-size:15px"' : ''}>${value}</span></div>`;
+      const groupLabel = 'Group discount' + (m._bom.groupOrg ? ` (${esc(m._bom.groupOrg)}, ${bom.groupPct}%)` : ` (${bom.groupPct}%)`);
+      summaryEl.innerHTML =
+        row('Subtotal', fmtMoney(bom.subtotal)) +
+        row(groupLabel, '−' + fmtMoney(bom.instrTime * bom.groupPct / 100)) +
+        (bom.manualPct ? row(`Manual discount (${bom.manualPct}%)`, '−' + fmtMoney(bom.instrTime * bom.manualPct / 100)) : '') +
+        row(`Overhead (${bom.ohInternal + bom.ohExternal}%)`, '+' + fmtMoney(bom.overheadAmt)) +
+        row('Before tax', fmtMoney(bom.beforeTax), { strong: true }) +
+        row(`Tax (${bom.taxPct}%)`, '+' + fmtMoney(bom.taxAmt)) +
+        row('Total', fmtMoney(bom.total), { strong: true, big: true });
+    }
+  }
+
+  function wireBomInputs(m, ids) {
+    const recalc = () => recomputeBomTotals(m, ids);
+    const startEl = m.querySelector('#' + ids.start);
+    const endEl = m.querySelector('#' + ids.end);
+    if (startEl) startEl.addEventListener('input', recalc);
+    if (endEl) endEl.addEventListener('input', recalc);
+    const projectEl = m.querySelector('#' + ids.project);
+    if (projectEl) projectEl.addEventListener('change', () => { updateGroupDiscount(m, ids); recalc(); });
+    const discEl = m.querySelector('#' + ids.prefix + '-discount');
+    if (discEl) discEl.addEventListener('input', () => { m._bom.manualPct = Number(discEl.value) || 0; recalc(); });
+
+    // Amount/partial-time inputs live inside rows rebuilt by renderBomRows, so this listener is
+    // delegated on the whole modal rather than bound per-row (it survives the row rebuilds).
+    m.addEventListener('input', (e) => {
+      const amtEl = e.target.closest('.bom-amount');
+      if (amtEl) { m._bom.instrAmounts[amtEl.dataset.id] = Number(amtEl.value) || 0; recalc(); return; }
+      const stEl = e.target.closest('.bom-staff-start');
+      if (stEl) { (m._bom.staffWindows[stEl.dataset.id] = m._bom.staffWindows[stEl.dataset.id] || {}).start = stEl.value; recalc(); return; }
+      const etEl = e.target.closest('.bom-staff-end');
+      if (etEl) { (m._bom.staffWindows[etEl.dataset.id] = m._bom.staffWindows[etEl.dataset.id] || {}).end = etEl.value; recalc(); return; }
+    });
+  }
+
   function mountBookingModal(m, opts) {
+    const ids = opts.ids;
+    m._bom = { instrAmounts: {}, staffWindows: {}, manualPct: opts.discountPct || 0, groupPct: 0, groupOrg: '' };
+    (opts.instrumentDetails || []).forEach((row) => { m._bom.instrAmounts[row.instrument_id] = row.amount || 0; });
+    (opts.staffDetails || []).forEach((row) => { m._bom.staffWindows[row.person_id] = { start: row.start_time || '', end: row.end_time || '' }; });
+
+    const refreshBom = () => { renderBomRows(m, ids); recomputeBomTotals(m, ids); };
+
     mountTokenPicker(m, 'owner', bkPeopleItems());
-    mountTokenPicker(m, 'inst', bkInstItems());
+    mountTokenPicker(m, 'inst', bkInstItems(), refreshBom);
+    mountTokenPicker(m, 'staff', bkStaffItems(), refreshBom);
     mountRichText(m, opts.noteId);
     if (opts.owners) m.querySelector('.token-picker[data-kind="owner"]')._setSelected(opts.owners);
     if (opts.insts) m.querySelector('.token-picker[data-kind="inst"]')._setSelected(opts.insts);
+    if (opts.staffIds) m.querySelector('.token-picker[data-kind="staff"]')._setSelected(opts.staffIds);
     if (opts.note) m.querySelector('#' + opts.noteId).innerHTML = UI.sanitizeHtml(opts.note);
+
+    updateGroupDiscount(m, ids);
+    wireBomInputs(m, ids);
+    refreshBom();
+  }
+
+  // Hard-block conflict check: the same instrument OR the same core-staff member cannot be on
+  // two bookings whose time windows overlap on the same day. Deliberately checks the whole
+  // booking's start/end (not a staff member's partial billing window) — a booking's time window
+  // is when the session is actually happening, and a person invited to it is presumed present
+  // for all of it whether or not all of that time gets billed to them. Times are "HH:MM"
+  // strings, and lexical string comparison already sorts them chronologically, so no time
+  // parsing is needed in the SQL itself: two windows overlap unless one ends at/before the
+  // other starts.
+  function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds }) {
+    if (!start || !end) return [];
+    const overlapSql = `m.date = ? AND m.id != ? AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
+    const conflicts = [];
+    if (instrumentIds && instrumentIds.length) {
+      DB.rows(`
+        SELECT m.title, m.start_time, m.end_time, i.name
+        FROM meeting_instruments mi JOIN meetings m ON m.id = mi.meeting_id JOIN instruments i ON i.id = mi.instrument_id
+        WHERE mi.instrument_id IN (${instrumentIds.map(() => '?').join(',')}) AND ${overlapSql}`,
+        [...instrumentIds, date, excludeId || 0, start, end]
+      ).forEach((r) => conflicts.push(`${r.name} is already booked ${r.start_time}–${r.end_time} on "${r.title}"`));
+    }
+    if (staffIds && staffIds.length) {
+      DB.rows(`
+        SELECT m.title, m.start_time, m.end_time, p.name
+        FROM meeting_staff ms JOIN meetings m ON m.id = ms.meeting_id JOIN people p ON p.id = ms.person_id
+        WHERE ms.person_id IN (${staffIds.map(() => '?').join(',')}) AND ${overlapSql}`,
+        [...staffIds, date, excludeId || 0, start, end]
+      ).forEach((r) => conflicts.push(`${r.name} is already booked ${r.start_time}–${r.end_time} on "${r.title}"`));
+    }
+    return conflicts;
   }
 
   function newBooking(date, projectId = null) {
     const allProjects = DB.rows('SELECT id, title FROM projects ORDER BY title');
     const pid = projectId != null ? Number(projectId) : null;
+    const adminOn = UI.storage.getItem('admin-mode') === '1';
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('calendar')} New Booking</span></div>
       <div class="body"><div class="stack">
         <div class="field"><label>Title *</label><input class="input" id="bk-title" placeholder="e.g. Initial Image Analysis Pipeline Sync" /></div>
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           <div class="field"><label>Date</label><input type="date" class="input" id="bk-date" value="${esc(date || UI.today())}" /></div>
-          <div class="field">
-            <label>Project (optional)</label>
-            <select class="input" id="bk-project">
-              <option value="">-- Facility-wide / No Project --</option>
-              ${allProjects.map((p) => `<option value="${p.id}" ${pid === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
-            </select>
-          </div>
+          <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" /></div>
+          <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" /></div>
+        </div>
+        <div class="field">
+          <label>Project (optional)</label>
+          <select class="input" id="bk-project">
+            <option value="">-- Facility-wide / No Project --</option>
+            ${allProjects.map((p) => `<option value="${p.id}" ${pid === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
+          </select>
         </div>
 
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
+        ${tokenPickerField('staff', 'Assign Core Staff', '+ Add core staff…')}
+
+        ${bomSectionHtml('bk', adminOn)}
 
         ${rteField('bk-note')}
         <div class="field"><label>Next Steps / Action Items</label><input class="input" id="bk-act" placeholder="e.g. Transfer RAW Nikon ND2 files to facility NAS" /></div>
@@ -1800,7 +2116,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note' }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project' } }));
   }
 
   function bookingSave() {
@@ -1809,6 +2125,8 @@
     if (!title) { UI.toast('Booking title required', 'error'); return; }
 
     const date = m.querySelector('#bk-date').value || UI.today();
+    const start = m.querySelector('#bk-start').value || '';
+    const end = m.querySelector('#bk-end').value || '';
     const projectVal = m.querySelector('#bk-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
     const note = readNote(m, 'bk-note');
@@ -1816,17 +2134,31 @@
 
     const ownerIds = readTokenIds(m, 'owner');
     const instIds = readTokenIds(m, 'inst');
+    const staffIds = readTokenIds(m, 'staff');
+
+    const conflicts = findBookingConflicts({ date, start, end, instrumentIds: instIds, staffIds });
+    if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
 
     const attendees = ownerIds.length
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    DB.run('INSERT INTO meetings (project_id, title, date, attendees, link, note, actions) VALUES (?,?,?,?,?,?,?)', [projectId, title, date, attendees, '', note, actions]);
+    const ids = { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project' };
+    recomputeBomTotals(m, ids);
+    const bom = m._bom.last;
+
+    DB.run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [projectId, title, date, start, end, attendees, '', note, actions, bom.manualPct, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total]);
     const inserted = DB.row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
     if (mid) {
       ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, oid]));
-      instIds.forEach((iid) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [mid, iid]));
+      bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [mid, line.id, line.amount || 0, line.line]));
+      bom.staffLines.forEach((line) => {
+        const win = m._bom.staffWindows[line.id] || {};
+        DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [mid, line.id, win.start || '', win.end || '', line.line]);
+      });
     }
 
     UI.closeDim(m.closest('.modal-dim'));
@@ -1839,26 +2171,33 @@
     if (!mt) return;
     const allProjects = DB.rows('SELECT id, title FROM projects ORDER BY title');
     const currentOwners = DB.rows('SELECT person_id FROM meeting_people WHERE meeting_id=?', [id]).map((r) => r.person_id);
-    const currentInsts = DB.rows('SELECT instrument_id FROM meeting_instruments WHERE meeting_id=?', [id]).map((r) => r.instrument_id);
+    const currentInstDetails = DB.rows('SELECT instrument_id, amount, line_cost FROM meeting_instruments WHERE meeting_id=?', [id]);
+    const currentStaffDetails = DB.rows('SELECT person_id, start_time, end_time, line_cost FROM meeting_staff WHERE meeting_id=?', [id]);
+    const adminOn = UI.storage.getItem('admin-mode') === '1';
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Booking</span></div>
       <div class="body"><div class="stack">
         <div class="field"><label>Title *</label><input class="input" id="bke-title" value="${esc(mt.title)}" /></div>
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           <div class="field"><label>Date</label><input type="date" class="input" id="bke-date" value="${mt.date || ''}" /></div>
-          <div class="field">
-            <label>Project (optional)</label>
-            <select class="input" id="bke-project">
-              <option value="">-- Facility-wide / No Project --</option>
-              ${allProjects.map((p) => `<option value="${p.id}" ${mt.project_id === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
-            </select>
-          </div>
+          <div class="field"><label>Start Time</label><input type="time" class="input" id="bke-start" value="${esc(mt.start_time || '')}" /></div>
+          <div class="field"><label>End Time</label><input type="time" class="input" id="bke-end" value="${esc(mt.end_time || '')}" /></div>
+        </div>
+        <div class="field">
+          <label>Project (optional)</label>
+          <select class="input" id="bke-project">
+            <option value="">-- Facility-wide / No Project --</option>
+            ${allProjects.map((p) => `<option value="${p.id}" ${mt.project_id === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
+          </select>
         </div>
 
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
+        ${tokenPickerField('staff', 'Assign Core Staff', '+ Add core staff…')}
+
+        ${bomSectionHtml('bke', adminOn)}
 
         ${rteField('bke-note')}
         <div class="field"><label>Next Steps / Action Items</label><input class="input" id="bke-act" value="${esc(mt.actions || '')}" /></div>
@@ -1868,7 +2207,13 @@
         <button class="btn btn-secondary" data-act="email-attendees" data-id="${mt.id}">${ic('mail')} Email Attendees</button>
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-edit-save" data-id="${mt.id}">Save Changes</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bke-note', owners: currentOwners, insts: currentInsts, note: mt.note }));
+      </div>`, (m) => mountBookingModal(m, {
+        noteId: 'bke-note', owners: currentOwners,
+        insts: currentInstDetails.map((r) => r.instrument_id), staffIds: currentStaffDetails.map((r) => r.person_id),
+        instrumentDetails: currentInstDetails, staffDetails: currentStaffDetails,
+        discountPct: mt.discount_pct || 0, note: mt.note,
+        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project' }
+      }));
   }
 
   function bookingEditSave(id) {
@@ -1877,6 +2222,8 @@
     if (!title) { UI.toast('Title required', 'error'); return; }
 
     const date = m.querySelector('#bke-date').value || null;
+    const start = m.querySelector('#bke-start').value || '';
+    const end = m.querySelector('#bke-end').value || '';
     const projectVal = m.querySelector('#bke-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
     const note = readNote(m, 'bke-note');
@@ -1884,17 +2231,32 @@
 
     const ownerIds = readTokenIds(m, 'owner');
     const instIds = readTokenIds(m, 'inst');
+    const staffIds = readTokenIds(m, 'staff');
+
+    const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds });
+    if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
+
     const attendees = ownerIds.length
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    DB.run("UPDATE meetings SET title=?, date=?, project_id=?, attendees=?, note=?, actions=?, updated_at=datetime('now') WHERE id=?",
-      [title, date, projectId, attendees, note, actions, id]);
+    const ids = { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project' };
+    recomputeBomTotals(m, ids);
+    const bom = m._bom.last;
+
+    DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, attendees=?, note=?, actions=?,
+              discount_pct=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, attendees, note, actions, bom.manualPct, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
+    DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
     ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [id, oid]));
-    instIds.forEach((iid) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [id, iid]));
+    bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [id, line.id, line.amount || 0, line.line]));
+    bom.staffLines.forEach((line) => {
+      const win = m._bom.staffWindows[line.id] || {};
+      DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [id, line.id, win.start || '', win.end || '', line.line]);
+    });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Booking updated');
@@ -1903,9 +2265,11 @@
 
   function deleteMeeting(id) {
     // foreign_keys enforcement is off for this app's sql.js connection, so ON DELETE CASCADE
-    // on meeting_people/meeting_instruments never actually fires — clean them up explicitly.
+    // on meeting_people/meeting_instruments/meeting_staff never actually fires — clean them up
+    // explicitly.
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
+    DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meetings WHERE id=?', [id]);
     UI.toast('Booking removed');
     refresh();
@@ -2151,6 +2515,38 @@
       }
     };
     input.click();
+  }
+
+  /* ---------------- Billing Rates & Admin Mode (Settings) ----------------
+     Admin mode is a local, unsecured Settings toggle — there is no login in this app, so it
+     cannot be real access control. It only decides whether the group-discount editor and the
+     per-booking manual discount override are shown; anyone with this browser can flip it on. */
+  function toggleAdminMode() {
+    const on = UI.storage.getItem('admin-mode') === '1';
+    UI.storage.setItem('admin-mode', on ? '0' : '1');
+    refresh();
+  }
+
+  function saveBillingRates() {
+    const internalEl = document.getElementById('cfg-overhead-internal');
+    const externalEl = document.getElementById('cfg-overhead-external');
+    const taxEl = document.getElementById('cfg-tax');
+    const curEl = document.getElementById('cfg-currency');
+    if (!internalEl) return;
+    DB.setConfig('overhead_internal', Number(internalEl.value) || 0);
+    DB.setConfig('overhead_external', Number(externalEl.value) || 0);
+    DB.setConfig('tax_pct', Number(taxEl.value) || 0);
+    DB.setConfig('currency', curEl.value.trim() || '$');
+    UI.toast('Billing rates saved');
+    refresh();
+  }
+
+  function saveGroupDiscounts() {
+    document.querySelectorAll('.group-discount-input').forEach((inp) => {
+      DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0);
+    });
+    UI.toast('Group discounts saved');
+    refresh();
   }
 
   /* ---------------- Day Focus / Today Agenda Modal ---------------- */

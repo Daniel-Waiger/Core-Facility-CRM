@@ -31,6 +31,9 @@
     department TEXT DEFAULT '',
     email TEXT DEFAULT '',
     note TEXT DEFAULT '',
+    is_staff INTEGER DEFAULT 0,
+    rate REAL DEFAULT 0,
+    rate_unit TEXT DEFAULT 'hour',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS instruments (
@@ -40,6 +43,8 @@
     status TEXT DEFAULT 'Available',
     location TEXT DEFAULT '',
     note TEXT DEFAULT '',
+    cost REAL DEFAULT 0,
+    cost_unit TEXT DEFAULT 'time',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS project_people (
@@ -78,10 +83,17 @@
     project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     title TEXT NOT NULL,
     date TEXT,
+    start_time TEXT DEFAULT '',
+    end_time TEXT DEFAULT '',
     attendees TEXT DEFAULT '',
     link TEXT DEFAULT '',
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
+    discount_pct REAL DEFAULT 0,
+    group_discount_pct REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    total_before_tax REAL DEFAULT 0,
+    total_cost REAL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -93,7 +105,17 @@
   CREATE TABLE IF NOT EXISTS meeting_instruments (
     meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
     instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+    amount REAL DEFAULT 0,
+    line_cost REAL DEFAULT 0,
     PRIMARY KEY (meeting_id, instrument_id)
+  );
+  CREATE TABLE IF NOT EXISTS meeting_staff (
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    start_time TEXT DEFAULT '',
+    end_time TEXT DEFAULT '',
+    line_cost REAL DEFAULT 0,
+    PRIMARY KEY (meeting_id, person_id)
   );
   CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +136,14 @@
     category TEXT NOT NULL,
     value TEXT NOT NULL,
     UNIQUE(category, value)
+  );
+  CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+  CREATE TABLE IF NOT EXISTS group_discounts (
+    org TEXT PRIMARY KEY,
+    percent REAL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
@@ -139,6 +169,21 @@
     try { db.exec("ALTER TABLE people ADD COLUMN department TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE instruments ADD COLUMN location TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN link TEXT DEFAULT ''"); } catch (_) {}
+    // Instrument/staff booking + billing (cost, rates, times, discounts) — additive columns.
+    try { db.exec("ALTER TABLE instruments ADD COLUMN cost REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE instruments ADD COLUMN cost_unit TEXT DEFAULT 'time'"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN is_staff INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN rate REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN rate_unit TEXT DEFAULT 'hour'"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN start_time TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN end_time TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN discount_pct REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN group_discount_pct REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN subtotal REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN total_before_tax REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN total_cost REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN amount REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN line_cost REAL DEFAULT 0"); } catch (_) {}
     try {
       db.exec(`
         CREATE TABLE IF NOT EXISTS vocab (
@@ -155,7 +200,25 @@
         CREATE TABLE IF NOT EXISTS meeting_instruments (
           meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
           instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+          amount REAL DEFAULT 0,
+          line_cost REAL DEFAULT 0,
           PRIMARY KEY (meeting_id, instrument_id)
+        );
+        CREATE TABLE IF NOT EXISTS meeting_staff (
+          meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          start_time TEXT DEFAULT '',
+          end_time TEXT DEFAULT '',
+          line_cost REAL DEFAULT 0,
+          PRIMARY KEY (meeting_id, person_id)
+        );
+        CREATE TABLE IF NOT EXISTS app_config (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        );
+        CREATE TABLE IF NOT EXISTS group_discounts (
+          org TEXT PRIMARY KEY,
+          percent REAL DEFAULT 0
         );
       `);
     } catch (_) {}
@@ -175,15 +238,22 @@
             project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
             title TEXT NOT NULL,
             date TEXT,
+            start_time TEXT DEFAULT '',
+            end_time TEXT DEFAULT '',
             attendees TEXT DEFAULT '',
             link TEXT DEFAULT '',
             note TEXT DEFAULT '',
             actions TEXT DEFAULT '',
+            discount_pct REAL DEFAULT 0,
+            group_discount_pct REAL DEFAULT 0,
+            subtotal REAL DEFAULT 0,
+            total_before_tax REAL DEFAULT 0,
+            total_cost REAL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
           );
-          INSERT INTO meetings_new (id, project_id, title, date, attendees, link, note, actions, created_at, updated_at)
-            SELECT id, project_id, title, date, attendees, link, note, actions, created_at, updated_at FROM meetings;
+          INSERT INTO meetings_new (id, project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost, created_at, updated_at)
+            SELECT id, project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost, created_at, updated_at FROM meetings;
           DROP TABLE meetings;
           ALTER TABLE meetings_new RENAME TO meetings;
           CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
@@ -512,6 +582,40 @@
     run('INSERT OR IGNORE INTO vocab (category, value) VALUES (?,?)', [category, v]);
   }
 
+  /* ---------------- App-wide config (billing rates, etc.) ----------------
+     A tiny key/value store, same idea as `vocab` above, but for single settings
+     rather than dropdown lists. Lives in the DB (not localStorage) so it travels
+     with backup/restore — the overhead/tax rates a facility sets are as much
+     "their data" as a project record is. */
+  function getConfig(key, fallback = '') {
+    const r = row('SELECT value FROM app_config WHERE key=?', [key]);
+    return r ? r.value : fallback;
+  }
+  function getConfigNum(key, fallback = 0) {
+    const v = getConfig(key, null);
+    const n = v == null ? NaN : parseFloat(v);
+    return isNaN(n) ? fallback : n;
+  }
+  function setConfig(key, value) {
+    run('INSERT INTO app_config (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [key, String(value)]);
+  }
+
+  /* ---------------- Group (organization) discounts ----------------
+     A standing discount percent a facility can pre-set per lab/organization, so a
+     booking under that lab auto-applies it without anyone re-typing it every time. */
+  function getGroupDiscount(org) {
+    if (!org) return 0;
+    const r = row('SELECT percent FROM group_discounts WHERE org=?', [org]);
+    return r ? Number(r.percent) || 0 : 0;
+  }
+  function setGroupDiscount(org, percent) {
+    if (!org) return;
+    run('INSERT INTO group_discounts (org, percent) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET percent=excluded.percent', [org, Number(percent) || 0]);
+  }
+  function listGroupDiscounts() {
+    return rows('SELECT org, percent FROM group_discounts ORDER BY org');
+  }
+
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
   function clearAllData() {
     db.exec(`
@@ -522,6 +626,7 @@
       DELETE FROM milestones;
       DELETE FROM meeting_people;
       DELETE FROM meeting_instruments;
+      DELETE FROM meeting_staff;
       DELETE FROM meetings;
       DELETE FROM files;
       DELETE FROM kv;
@@ -541,29 +646,29 @@
   function seedSampleData() {
     clearAllData();
 
-    // 1. People
+    // 1. People (is_staff/rate: only facility staff are billable core-staff assignees)
     const peopleData = [
-      ['Dr. Elena Rostova', 'PI', 'Bio-Photonics Lab', 'Harvard Immunology', 'elena.rostova@harvard.edu', 'Specializes in deep-tissue intravital 2-photon imaging'],
-      ['Prof. Marcus Thorne', 'PI', 'Neural Dynamics Institute', 'MIT', 'mthorne@mit.edu', 'Synaptic plasticity & optogenetics grant leader'],
-      ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy', 'Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening'],
-      ['Alex Chen', 'Researcher', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses'],
-      ['Maya Patel', 'Researcher', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays'],
-      ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', '', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer']
+      ['Dr. Elena Rostova', 'PI', 'Bio-Photonics Lab', 'Harvard Immunology', 'elena.rostova@harvard.edu', 'Specializes in deep-tissue intravital 2-photon imaging', 0, 0],
+      ['Prof. Marcus Thorne', 'PI', 'Neural Dynamics Institute', 'MIT', 'mthorne@mit.edu', 'Synaptic plasticity & optogenetics grant leader', 0, 0],
+      ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy', 'Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening', 0, 0],
+      ['Alex Chen', 'Researcher', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses', 0, 0],
+      ['Maya Patel', 'Researcher', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays', 0, 0],
+      ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', '', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer', 1, 95]
     ];
     for (const p of peopleData) {
-      run('INSERT INTO people (name, type, organization, department, email, note) VALUES (?,?,?,?,?,?)', p);
+      run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', p);
     }
 
-    // 2. Instruments
+    // 2. Instruments (cost_unit 'time' = price/hour; other units price per amount entered on a booking)
     const instData = [
-      ['Leica SP8 FALCON', 'FLIM / Confocal', 'Available', 'Room 118', 'Fluorescence lifetime imaging, White Light Laser 470-670nm + 405nm'],
-      ['Olympus FV3000', 'Multiphoton / Confocal', 'In-use', 'Room 204', 'High-sensitivity spectral GaAsP detectors, heated stage chamber'],
-      ['Zeiss Lightsheet Z.1', 'Lightsheet (Volume)', 'Available', 'Room 210', 'Dual-side illumination for cleared tissue & whole organ 3D imaging'],
-      ['Nikon AX R Resonant', 'Resonant Confocal', 'Available', 'Room 212', '2K x 2K resonant scanning for high-speed calcium dynamics'],
-      ['Glacios Cryo-TEM', 'Cryo-EM', 'Maintenance', 'Room B14', '200kV autoloader - undergoing routine monthly beam alignment']
+      ['Leica SP8 FALCON', 'FLIM / Confocal', 'Available', 'Room 118', 'Fluorescence lifetime imaging, White Light Laser 470-670nm + 405nm', 120, 'time'],
+      ['Olympus FV3000', 'Multiphoton / Confocal', 'In-use', 'Room 204', 'High-sensitivity spectral GaAsP detectors, heated stage chamber', 150, 'time'],
+      ['Zeiss Lightsheet Z.1', 'Lightsheet (Volume)', 'Available', 'Room 210', 'Dual-side illumination for cleared tissue & whole organ 3D imaging', 200, 'time'],
+      ['Nikon AX R Resonant', 'Resonant Confocal', 'Available', 'Room 212', '2K x 2K resonant scanning for high-speed calcium dynamics', 100, 'time'],
+      ['Glacios Cryo-TEM', 'Cryo-EM', 'Maintenance', 'Room B14', '200kV autoloader - undergoing routine monthly beam alignment', 45, 'unit']
     ];
     for (const i of instData) {
-      run('INSERT INTO instruments (name, kind, status, location, note) VALUES (?,?,?,?,?)', i);
+      run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)', i);
     }
 
     // 3. Projects
@@ -667,27 +772,40 @@
     run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (8, 3, "Volumetric Lightsheet Stacks (2.4 TB)", "2025-11-20", "done", "Acquired dual-illumination 5µm z-step stacks on Z.1")');
     run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (9, 3, "Final 3D Islet Morphometry Report", "2026-01-15", "done", "Delivered complete volume distribution metrics and data archive")');
 
-    // 7. Meetings
-    run(`INSERT INTO meetings (project_id, title, date, attendees, note, actions) VALUES (?,?,?,?,?,?)`, [
+    // 7. Meetings (start_time/end_time now drive calendar display + instrument/staff conflict
+    // checks; discount/subtotal/total_* on meeting 1 are a snapshot BOM — see meeting_instruments
+    // / meeting_staff below for the line items that produced it).
+    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       1,
       'Project Kickoff & Laser Alignment Review',
       '2026-01-12',
+      '09:00',
+      '11:00',
       'Elena Rostova, Alex Chen, David Kim',
       'Reviewed intravital laser power levels and live-animal heating stage protocol.',
-      'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.'
+      'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.',
+      0,      // manual discount_pct
+      5,      // group_discount_pct snapshot (Bio-Photonics Lab standing discount, see group_discounts below)
+      490,    // subtotal: Olympus FV3000 300 (2h @ $150/hr) + David Kim 190 (2h @ $95/hr)
+      546.25, // total_before_tax: (490 - 5% of the $300 instrument-time line) x 1.15 overhead (10% internal + 5% external)
+      590.15  // total_cost: total_before_tax x 1.08 tax
     ]);
-    run(`INSERT INTO meetings (project_id, title, date, attendees, note, actions) VALUES (?,?,?,?,?,?)`, [
+    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions) VALUES (?,?,?,?,?,?,?,?)`, [
       1,
       'Interim Progress & Channel Bleaching Check',
       '2026-02-28',
+      '13:00',
+      '14:30',
       'Alex Chen, David Kim',
       'Observed minor fluorophore quenching in red channel. Switched to resonant line accumulation.',
       'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.'
     ]);
-    run(`INSERT INTO meetings (project_id, title, date, attendees, note, actions) VALUES (?,?,?,?,?,?)`, [
+    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions) VALUES (?,?,?,?,?,?,?,?)`, [
       2,
       'Screening Protocol Design & STED Parameter Setup',
       '2026-03-05',
+      '10:00',
+      '11:30',
       'Marcus Thorne, Maya Patel, David Kim',
       'Discussed depletion laser doughnut alignment and immersion oil selection for 96-well glass plates.',
       'Maya to prepare test 24-well plate for PSF and resolution calibration next week.'
@@ -704,6 +822,20 @@
     run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 2)'); // Marcus Thorne
     run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 5)'); // Maya Patel
     run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 6)'); // David Kim
+
+    // meeting_instruments/meeting_staff are the billable line items behind meeting 1's snapshot
+    // totals above: Olympus FV3000 (instrument_id 2) billed by time (amount unused), David Kim
+    // (person_id 6, the only is_staff=1 person) billed for the full booking window.
+    run('INSERT INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (1, 2, 0, 300)');
+    run("INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (1, 6, '', '', 190)");
+
+    // Global billing rates (Settings > Billing Rates) and one standing group discount, so the
+    // cost breakdown above is reproducible from Settings rather than a one-off hardcoded total.
+    run("INSERT INTO app_config (key, value) VALUES ('overhead_internal', '10')");
+    run("INSERT INTO app_config (key, value) VALUES ('overhead_external', '5')");
+    run("INSERT INTO app_config (key, value) VALUES ('tax_pct', '8')");
+    run("INSERT INTO app_config (key, value) VALUES ('currency', '$')");
+    run("INSERT INTO group_discounts (org, percent) VALUES ('Bio-Photonics Lab', 5)");
 
     // 8. Custom KV Metadata
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Biosafety Level", "BSL-2 (Murine Live In-Vivo)")');
@@ -749,6 +881,12 @@
     projectFlags,
     vocabList,
     addVocab,
+    getConfig,
+    getConfigNum,
+    setConfig,
+    getGroupDiscount,
+    setGroupDiscount,
+    listGroupDiscounts,
     seedSampleData,
     clearAllData
   };

@@ -3,6 +3,20 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-09-02
+
+### Added
+- **Timed instrument & core-staff bookings.** Bookings now carry an optional start/end time alongside the date. A new "Assign Core Staff" picker (people flagged as Core Staff, billable by the hour) sits alongside the existing attendee and instrument pickers.
+- **Double-booking prevention.** Saving a booking is hard-blocked if any selected instrument or core-staff member already has an overlapping time window booked elsewhere the same day — the save is rejected with a message naming the clash, no override.
+- **Instrument cost & billing unit.** Instruments gain a Cost field and a Unit (`time`, `unit`, `weight`, `other` — extensible like every other dropdown). Time-priced instruments bill by the booking's duration; other units bill by an amount typed into the booking.
+- **Core-staff hourly rate & 1-hour billing floor.** People can be flagged as Core Staff with an hourly rate. Each assignee can be given a partial window within the booking (defaulting to the full booking); billable time is never less than 1 hour and always rounds up to the next whole hour.
+- **Live Cost & Time Breakdown in the booking modal.** Every instrument/staff line, a standing per-lab group discount (auto-applied from the project's PI's lab) plus a manual admin-only override, both overhead percentages (stacked), and the resulting subtotal → before-tax → after-tax total are shown live and recomputed on every change.
+- **Billing Rates & Admin Mode in Settings.** Facility-wide internal/external overhead %, tax %, and currency symbol now live in Settings. An unsecured local "Admin Mode" toggle (no accounts exist in this app) reveals the per-lab Group Discounts editor and the manual per-booking discount override.
+- **Project Costs.** Each project page now lists every booking's stored cost snapshot (subtotal, before-tax, total) with a running project total.
+- **Custom project statuses.** The project status list is now user-extensible via the same "+ Add New" vocabulary flow used elsewhere, seeded with a review → kickoff → billing workflow (Submitted for review, Under review, Kickoff scheduled, Invoiced, Paid, …) alongside the original statuses.
+- **Cost data in exports.** Instrument cost/unit and staff rate now appear in the per-project XLSX/DOCX/PDF exports and the facility-wide export, which also gains a dedicated "Bookings & Costs" sheet.
+- Calendar bookings now show and sort by start time.
+
 ## [1.2.8] — 2026-09-02
 
 ### Added
