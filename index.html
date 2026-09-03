@@ -4,10 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Core Facility Tracker</title>
+  <!-- SVG favicon for browsers that support it, plus ICO/PNG fallbacks: Chrome's bookmarks bar
+       (and other UI surfaces) doesn't render SVG-only favicons and falls back to a generic
+       globe/sphere icon without these. -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
+  <link rel="shortcut icon" href="favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
   <!-- ?v= cache-busters (kept at the app version): bump these when css/js change so browsers
        (and the service-worker precache) pick up the new files instead of a stale copy. -->
-  <link rel="stylesheet" href="css/app.css?v=1.3.2">
+  <link rel="stylesheet" href="css/app.css?v=1.3.3">
   <!-- Installable/offline support when served over https (e.g. GitHub Pages). Both are
        no-ops under file:// or plain http — the app still runs via the boot fallbacks below. -->
   <link rel="manifest" href="manifest.json">
@@ -31,12 +38,12 @@
   <script src="libs/jspdf.umd.min.js"></script>
   <script src="libs/docx.iife.js"></script>
 
-  <script src="js/consts.js?v=1.3.2"></script>
-  <script src="js/db.js?v=1.3.2"></script>
-  <script src="js/ui.js?v=1.3.2"></script>
-  <script src="js/views.js?v=1.3.2"></script>
-  <script src="js/exports.js?v=1.3.2"></script>
-  <script src="js/app.js?v=1.3.2"></script>
+  <script src="js/consts.js?v=1.3.3"></script>
+  <script src="js/db.js?v=1.3.3"></script>
+  <script src="js/ui.js?v=1.3.3"></script>
+  <script src="js/views.js?v=1.3.3"></script>
+  <script src="js/exports.js?v=1.3.3"></script>
+  <script src="js/app.js?v=1.3.3"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       // Last-resort net: App.boot() already catches its own errors and renders a diagnostic

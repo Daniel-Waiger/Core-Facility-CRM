@@ -1,5 +1,5 @@
 /* consts.js — shared vocabularies (keep in sync with UI) */
-window.APP_VERSION = '1.3.2';
+window.APP_VERSION = '1.3.3';
 window.CONST = {
   // A lab→facility review/billing workflow by default; facilities can add their own via the
   // "+ Add New" vocab flow (DB.vocabList/addVocab), same as every other list here.
