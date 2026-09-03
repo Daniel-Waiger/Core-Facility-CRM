@@ -322,7 +322,7 @@
 
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · v1.3.0 · Bioimaging Facility</div>
+    <div>Core Facility Tracker · <span id="footer-version">v1.3.6</span> · Bioimaging Facility</div>
     <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>
@@ -357,7 +357,11 @@
     }
     var body = document.getElementById('cl-body');
     fetch('../CHANGELOG.md').then(function (r){ if (!r.ok) throw 0; return r.text(); })
-      .then(function (md){ body.innerHTML = render(md); })
+      .then(function (md){
+        body.innerHTML = render(md);
+        var m = md.match(/^##\s+\[([^\]]+)\]/m);
+        if (m) document.getElementById('footer-version').textContent = 'v' + m[1];
+      })
       .catch(function (){ body.innerHTML = '<p>Couldn’t load the changelog here — <a href="' + CL_GH + '" target="_blank" rel="noopener">read it on GitHub</a>.</p>'; });
   })();
 </script>
