@@ -3,6 +3,16 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] — 2026-09-03
+
+### Added
+- **Group / Lab selector on bookings.** A new "Group / Lab" dropdown next to Project narrows the "Assign People" picker down to one lab — relief for facilities with everyone in one flat list — while already-selected people (e.g. a cross-lab collaborator) stay on the booking regardless of the filter. Picking a project auto-fills the Group from its PI's lab; it can also be set directly for a facility-wide booking.
+- **The Group selector now drives the standing group discount**, offered automatically whenever a lab is chosen. In Admin Mode, a **Revoke**/**Apply** control on the discount line lets you turn it off for this booking — asking whether to remove it **just for this booking** or **for every future booking under that lab too** (the latter updates the lab's standing rate in Settings, same as editing it there directly). Re-applying restores the rate with no prompt.
+- Bookings now store which Group/Lab they were made under (`group_org`), so reopening one restores its exact filter and discount state rather than re-deriving it live.
+
+### Fixed
+- No functional bug in the cost breakdown itself — a documentation screenshot of it was cropped mid-way through the summary. Re-captured showing the full Subtotal → Total breakdown.
+
 ## [1.3.0] — 2026-09-02
 
 ### Added

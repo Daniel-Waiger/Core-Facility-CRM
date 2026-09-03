@@ -90,6 +90,7 @@
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
     discount_pct REAL DEFAULT 0,
+    group_org TEXT DEFAULT '',
     group_discount_pct REAL DEFAULT 0,
     subtotal REAL DEFAULT 0,
     total_before_tax REAL DEFAULT 0,
@@ -178,6 +179,7 @@
     try { db.exec("ALTER TABLE meetings ADD COLUMN start_time TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN end_time TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN discount_pct REAL DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN group_org TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN group_discount_pct REAL DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN subtotal REAL DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN total_before_tax REAL DEFAULT 0"); } catch (_) {}
@@ -245,6 +247,7 @@
             note TEXT DEFAULT '',
             actions TEXT DEFAULT '',
             discount_pct REAL DEFAULT 0,
+            group_org TEXT DEFAULT '',
             group_discount_pct REAL DEFAULT 0,
             subtotal REAL DEFAULT 0,
             total_before_tax REAL DEFAULT 0,
@@ -252,8 +255,8 @@
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
           );
-          INSERT INTO meetings_new (id, project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost, created_at, updated_at)
-            SELECT id, project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost, created_at, updated_at FROM meetings;
+          INSERT INTO meetings_new (id, project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, created_at, updated_at)
+            SELECT id, project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, created_at, updated_at FROM meetings;
           DROP TABLE meetings;
           ALTER TABLE meetings_new RENAME TO meetings;
           CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
@@ -775,7 +778,7 @@
     // 7. Meetings (start_time/end_time now drive calendar display + instrument/staff conflict
     // checks; discount/subtotal/total_* on meeting 1 are a snapshot BOM — see meeting_instruments
     // / meeting_staff below for the line items that produced it).
-    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       1,
       'Project Kickoff & Laser Alignment Review',
       '2026-01-12',
@@ -784,7 +787,8 @@
       'Elena Rostova, Alex Chen, David Kim',
       'Reviewed intravital laser power levels and live-animal heating stage protocol.',
       'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.',
-      0,      // manual discount_pct
+      0,                  // manual discount_pct
+      'Bio-Photonics Lab', // group_org: this project's PI (Elena Rostova) belongs to this lab
       5,      // group_discount_pct snapshot (Bio-Photonics Lab standing discount, see group_discounts below)
       490,    // subtotal: Olympus FV3000 300 (2h @ $150/hr) + David Kim 190 (2h @ $95/hr)
       546.25, // total_before_tax: (490 - 5% of the $300 instrument-time line) x 1.15 overhead (10% internal + 5% external)
