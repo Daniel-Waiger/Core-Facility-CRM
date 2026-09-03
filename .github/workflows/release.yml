@@ -1,0 +1,115 @@
+name: Release
+
+# Cuts a GitHub Release (and its tag) for the version the app currently reports.
+# Run it from the Actions tab, or via the API, after the version bump has landed on main.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the leading v (e.g. 1.3.6). Defaults to window.APP_VERSION in js/consts.js."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the release as a pre-release."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            # Fall back to the version the app itself shows in Settings.
+            version=$(sed -n "s/.*APP_VERSION[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" js/consts.js | head -1)
+          fi
+          if [ -z "$version" ]; then
+            echo "::error::Could not resolve a version from inputs or js/consts.js"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version"
+
+      - name: Bail out if the release already exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists"
+            exit 1
+          fi
+
+      - name: Collect release notes from CHANGELOG.md
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The version of the most recent existing release, e.g. "1.2.4" from tag "v1.2.4".
+          # Everything in the changelog newer than that goes into these notes, so a release
+          # that skips a few patch versions still documents all of them.
+          prev=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')
+          echo "Previous release: ${prev:-none}"
+
+          # Walk CHANGELOG.md from the top and print every "## [x.y.z]" section until we
+          # reach the one belonging to the previous release (exclusive). With no previous
+          # release, print just the newest section.
+          awk -v prev="$prev" '
+            /^## \[/ {
+              heading++
+              v = $0; sub(/^## \[/, "", v); sub(/\].*/, "", v)
+              if (prev == "" && heading == 2) exit
+              if (prev != "" && v == prev) exit
+              printing = 1
+            }
+            printing { print }
+          ' CHANGELOG.md > notes.md
+
+          if [ ! -s notes.md ]; then
+            echo "::error::No changelog sections found for v$VERSION"
+            exit 1
+          fi
+
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "**Try it:** https://daniel-waiger.github.io/Core-Facility-CRM/"
+            echo "**Release notes page:** https://daniel-waiger.github.io/Core-Facility-CRM/docs/"
+          } >> notes.md
+
+          echo "--- notes.md ---"
+          cat notes.md
+
+      - name: Create the tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          # shellcheck disable=SC2086  # intentionally unquoted: empty means "no flag"
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file notes.md $prerelease_flag
+          gh release view "$TAG" --json tagName,htmlUrl --jq '"Created \(.tagName): \(.htmlUrl)"'

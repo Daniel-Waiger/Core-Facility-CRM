@@ -104,6 +104,20 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 *Figure 14 — Settings: single-file JSON backup/restore, sample data reload, and startup preferences — all data stays local to the browser's IndexedDB.*
 
+**Billing & cost tracking**
+
+<img src="docs/screenshots/35-booking-group-required-lock.png" width="420" alt="Booking modal with the people and core-staff pickers locked until a Group/Lab is chosen">
+
+*Figure 15 — A booking starts with its Group / Lab. Until one is picked (directly, or auto-filled from the project's PI), the "Assign People" and "Assign Core Staff" dropdowns stay locked with a "Choose Group/Lab First" hint — and the cost breakdown has no lab rate to bill against yet.*
+
+<img src="docs/screenshots/34-booking-group-discount-revoke.png" width="420" alt="Booking modal showing the live cost breakdown with an applied group discount and its Revoke control">
+
+*Figure 16 — With a lab chosen, its standing discount is applied automatically and the Cost & Time Breakdown recomputes live: instrument time, group discount (with an admin-only **Revoke** control), stacked overhead, tax, and total.*
+
+<img src="docs/screenshots/36-project-costs-running-total.png" width="720" alt="Project Costs card listing each booking's subtotal, before-tax amount and total with a running project total">
+
+*Figure 17 — Project Costs: every booking's saved cost snapshot (subtotal → before tax → total) with a running total for the project.*
+
 ---
 
 ## Directory Structure
