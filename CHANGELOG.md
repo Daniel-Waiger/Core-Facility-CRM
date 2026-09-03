@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.6] — 2026-09-03
+
+### Changed
+- **Group / Lab is now required before assigning Core Staff too, not just People.** The "Assign Core Staff" picker locks the same way the "Assign People" picker already did — no group picked yet blocks it with a "Choose Group/Lab First" hint — since every core-staff member also belongs to a facility group. Dropped the "(optional)" label off the Group / Lab field itself: it's never actually skippable, since it's either picked directly or auto-filled from the project's PI.
+
 ## [1.3.5] — 2026-09-03
 
 ### Added

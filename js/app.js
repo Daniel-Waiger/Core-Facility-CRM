@@ -1640,7 +1640,7 @@
   // groups --" clears the filter and, with it, any group discount.
   function groupSelectField(id, selected) {
     return `<div class="field">
-      <label>Group / Lab (optional)</label>
+      <label>Group / Lab</label>
       <select class="input" id="${id}">
         <option value="">-- All groups --</option>
         ${orgNames().map((o) => `<option value="${esc(o)}" ${o === selected ? 'selected' : ''}>${esc(o)}</option>`).join('')}
@@ -1669,7 +1669,11 @@
   // from the plain "Assign People" attendee list above, which is never billed.
   function bkStaffItems() {
     return DB.rows('SELECT id, name, rate, organization, department FROM people WHERE is_staff=1 ORDER BY name')
-      .map((r) => ({ id: r.id, name: r.name, rate: r.rate || 0, meta: [r.organization, r.department].filter(Boolean).join(' · '), tip: 'Core Staff — ' + fmtMoney(r.rate || 0) + '/hr' }));
+      .map((r) => ({
+        id: r.id, name: r.name, rate: r.rate || 0,
+        org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
+        meta: [r.organization, r.department].filter(Boolean).join(' · '), tip: 'Core Staff — ' + fmtMoney(r.rate || 0) + '/hr'
+      }));
   }
 
   /* ---------------- Booking cost math (bill of materials) ----------------
@@ -1979,18 +1983,23 @@
     </div>`;
   }
 
-  // Narrows the Assign People dropdown to one lab — an institute-scale relief valve so the
-  // picker doesn't list every person in the building. Already-selected badges are unaffected
-  // (mountTokenPicker's _setFilter only ever narrows the *dropdown*, never hides a badge), so
-  // switching labs mid-booking never drops a cross-lab collaborator you'd already picked.
+  // Narrows the Assign People / Assign Core Staff dropdowns to one lab — an institute-scale
+  // relief valve so neither picker lists every person in the building. Already-selected badges
+  // are unaffected (mountTokenPicker's _setFilter only ever narrows the *dropdown*, never hides
+  // a badge), so switching labs mid-booking never drops a cross-lab collaborator or staff member
+  // you'd already picked.
+  //
+  // Group/Lab itself is mandatory, not optional — every booking either gets it typed in directly
+  // or auto-filled from its project's PI (applyProjectDrivenGroup), and both people and core
+  // staff belong to a facility group, so neither picker can be used before one is set: no group
+  // picked yet locks both dropdowns (not-allowed cursor + "Choose Group/Lab First" hint).
   function filterOwnerPickerByGroup(m, org) {
-    const wrap = m.querySelector('.token-picker[data-kind="owner"]');
-    if (!wrap) return;
-    if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
-    // Group/Lab is mandatory before new people can be assigned: no group picked yet locks the
-    // dropdown (not-allowed cursor + "Choose Group/Lab First" hint). Already-picked badges are
-    // never affected, same as the filter above.
-    if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
+    ['owner', 'staff'].forEach((kind) => {
+      const wrap = m.querySelector(`.token-picker[data-kind="${kind}"]`);
+      if (!wrap) return;
+      if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
+      if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
+    });
   }
 
   // The "offer" path: a lab is chosen (by hand, or auto-filled from a project's PI) and its
