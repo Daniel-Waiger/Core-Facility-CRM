@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.5] — 2026-09-03
+
+### Added
+- **Single-instrument booking precheck.** The first time an instrument is added to a booking, a prompt asks whether only that one is needed. Answering yes locks the "Assign Instruments" picker — no further instrument can be added — until that instrument is removed from the booking.
+
 ## [1.3.4] — 2026-09-03
 
 ### Changed
