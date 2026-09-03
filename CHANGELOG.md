@@ -5,6 +5,9 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ## [1.3.6] — 2026-09-03
 
+### Added
+- **Interactive screenshot gallery.** `docs/gallery.html` — a full-size carousel of every screenshot with prev/next controls, a thumbnail rail, keyboard and swipe navigation, and a shareable link per shot. Lists `docs/screenshots/` live from GitHub so newly added screenshots need no code change. Linked from the README's Screenshots section.
+
 ### Changed
 - **Group / Lab is now required before assigning Core Staff too, not just People.** The "Assign Core Staff" picker locks the same way the "Assign People" picker already did — no group picked yet blocks it with a "Choose Group/Lab First" hint — since every core-staff member also belongs to a facility group. Dropped the "(optional)" label off the Group / Lab field itself: it's never actually skippable, since it's either picked directly or auto-filled from the project's PI.
 
