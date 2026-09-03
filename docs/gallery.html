@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Core Facility Tracker — Screenshot Gallery</title>
+<meta name="description" content="Browse every screen of Core Facility Tracker in a full-size carousel.">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<style>
+  :root{
+    --bg:#f6f7fb; --surface:#ffffff; --surface-2:#f1f3f9; --border:#e4e7ef;
+    --text:#1f2430; --muted:#5b6472; --faint:#8a93a4;
+    --primary:#4f46e5; --primary-soft:#eef2ff;
+    --shadow:0 1px 3px rgba(17,24,39,.06), 0 8px 24px rgba(17,24,39,.06);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b0f17; --surface:#121826; --surface-2:#0f1420; --border:#222b3b;
+      --text:#e9edf5; --muted:#a3adbf; --faint:#71809a;
+      --primary:#818cf8; --primary-soft:#1e1b4b;
+      --shadow:0 1px 3px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--primary); text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em;
+       background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:1px 6px}
+  .wrap{max-width:1120px; margin:0 auto; padding:0 20px}
+
+  /* ---- Header ---- */
+  header.top{padding:26px 0 18px; border-bottom:1px solid var(--border);
+    background:radial-gradient(1200px 400px at 20% -40%, var(--primary-soft), transparent 60%)}
+  header.top .row{display:flex; flex-wrap:wrap; gap:12px 20px; align-items:baseline; justify-content:space-between}
+  h1{font-size:clamp(21px,3.4vw,28px); letter-spacing:-.02em; margin:0}
+  .sub{color:var(--muted); font-size:14px; margin:4px 0 0}
+  .links{font-size:14px; color:var(--faint)}
+
+  /* ---- Stage ---- */
+  main{padding:22px 0 40px}
+  .stage{position:relative; background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden}
+  .frame{position:relative; display:grid; place-items:center; background:var(--surface-2);
+    min-height:280px; aspect-ratio:16/10}
+  .frame img{max-width:100%; max-height:100%; width:auto; height:auto; display:block}
+  .frame.loading::after{
+    content:""; position:absolute; width:26px; height:26px; border-radius:50%;
+    border:3px solid var(--border); border-top-color:var(--primary); animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .frame .err{display:none; text-align:center; color:var(--faint); padding:30px; font-size:14px}
+  .frame.failed img{display:none}
+  .frame.failed .err{display:block}
+
+  .nav{position:absolute; top:50%; transform:translateY(-50%); width:44px; height:44px;
+    border-radius:50%; border:1px solid var(--border); background:var(--surface); color:var(--text);
+    display:grid; place-items:center; cursor:pointer; box-shadow:var(--shadow); opacity:.92;
+    font-size:19px; line-height:1; padding:0}
+  .nav:hover{opacity:1; background:var(--surface-2)}
+  .nav:focus-visible{outline:2px solid var(--primary); outline-offset:2px}
+  .nav.prev{left:12px} .nav.next{right:12px}
+
+  .caption{display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; justify-content:space-between;
+    padding:12px 16px; border-top:1px solid var(--border); background:var(--surface)}
+  .caption .txt{font-size:14.5px}
+  .caption .file{font-size:12px; color:var(--faint)}
+  .counter{font-size:12.5px; font-weight:700; letter-spacing:.04em; color:var(--primary);
+    background:var(--primary-soft); border:1px solid color-mix(in srgb,var(--primary) 25%,transparent);
+    border-radius:999px; padding:3px 10px; white-space:nowrap}
+
+  /* ---- Thumbnail rail ---- */
+  .rail{display:flex; gap:10px; overflow-x:auto; padding:16px 2px 6px; scroll-behavior:smooth}
+  .rail::-webkit-scrollbar{height:8px}
+  .rail::-webkit-scrollbar-thumb{background:var(--border); border-radius:999px}
+  .thumb{flex:0 0 auto; width:132px; border:1px solid var(--border); border-radius:10px; overflow:hidden;
+    background:var(--surface-2); cursor:pointer; padding:0; opacity:.62; transition:opacity .15s, border-color .15s}
+  .thumb img{display:block; width:100%; height:78px; object-fit:cover; object-position:top left}
+  .thumb:hover{opacity:.9}
+  .thumb[aria-current="true"]{opacity:1; border-color:var(--primary); box-shadow:0 0 0 2px var(--primary-soft)}
+  .thumb:focus-visible{outline:2px solid var(--primary); outline-offset:2px}
+
+  .status{margin:14px 0 0; font-size:12.5px; color:var(--faint)}
+  .hint{margin:10px 0 0; font-size:12.5px; color:var(--faint)}
+  kbd{font-family:ui-monospace,monospace; font-size:.85em; background:var(--surface-2);
+    border:1px solid var(--border); border-bottom-width:2px; border-radius:6px; padding:1px 6px}
+
+  footer{border-top:1px solid var(--border); padding:26px 0 50px; color:var(--faint); font-size:13.5px}
+  footer .row{display:flex; flex-wrap:wrap; gap:14px 22px; align-items:center; justify-content:space-between}
+
+  @media (max-width:640px){
+    .nav{width:38px; height:38px; font-size:16px}
+    .thumb{width:104px} .thumb img{height:62px}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap row">
+    <div>
+      <h1>Screenshot Gallery</h1>
+      <p class="sub">Every screen of Core Facility Tracker, full size. Loaded live from the repository.</p>
+    </div>
+    <div class="links">
+      <a href="../index.html">Open the app</a> ·
+      <a href="index.html">Release notes</a> ·
+      <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div class="stage">
+      <div class="frame loading" id="frame">
+        <img id="shot" alt="" src="">
+        <div class="err">Couldn’t load this image.</div>
+      </div>
+      <button class="nav prev" id="prev" type="button" aria-label="Previous screenshot">‹</button>
+      <button class="nav next" id="next" type="button" aria-label="Next screenshot">›</button>
+      <div class="caption">
+        <div>
+          <div class="txt" id="cap">Loading…</div>
+          <div class="file" id="fname"></div>
+        </div>
+        <span class="counter" id="counter">— / —</span>
+      </div>
+    </div>
+
+    <div class="rail" id="rail" role="tablist" aria-label="Screenshot thumbnails"></div>
+
+    <p class="hint">Use <kbd>←</kbd> <kbd>→</kbd> to move, <kbd>Home</kbd> / <kbd>End</kbd> to jump to the first or last shot. Swipe on touch. Every shot has its own link — copy the address bar to share the one you’re looking at.</p>
+    <p class="status" id="status"></p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap row">
+    <div>Core Facility Tracker · Bioimaging Facility</div>
+    <div><a href="../index.html">Open the app</a> · <a href="index.html">Release notes</a></div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var OWNER = 'Daniel-Waiger', REPO = 'Core-Facility-CRM';
+  var DIR = 'docs/screenshots';
+  var API = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/' + DIR + '?ref=main';
+  var IMG_RE = /\.(png|jpe?g|gif|webp|avif)$/i;
+
+  /* Human captions, keyed by filename. Anything not listed here still shows up —
+     it just gets a caption derived from its filename (see prettify()). That's what
+     keeps a newly-added screenshot from needing a code change. */
+  var CAPTIONS = {
+    '01-onboarding.png': 'Startup modal — seeded demo dataset with a guided walkthrough, or a clean empty workspace.',
+    '02-dashboard.png': 'Facility Dashboard — KPI counters plus upcoming and overdue milestone feeds.',
+    '02b-sidebar-collapsed.png': 'The sidebar collapsed to an icon-only rail.',
+    '02c-light-theme.png': 'One-click Dark / Light theme switching across the whole UI.',
+    '03-projects-registry.png': 'Projects Registry with live search and filtering by modality, status, and priority.',
+    '04-project-header.png': 'Project header — code, PI, timeline, lifecycle buttons, and inline export actions.',
+    '06-metadata-tags.png': 'Funding, modality, sample type, tags, and custom key-value metadata.',
+    '07-team-collaborators.png': 'Team & collaborator roster with roles and inline contact info.',
+    '08-assigned-instruments.png': 'Instruments assigned to a project, with live operational status badges.',
+    '09-milestones.png': 'Milestones & Deliverables timeline — due dates, status, owners, and instruments.',
+    '10-meetings.png': 'Consultation meeting notes with attendee tagging and next-step action items.',
+    '11-people-labs.png': 'People, Labs & Researchers directory with affiliations and active project counts.',
+    '12-instruments.png': 'Core Instruments inventory with operational status and imaging modality.',
+    '13-calendar.png': 'Derived calendar combining milestone deadlines and scheduled consultations.',
+    '14-settings.png': 'Settings — JSON backup/restore, sample data reload, and startup preferences.',
+    '15-booking-pickers.png': 'Booking dialog with dropdown pickers for attendees and instruments.',
+    '16-register-person.png': 'Register Researcher / Staff, inline from anywhere a person is needed.',
+    '17-people-department.png': 'People directory with the Department column.',
+    '18-add-new-value.png': 'The “+ Add New” pattern — extend any vocabulary without leaving the dialog.',
+    '19-rich-notes.png': 'Rich-text meeting notes with bold text and bullet lists.',
+    '20-guided-tour.png': 'The guided tour spotlighting a dialog.',
+    '21-new-booking-modal.png': 'New Booking — Start/End times and the Assign Core Staff picker.',
+    '22-booking-cost-breakdown.png': 'Live Cost & Time Breakdown — instrument and staff lines, discount, overhead, tax, total.',
+    '23-booking-conflict-blocked.png': 'An overlapping booking is rejected outright, with a toast naming the clash.',
+    '24-instrument-cost-unit-fields.png': 'Edit Instrument — Cost and “Billed per” fields.',
+    '25-person-core-staff-fields.png': 'Edit Profile — Core Staff flag and hourly rate.',
+    '26-project-status-workflow.png': 'Project status bar extended with a review → kickoff → billing workflow.',
+    '27-add-custom-status.png': 'Adding a custom project status.',
+    '28-settings-billing-rates.png': 'Settings — Billing Rates: overhead %, tax %, and currency.',
+    '29-settings-admin-group-discounts.png': 'Admin Mode on — the per-lab Group Discounts editor.',
+    '30-project-costs-list.png': 'Project Costs — each booking’s stored subtotal, pre-tax figure, and total.',
+    '31-instruments-list-cost-unit.png': 'Instruments list with Cost and Unit columns.',
+    '32-people-list-staff-rate.png': 'People list with Staff and Rate columns.',
+    '33-calendar-timed-bookings.png': 'Calendar — booking chips prefixed with their start time.'
+  };
+
+  /* Offline / rate-limited fallback: the filenames known at the time this page was written.
+     The live listing above supersedes it whenever the API answers. */
+  var FALLBACK = Object.keys(CAPTIONS);
+
+  var frameEl  = document.getElementById('frame');
+  var imgEl    = document.getElementById('shot');
+  var capEl    = document.getElementById('cap');
+  var fileEl   = document.getElementById('fname');
+  var countEl  = document.getElementById('counter');
+  var railEl   = document.getElementById('rail');
+  var statusEl = document.getElementById('status');
+
+  var shots = [];   // array of filenames, in display order
+  var idx = 0;
+  var thumbs = [];  // the <button> elements, index-aligned with `shots`
+
+  /* "02b-sidebar-collapsed.png" -> "Sidebar collapsed" */
+  function prettify(name){
+    var base = name.replace(IMG_RE, '').replace(/^\d+[a-z]?[-_]/i, '').replace(/[-_]+/g, ' ').trim();
+    return base ? base.charAt(0).toUpperCase() + base.slice(1) : name;
+  }
+  function captionFor(name){ return CAPTIONS[name] || prettify(name); }
+
+  /* Numeric-aware sort so 2, 2b, 3 … 10 order the way a human reads them,
+     instead of the plain-text order 1, 10, 11, 2. */
+  var collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  function sortShots(list){ return list.slice().sort(function (a, b){ return collator.compare(a, b); }); }
+
+  function buildRail(){
+    railEl.innerHTML = '';
+    thumbs = shots.map(function (name, i){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'thumb';
+      b.setAttribute('role', 'tab');
+      b.title = prettify(name);
+      var im = document.createElement('img');
+      im.src = 'screenshots/' + name;
+      im.alt = prettify(name);
+      im.loading = 'lazy';
+      b.appendChild(im);
+      b.addEventListener('click', function (){ show(i, true); });
+      railEl.appendChild(b);
+      return b;
+    });
+  }
+
+  /* Scroll the rail so the active thumbnail sits in the middle of the visible strip.
+     The arithmetic: take the thumbnail's left edge inside the rail (offsetLeft), add half
+     the thumbnail's own width to reach its centre, then subtract half the rail's visible
+     width — that shifts the centre of the thumbnail onto the centre of the viewport.
+     Math.max(0, …) stops it scrolling to a negative position for the first few items. */
+  function centreThumb(el){
+    if (!el) return;
+    var target = el.offsetLeft + el.offsetWidth / 2 - railEl.clientWidth / 2;
+    railEl.scrollLeft = Math.max(0, target);
+  }
+
+  function preload(i){
+    if (i < 0 || i >= shots.length) return;
+    var p = new Image();
+    p.src = 'screenshots/' + shots[i];
+  }
+
+  function show(i, updateHash){
+    if (!shots.length) return;
+    idx = (i + shots.length) % shots.length;          // wrap around at both ends
+    var name = shots[idx];
+
+    frameEl.classList.remove('failed');
+    frameEl.classList.add('loading');
+    imgEl.alt = prettify(name);
+    imgEl.src = 'screenshots/' + name;
+
+    capEl.textContent = captionFor(name);
+    fileEl.textContent = DIR + '/' + name;
+    countEl.textContent = (idx + 1) + ' / ' + shots.length;
+
+    thumbs.forEach(function (t, n){ t.setAttribute('aria-current', n === idx ? 'true' : 'false'); });
+    centreThumb(thumbs[idx]);
+
+    preload(idx + 1); preload(idx - 1);
+
+    if (updateHash) {
+      var slug = name.replace(IMG_RE, '');
+      if (history.replaceState) history.replaceState(null, '', '#' + slug);
+      else location.hash = slug;
+    }
+  }
+
+  imgEl.addEventListener('load',  function (){ frameEl.classList.remove('loading'); });
+  imgEl.addEventListener('error', function (){ frameEl.classList.remove('loading'); frameEl.classList.add('failed'); });
+
+  document.getElementById('prev').addEventListener('click', function (){ show(idx - 1, true); });
+  document.getElementById('next').addEventListener('click', function (){ show(idx + 1, true); });
+
+  document.addEventListener('keydown', function (e){
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowLeft')  { show(idx - 1, true); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { show(idx + 1, true); e.preventDefault(); }
+    if (e.key === 'Home')       { show(0, true); e.preventDefault(); }
+    if (e.key === 'End')        { show(shots.length - 1, true); e.preventDefault(); }
+  });
+
+  /* Touch swipe: a horizontal drag of more than 40px, and more horizontal than vertical
+     (so a normal vertical page scroll never flips the slide), moves one step. */
+  var tx = 0, ty = 0;
+  frameEl.addEventListener('touchstart', function (e){
+    tx = e.changedTouches[0].clientX; ty = e.changedTouches[0].clientY;
+  }, { passive: true });
+  frameEl.addEventListener('touchend', function (e){
+    var dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) show(idx + (dx < 0 ? 1 : -1), true);
+  }, { passive: true });
+
+  function startAt(){
+    var slug = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    if (!slug) return 0;
+    for (var i = 0; i < shots.length; i++) if (shots[i].replace(IMG_RE, '') === slug) return i;
+    return 0;
+  }
+
+  function boot(list, note){
+    shots = sortShots(list);
+    if (!shots.length) { capEl.textContent = 'No screenshots found.'; countEl.textContent = '0 / 0'; return; }
+    buildRail();
+    show(startAt(), false);
+    statusEl.textContent = note;
+  }
+
+  window.addEventListener('hashchange', function (){ show(startAt(), false); });
+
+  fetch(API, { headers: { 'Accept': 'application/vnd.github+json' } })
+    .then(function (r){ if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (json){
+      if (!Array.isArray(json)) throw new Error('unexpected payload');
+      var names = json
+        .filter(function (f){ return f.type === 'file' && IMG_RE.test(f.name); })
+        .map(function (f){ return f.name; });
+      if (!names.length) throw new Error('empty listing');
+      boot(names, names.length + ' screenshots, listed live from ' + DIR + ' on main.');
+    })
+    .catch(function (){
+      boot(FALLBACK, 'Showing the built-in list (' + FALLBACK.length + ' screenshots) — the live listing from GitHub wasn’t available.');
+    });
+})();
+</script>
+
+</body>
+</html>

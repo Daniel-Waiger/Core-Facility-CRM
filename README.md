@@ -36,6 +36,14 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 ## Screenshots
 
+<a href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/gallery.html">
+  <img src="docs/screenshots/02-dashboard.png" width="720" alt="Open the full screenshot gallery — an interactive carousel of every screen">
+</a>
+
+**▶ [Browse every screen in the interactive gallery](https://daniel-waiger.github.io/Core-Facility-CRM/docs/gallery.html)** — a full-size carousel with arrow-key navigation, thumbnails, and a shareable link per shot. It lists `docs/screenshots/` live from this repository, so it always shows the current set, including shots not reproduced below.
+
+A selection follows.
+
 **Onboarding & first run**
 
 <img src="docs/screenshots/01-onboarding.png" width="720" alt="Welcome onboarding modal">
@@ -143,7 +151,10 @@ Core-Facility-CRM/
 │   ├── xlsx.full.min.js  # SheetJS spreadsheet export engine
 │   ├── jspdf.umd.min.js  # Client-side PDF generation engine
 │   └── docx.iife.js      # Client-side DOCX document generator
-├── docs/screenshots/     # README screenshots (not required to run the app)
+├── docs/
+│   ├── index.html        # Hosted release-notes page (renders CHANGELOG.md live)
+│   ├── gallery.html      # Screenshot carousel (lists docs/screenshots/ live from GitHub)
+│   └── screenshots/      # README screenshots (not required to run the app)
 ├── LICENSE               # MIT License
 └── README.md             # Documentation
 ```
