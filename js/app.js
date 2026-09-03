@@ -900,6 +900,8 @@
       case 'booking-del': return deleteBookingFromModal(el.dataset.id);
       case 'email-attendees': return emailAttendees(el.dataset.id);
       case 'email-open-blank': return void (window.location.href = 'mailto:');
+      case 'bom-group-revoke': return handleGroupRevoke(el.closest('.modal'), el.closest('.modal')._bomIds);
+      case 'bom-group-apply': return handleGroupReapply(el.closest('.modal'), el.closest('.modal')._bomIds);
 
       // Custom KV Fields CRUD
       case 'kv-add': return addKV();
@@ -1633,6 +1635,19 @@
 
   /* ---------------- Bookings (Meetings) CRUD — any date, any object, optional project ---------------- */
 
+  // Group/Lab selector: filters the Assign People picker down to one lab (institute-scale
+  // relief from an every-person dropdown) and drives the standing group discount. "-- All
+  // groups --" clears the filter and, with it, any group discount.
+  function groupSelectField(id, selected) {
+    return `<div class="field">
+      <label>Group / Lab (optional)</label>
+      <select class="input" id="${id}">
+        <option value="">-- All groups --</option>
+        ${orgNames().map((o) => `<option value="${esc(o)}" ${o === selected ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
   /* People / instrument options for the booking token-pickers.
      `meta` shows next to the dropdown option; `tip` is the hover tooltip
      (person → role, instrument → modality). */
@@ -1641,6 +1656,7 @@
       .map((r) => ({
         id: r.id,
         name: r.name,
+        org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
         meta: [r.organization, r.department].filter(Boolean).join(' · ') || r.type || '',
         tip: r.type || 'Person'
       }));
@@ -1769,6 +1785,7 @@
     const addLabel = wrap.dataset.add || '+ Add…';
     const byId = new Map(items.map((it) => [String(it.id), it]));
     const selected = new Set();
+    let filterFn = null; // narrows the dropdown only — an already-picked badge never disappears
 
     function render() {
       list.innerHTML = [...selected].map((id) => {
@@ -1777,7 +1794,8 @@
         return `<span class="token" data-id="${id}" data-tooltip="${esc(it.tip)}">` +
           `<button type="button" class="token-x" aria-label="Remove ${esc(it.name)}">&times;</button>${esc(it.name)}</span>`;
       }).join('');
-      const avail = items.filter((it) => !selected.has(String(it.id)));
+      let avail = items.filter((it) => !selected.has(String(it.id)));
+      if (filterFn) avail = avail.filter(filterFn);
       sel.innerHTML = `<option value="">${esc(addLabel)}</option>` +
         avail.map((it) => `<option value="${it.id}">${esc(it.name)}${it.meta ? ' — ' + esc(it.meta) : ''}</option>`).join('');
       sel.value = '';
@@ -1803,6 +1821,9 @@
       selected.add(String(it.id));
       render();
     };
+    // Narrow the dropdown to items matching `fn` (e.g. a Group/Lab filter). Pass null/undefined
+    // to clear it. Never touches already-selected badges — only the "not yet picked" dropdown.
+    wrap._setFilter = (fn) => { filterFn = fn || null; render(); };
     render();
   }
   function readTokenIds(m, kind) {
@@ -1899,13 +1920,89 @@
     </div>`;
   }
 
-  function updateGroupDiscount(m, ids) {
+  // Narrows the Assign People dropdown to one lab — an institute-scale relief valve so the
+  // picker doesn't list every person in the building. Already-selected badges are unaffected
+  // (mountTokenPicker's _setFilter only ever narrows the *dropdown*, never hides a badge), so
+  // switching labs mid-booking never drops a cross-lab collaborator you'd already picked.
+  function filterOwnerPickerByGroup(m, org) {
+    const wrap = m.querySelector('.token-picker[data-kind="owner"]');
+    if (wrap && wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
+  }
+
+  // The "offer" path: a lab is chosen (by hand, or auto-filled from a project's PI) and its
+  // CURRENT standing discount is looked up fresh and applied. Used for new bookings and for
+  // any live change to the Group or Project select — i.e. whenever the user is actively
+  // choosing a lab, not just reopening a booking that already recorded one.
+  function offerGroupDiscount(m, ids, org) {
+    const groupEl = m.querySelector('#' + ids.group);
+    if (groupEl && groupEl.value !== (org || '')) groupEl.value = org || '';
+    filterOwnerPickerByGroup(m, org);
+    m._bom.groupOrg = org || '';
+    m._bom.groupPct = DB.getGroupDiscount(org);
+    recomputeBomTotals(m, ids);
+  }
+
+  // The "restore" path: seed the modal from a SAVED booking's own group_org/group_discount_pct
+  // snapshot rather than re-querying the lab's current standing rate — so reopening a booking
+  // where the discount was revoked (see chooseDiscountScope below) doesn't silently re-offer
+  // it. Only touching the Group select yourself re-triggers the live "offer" path above.
+  function restoreGroupState(m, ids, org, pct) {
+    const groupEl = m.querySelector('#' + ids.group);
+    if (groupEl) groupEl.value = org || '';
+    filterOwnerPickerByGroup(m, org);
+    m._bom.groupOrg = org || '';
+    m._bom.groupPct = pct || 0;
+    recomputeBomTotals(m, ids);
+  }
+
+  // Project → Group auto-fill: picking a project fills the Group select from that project's
+  // PI's lab (blank if the project has no PI, or no project is selected) and offers that lab's
+  // discount. Runs on the Project select's own change, and once at mount for a pre-selected one.
+  function applyProjectDrivenGroup(m, ids) {
     const projectEl = m.querySelector('#' + ids.project);
     const pid = projectEl && projectEl.value ? Number(projectEl.value) : null;
     const r = pid ? DB.row('SELECT o.organization as org FROM projects p LEFT JOIN people o ON o.id = p.pi_id WHERE p.id=?', [pid]) : null;
-    const org = (r && r.org) || '';
-    m._bom.groupOrg = org;
-    m._bom.groupPct = DB.getGroupDiscount(org);
+    offerGroupDiscount(m, ids, (r && r.org) || '');
+  }
+
+  // Revoking a lab's discount on one booking is ambiguous about scope, so ask: just this
+  // booking (session-only — the lab's standing rate in Settings is untouched), or every future
+  // booking too (writes DB.setGroupDiscount(org, 0), same as editing it in Settings directly).
+  // Mirrors UI.confirmModal's promise-that-resolves-null-on-dismiss shape, with a 3rd choice.
+  function chooseDiscountScope(org) {
+    return new Promise((resolve) => {
+      const m = UI.openModal(`
+        <div class="head"><span class="t" style="font-weight:600">Remove ${esc(org)}’s Discount</span></div>
+        <div class="body"><p class="mt-0 mb-8">Remove it just for this booking, or for every future booking under <strong>${esc(org)}</strong> too? Applying it to future bookings changes that lab’s standing discount in Settings.</p></div>
+        <div class="foot">
+          <button class="btn btn-secondary" data-act="cancel">Cancel</button>
+          <button class="btn btn-secondary" data-act="once">Just This Booking</button>
+          <button class="btn btn-danger" data-act="future">Apply to Future Too</button>
+        </div>`, null, () => resolve(null));
+      const dim = m.closest('.modal-dim');
+      m.querySelector('[data-act="cancel"]').onclick = () => { UI.closeDim(dim); resolve(null); };
+      m.querySelector('[data-act="once"]').onclick = () => { UI.closeDim(dim); resolve('once'); };
+      m.querySelector('[data-act="future"]').onclick = () => { UI.closeDim(dim); resolve('future'); };
+    });
+  }
+
+  async function handleGroupRevoke(m, ids) {
+    const org = m._bom.groupOrg;
+    const scope = await chooseDiscountScope(org);
+    if (!scope) return;
+    m._bom.groupPct = 0;
+    if (scope === 'future') {
+      DB.setGroupDiscount(org, 0);
+      UI.toast(`${org}’s standing discount removed going forward`);
+    } else {
+      UI.toast('Discount removed for this booking');
+    }
+    recomputeBomTotals(m, ids);
+  }
+
+  function handleGroupReapply(m, ids) {
+    m._bom.groupPct = DB.getGroupDiscount(m._bom.groupOrg);
+    recomputeBomTotals(m, ids);
   }
 
   function renderBomRows(m, ids) {
@@ -1993,10 +2090,28 @@
     const summaryEl = m.querySelector('#' + ids.prefix + '-bom-summary');
     if (summaryEl) {
       const row = (label, value, opts2) => `<div class="row" style="justify-content:space-between${opts2 && opts2.strong ? ';border-top:1px solid var(--border);padding-top:4px;margin-top:4px' : ''}"><span class="${opts2 && opts2.strong ? 'font-medium' : 'faint'} small">${label}</span><span class="mono${opts2 && opts2.strong ? ' font-medium' : ''}" ${opts2 && opts2.big ? 'style="font-size:15px"' : ''}>${value}</span></div>`;
-      const groupLabel = 'Group discount' + (m._bom.groupOrg ? ` (${esc(m._bom.groupOrg)}, ${bom.groupPct}%)` : ` (${bom.groupPct}%)`);
+
+      // The lab's own standing rate (unaffected by any revoke on THIS booking) decides whether
+      // there's anything to toggle: nothing to revoke if the lab has no discount at all; nothing
+      // to re-apply once "future too" has actually zeroed the standing rate.
+      const org = m._bom.groupOrg;
+      const standingPct = org ? DB.getGroupDiscount(org) : 0;
+      const adminOn = UI.storage.getItem('admin-mode') === '1';
+      let groupControl = '';
+      if (adminOn && standingPct > 0) {
+        groupControl = bom.groupPct > 0
+          ? `<button type="button" class="btn btn-ghost btn-xs" data-act="bom-group-revoke" data-tooltip="Remove this lab's discount">Revoke</button>`
+          : `<button type="button" class="btn btn-ghost btn-xs" data-act="bom-group-apply" data-tooltip="Restore this lab's standing discount">Apply</button>`;
+      }
+      const groupLabel = 'Group discount' + (org ? ` (${esc(org)}, ${bom.groupPct}%)` : ` (${bom.groupPct}%)`);
+      const groupRow = `<div class="row" style="justify-content:space-between;gap:8px">
+        <span class="faint small">${groupLabel}</span>
+        <span class="row" style="gap:8px;align-items:center">${groupControl}<span class="mono">−${fmtMoney(bom.instrTime * bom.groupPct / 100)}</span></span>
+      </div>`;
+
       summaryEl.innerHTML =
         row('Subtotal', fmtMoney(bom.subtotal)) +
-        row(groupLabel, '−' + fmtMoney(bom.instrTime * bom.groupPct / 100)) +
+        groupRow +
         (bom.manualPct ? row(`Manual discount (${bom.manualPct}%)`, '−' + fmtMoney(bom.instrTime * bom.manualPct / 100)) : '') +
         row(`Overhead (${bom.ohInternal + bom.ohExternal}%)`, '+' + fmtMoney(bom.overheadAmt)) +
         row('Before tax', fmtMoney(bom.beforeTax), { strong: true }) +
@@ -2012,7 +2127,9 @@
     if (startEl) startEl.addEventListener('input', recalc);
     if (endEl) endEl.addEventListener('input', recalc);
     const projectEl = m.querySelector('#' + ids.project);
-    if (projectEl) projectEl.addEventListener('change', () => { updateGroupDiscount(m, ids); recalc(); });
+    if (projectEl) projectEl.addEventListener('change', () => applyProjectDrivenGroup(m, ids));
+    const groupEl = m.querySelector('#' + ids.group);
+    if (groupEl) groupEl.addEventListener('change', () => offerGroupDiscount(m, ids, groupEl.value));
     const discEl = m.querySelector('#' + ids.prefix + '-discount');
     if (discEl) discEl.addEventListener('input', () => { m._bom.manualPct = Number(discEl.value) || 0; recalc(); });
 
@@ -2030,6 +2147,7 @@
 
   function mountBookingModal(m, opts) {
     const ids = opts.ids;
+    m._bomIds = ids; // read back by the bom-group-revoke/apply dispatcher cases
     m._bom = { instrAmounts: {}, staffWindows: {}, manualPct: opts.discountPct || 0, groupPct: 0, groupOrg: '' };
     (opts.instrumentDetails || []).forEach((row) => { m._bom.instrAmounts[row.instrument_id] = row.amount || 0; });
     (opts.staffDetails || []).forEach((row) => { m._bom.staffWindows[row.person_id] = { start: row.start_time || '', end: row.end_time || '' }; });
@@ -2045,9 +2163,12 @@
     if (opts.staffIds) m.querySelector('.token-picker[data-kind="staff"]')._setSelected(opts.staffIds);
     if (opts.note) m.querySelector('#' + opts.noteId).innerHTML = UI.sanitizeHtml(opts.note);
 
-    updateGroupDiscount(m, ids);
     wireBomInputs(m, ids);
     refreshBom();
+    // Editing an existing booking restores exactly what was saved (respecting a prior revoke);
+    // a new booking offers the live standing discount for whatever project/group is preselected.
+    if (opts.groupOrg != null) restoreGroupState(m, ids, opts.groupOrg, opts.groupPct);
+    else applyProjectDrivenGroup(m, ids);
   }
 
   // Hard-block conflict check: the same instrument OR the same core-staff member cannot be on
@@ -2095,12 +2216,15 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" /></div>
         </div>
-        <div class="field">
-          <label>Project (optional)</label>
-          <select class="input" id="bk-project">
-            <option value="">-- Facility-wide / No Project --</option>
-            ${allProjects.map((p) => `<option value="${p.id}" ${pid === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
-          </select>
+        <div class="grid cols-2">
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="bk-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${allProjects.map((p) => `<option value="${p.id}" ${pid === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
+            </select>
+          </div>
+          ${groupSelectField('bk-group', '')}
         </div>
 
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
@@ -2116,7 +2240,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project' } }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group' } }));
   }
 
   function bookingSave() {
@@ -2129,6 +2253,7 @@
     const end = m.querySelector('#bk-end').value || '';
     const projectVal = m.querySelector('#bk-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
+    const groupOrg = (m.querySelector('#bk-group') || {}).value || '';
     const note = readNote(m, 'bk-note');
     const actions = m.querySelector('#bk-act').value.trim();
 
@@ -2143,13 +2268,13 @@
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    const ids = { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project' };
+    const ids = { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group' };
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_discount_pct, subtotal, total_before_tax, total_cost)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, title, date, start, end, attendees, '', note, actions, bom.manualPct, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total]);
+    DB.run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [projectId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total]);
     const inserted = DB.row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
     if (mid) {
@@ -2184,12 +2309,15 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bke-start" value="${esc(mt.start_time || '')}" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bke-end" value="${esc(mt.end_time || '')}" /></div>
         </div>
-        <div class="field">
-          <label>Project (optional)</label>
-          <select class="input" id="bke-project">
-            <option value="">-- Facility-wide / No Project --</option>
-            ${allProjects.map((p) => `<option value="${p.id}" ${mt.project_id === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
-          </select>
+        <div class="grid cols-2">
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="bke-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${allProjects.map((p) => `<option value="${p.id}" ${mt.project_id === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
+            </select>
+          </div>
+          ${groupSelectField('bke-group', mt.group_org || '')}
         </div>
 
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
@@ -2212,7 +2340,8 @@
         insts: currentInstDetails.map((r) => r.instrument_id), staffIds: currentStaffDetails.map((r) => r.person_id),
         instrumentDetails: currentInstDetails, staffDetails: currentStaffDetails,
         discountPct: mt.discount_pct || 0, note: mt.note,
-        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project' }
+        groupOrg: mt.group_org || '', groupPct: mt.group_discount_pct || 0,
+        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group' }
       }));
   }
 
@@ -2226,6 +2355,7 @@
     const end = m.querySelector('#bke-end').value || '';
     const projectVal = m.querySelector('#bke-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
+    const groupOrg = (m.querySelector('#bke-group') || {}).value || '';
     const note = readNote(m, 'bke-note');
     const actions = m.querySelector('#bke-act').value.trim();
 
@@ -2240,13 +2370,13 @@
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    const ids = { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project' };
+    const ids = { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group' };
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
     DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, attendees=?, note=?, actions=?,
-              discount_pct=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, attendees, note, actions, bom.manualPct, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, id]);
+              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
