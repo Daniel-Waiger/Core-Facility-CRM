@@ -427,6 +427,18 @@ textarea.input { resize: vertical; min-height: 74px; }
 }
 .token-x:hover { opacity: 1; }
 .token-select { cursor: pointer; }
+.token-select.locked { cursor: not-allowed; }
+
+/* Transient hint shown when the Assign People dropdown is locked pending a Group/Lab pick */
+.lock-hint {
+  position: fixed; z-index: 1060; transform: translateY(-50%);
+  background: #0f172a; color: #f8fafc; font-size: 11.5px; font-weight: 500;
+  padding: 6px 10px; border-radius: 8px; white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .15s ease, transform .15s ease;
+}
+.lock-hint.show { opacity: 1; visibility: visible; }
 
 /* ---------- Quick-add-person avatar (small, gender-neutral) ---------- */
 .reg-person-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }

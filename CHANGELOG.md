@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.4] — 2026-09-03
+
+### Changed
+- **Group / Lab is now required before assigning people to a booking.** Clicking the "Assign People" dropdown while no Group/Lab is chosen shows a not-allowed cursor and a rounded hint box ("Choose Group/Lab First") next to it instead of opening the list. Already-assigned people stay on the booking regardless (removing them, or switching labs, is never blocked); picking a Group/Lab — directly, or auto-filled from a project's PI — unlocks the dropdown immediately.
+
 ## [1.3.3] — 2026-09-03
 
 ### Fixed

@@ -1775,6 +1775,26 @@
       </div></div>`;
   }
 
+  // Transient "you can't do that yet" hint: a rounded toast-like box anchored next to the
+  // control that blocked the click, auto-dismissed a moment later. Used when the Assign
+  // People dropdown is locked pending a Group/Lab pick.
+  let lockHintTimer = null;
+  function showLockHint(anchor, text) {
+    let hint = document.querySelector('.lock-hint');
+    if (!hint) {
+      hint = document.createElement('div');
+      hint.className = 'lock-hint';
+      document.body.appendChild(hint);
+    }
+    const r = anchor.getBoundingClientRect();
+    hint.textContent = text;
+    hint.style.left = (r.right + 8) + 'px';
+    hint.style.top = (r.top + r.height / 2) + 'px';
+    hint.classList.add('show');
+    clearTimeout(lockHintTimer);
+    lockHintTimer = setTimeout(() => hint.classList.remove('show'), 1600);
+  }
+
   /* Token-picker: <select> of not-yet-picked items + accumulating removable badges.
      Source of truth is the badge DOM; `wrap._setSelected(ids)` seeds it (edit mode). */
   function mountTokenPicker(m, kind, items, onChange) {
@@ -1785,6 +1805,7 @@
     const addLabel = wrap.dataset.add || '+ Add…';
     const byId = new Map(items.map((it) => [String(it.id), it]));
     const selected = new Set();
+    let locked = false, lockMsg = '';
     let filterFn = null; // narrows the dropdown only — an already-picked badge never disappears
 
     function render() {
@@ -1804,6 +1825,24 @@
       if (onChange) onChange();
     }
     sel.addEventListener('change', () => { if (sel.value) { selected.add(sel.value); render(); } });
+    // Blocks opening the native dropdown while locked (e.g. no Group/Lab picked yet) —
+    // preventDefault on mousedown stops the browser from popping the option list open, and
+    // Enter/Space (keyboard) gets the same treatment. Already-picked badges are unaffected.
+    sel.addEventListener('mousedown', (e) => {
+      if (!locked) return;
+      e.preventDefault();
+      showLockHint(sel, lockMsg);
+    });
+    sel.addEventListener('keydown', (e) => {
+      if (!locked || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      showLockHint(sel, lockMsg);
+    });
+    wrap._setLocked = (isLocked, msg) => {
+      locked = !!isLocked;
+      lockMsg = msg || '';
+      sel.classList.toggle('locked', locked);
+    };
     list.addEventListener('click', (e) => {
       const x = e.target.closest('.token-x');
       if (!x) return;
@@ -1926,7 +1965,12 @@
   // switching labs mid-booking never drops a cross-lab collaborator you'd already picked.
   function filterOwnerPickerByGroup(m, org) {
     const wrap = m.querySelector('.token-picker[data-kind="owner"]');
-    if (wrap && wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
+    if (!wrap) return;
+    if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
+    // Group/Lab is mandatory before new people can be assigned: no group picked yet locks the
+    // dropdown (not-allowed cursor + "Choose Group/Lab First" hint). Already-picked badges are
+    // never affected, same as the filter above.
+    if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
   }
 
   // The "offer" path: a lab is chosen (by hand, or auto-filled from a project's PI) and its
