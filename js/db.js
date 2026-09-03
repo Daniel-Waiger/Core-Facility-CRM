@@ -788,7 +788,7 @@
       5,      // group_discount_pct snapshot (Bio-Photonics Lab standing discount, see group_discounts below)
       490,    // subtotal: Olympus FV3000 300 (2h @ $150/hr) + David Kim 190 (2h @ $95/hr)
       546.25, // total_before_tax: (490 - 5% of the $300 instrument-time line) x 1.15 overhead (10% internal + 5% external)
-      590.15  // total_cost: total_before_tax x 1.08 tax
+      589.95  // total_cost: total_before_tax x 1.08 tax
     ]);
     run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions) VALUES (?,?,?,?,?,?,?,?)`, [
       1,
