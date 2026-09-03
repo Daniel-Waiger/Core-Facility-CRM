@@ -130,9 +130,9 @@
 
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.2.3 · 30 Aug 2026</span>
+    <span class="eyebrow">Release 1.3.0 · 03 Sep 2026</span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">A big pass over data entry and scale: booking now uses dropdown pickers instead of walls of chips, people carry a proper Department, meeting notes are rich text, nothing scrolls sideways, and the guided tour walks you through every dialog.</p>
+    <p class="lede">Bookings grow up: instruments and core staff now get a start/end time, double-booking the same instrument or person is blocked outright, and every booking computes a live bill of materials — instrument and staff cost, a standing lab discount, overhead, and tax — down to a final total. Project status is now yours to extend.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="#changelog">Full changelog</a>
@@ -147,12 +147,12 @@
     <h2>Highlights</h2>
     <p class="section-sub">The headline changes in this release.</p>
     <div class="cards">
-      <div class="card"><div class="ic">🏷️</div><h3>Scalable pickers</h3><p>People &amp; instruments are dropdowns that fill up with removable badges — they no longer list your whole inventory as chips.</p></div>
-      <div class="card"><div class="ic">🏢</div><h3>Department field</h3><p>Lab / Group and Department are separate fields and columns, each with a quick “+ Add New”.</p></div>
-      <div class="card"><div class="ic">✍️</div><h3>Rich-text notes</h3><p>Bold, italics, bullets and font sizes in meeting notes — preserved in Word &amp; PDF exports.</p></div>
-      <div class="card"><div class="ic">↔️</div><h3>No side-scrolling</h3><p>Tables and modals lay out within the window; wide content wraps instead of scrolling.</p></div>
-      <div class="card"><div class="ic">🌿</div><h3>Register mid-flow</h3><p>A mint “Register New Person” button opens the full form without leaving your booking.</p></div>
-      <div class="card"><div class="ic">🧭</div><h3>Dialog-aware tour</h3><p>A 19-step walkthrough opens every real modal and glides between steps.</p></div>
+      <div class="card"><div class="ic">🕒</div><h3>Timed bookings</h3><p>Instrument and core-staff bookings carry a start/end time now, not just a date.</p></div>
+      <div class="card"><div class="ic">🚫</div><h3>No double-booking</h3><p>Saving is blocked outright if an instrument or staff member already has an overlapping booking that day.</p></div>
+      <div class="card"><div class="ic">💵</div><h3>Live cost breakdown</h3><p>Every booking computes its own bill of materials: instrument + staff cost, discounts, overhead, tax.</p></div>
+      <div class="card"><div class="ic">🏷️</div><h3>Group discounts</h3><p>A standing per-lab discount plus a manual admin override, both shown live in the breakdown.</p></div>
+      <div class="card"><div class="ic">🧾</div><h3>Project Costs</h3><p>Every project page lists its bookings’ costs; exports gain a dedicated Bookings &amp; Costs sheet.</p></div>
+      <div class="card"><div class="ic">🔀</div><h3>Custom statuses</h3><p>Add your own project status tags to match a review → kickoff → billing workflow.</p></div>
     </div>
   </div>
 </section>
@@ -162,96 +162,114 @@
     <h2>In detail</h2>
     <p class="section-sub">Each change, with a snapshot.</p>
 
-    <!-- Booking pickers -->
+    <!-- Timed bookings + core staff picker -->
     <div class="feature">
       <div class="txt">
-        <h3>Scalable booking pickers <span class="tag">new</span></h3>
-        <p>The New / Edit Booking dialog no longer renders your entire roster as toggle chips. People and Instruments are dropdowns; picking one drops a removable badge above the list and shrinks the menu.</p>
+        <h3>Timed instrument &amp; core-staff bookings <span class="tag">new</span></h3>
+        <p>The New / Edit Booking dialog gains Start Time and End Time alongside the date, plus a brand-new <strong>Assign Core Staff</strong> picker — separate from the plain attendee list — for the facility staff who actually run the session and get billed for it.</p>
         <ul>
-          <li>A small <code>×</code> on the left of each badge removes it.</li>
-          <li>Hover a person badge for their role; an instrument badge for its modality.</li>
-          <li>Notes are a rich-text editor (see below); the old Meeting Link field is gone — paste links into notes.</li>
+          <li>Core Staff options are anyone flagged “Core Staff” on their profile, with an hourly rate.</li>
+          <li>Times are optional — a booking with no times still behaves like a plain meeting.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/15-booking-pickers.png" alt="New Booking dialog with dropdown pickers, removable badges, mint Register New Person button and rich-text notes" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/15-booking-pickers.png</code></span></div>
-        <figcaption>New Booking — dropdown pickers, removable badges, mint “Register New Person”, rich-text notes.</figcaption>
+        <img src="screenshots/21-new-booking-modal.png" alt="New Booking dialog with Date, Start Time, End Time fields and Assign Core Staff picker" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/21-new-booking-modal.png</code></span></div>
+        <figcaption>New Booking — Start/End time fields and the new Assign Core Staff picker, above the live Cost &amp; Time Breakdown.</figcaption>
       </figure>
     </div>
 
-    <!-- Register person + department -->
+    <!-- Conflict prevention -->
     <div class="feature reverse">
       <div class="txt">
-        <h3>Register Person &amp; Department <span class="tag">new</span></h3>
-        <p>Register a researcher from the standard form — now with <strong>separate Lab / Group and Department</strong> dropdowns instead of one comma-packed field. Each dropdown has a “+ Add New” mini-dialog for values you don’t have yet, and the inline avatar is small and gender-neutral.</p>
+        <h3>Double-booking is blocked, not just discouraged <span class="tag">new</span></h3>
+        <p>Save a booking whose time window overlaps another booking on the same instrument — or the same core-staff member — and the save is rejected outright, with a toast naming exactly which booking it clashes with.</p>
         <ul>
-          <li>From the booking dialog, the mint <strong>Register New Person</strong> button opens this form and drops the new person straight into the picker — add several in a row.</li>
-          <li>Department shows as its own column in People and its own field in every export.</li>
+          <li>Checked independently for every selected instrument and every selected staff member.</li>
+          <li>No override: a facility has exactly one of each instrument, and a person can’t be in two places.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/16-register-person.png" alt="Register Researcher / Staff dialog with Position, Lab/Group and Department dropdowns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/16-register-person.png</code></span></div>
-        <figcaption>Register Researcher / Staff — Lab / Group and Department are separate dropdowns.</figcaption>
+        <img src="screenshots/23-booking-conflict-blocked.png" alt="Toast rejecting a booking because the instrument is already booked in an overlapping window" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/23-booking-conflict-blocked.png</code></span></div>
+        <figcaption>Saving a second, overlapping booking on the same instrument is rejected — the toast names the clash.</figcaption>
       </figure>
     </div>
 
-    <!-- People table with department -->
+    <!-- Live cost breakdown -->
     <div class="feature">
       <div class="txt">
-        <h3>People directory, wider &amp; wrapped <span class="tag">changed</span></h3>
-        <p>The People, Labs &amp; Researchers table gains a Department column and lays out fully within the window — no horizontal scrollbar. Long values wrap; the row actions stay pinned.</p>
-      </div>
-      <figure class="shot">
-        <img src="screenshots/17-people-department.png" alt="People table showing separate Lab/Group and Department columns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/17-people-department.png</code></span></div>
-        <figcaption>People &amp; Labs — Lab / Group and Department as separate columns, no side-scroll.</figcaption>
-      </figure>
-    </div>
-
-    <!-- Add New mini dialog -->
-    <div class="feature reverse">
-      <div class="txt">
-        <h3>“+ Add New” everywhere <span class="tag">changed</span></h3>
-        <p>Lab / Group, Department, and the vocabulary dropdowns (Modality, Funding, Sample, Role) all share the same pattern: a select of known values plus a “+ Add New” button that opens a small dialog and injects your new value, selected, back into the form.</p>
-        <p>Nested dialogs now close the <em>topmost</em> one on Cancel / Save — so registering a new lab never dismisses the form underneath.</p>
-      </div>
-      <figure class="shot">
-        <img src="screenshots/18-add-new-value.png" alt="The quick Add New Lab / Group / Company dialog" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/18-add-new-value.png</code></span></div>
-        <figcaption>The quick “Add New Lab / Group / Company” dialog — opened from “＋ Add New” on the person form.</figcaption>
-      </figure>
-    </div>
-
-    <!-- Rich text notes -->
-    <div class="feature">
-      <div class="txt">
-        <h3>Rich-text meeting notes <span class="tag">new</span></h3>
-        <p>Meeting notes support light formatting in the app’s own font: bullet lists, <strong>bold</strong> (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>B</kbd>), <em>italics</em> (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>I</kbd>), and preset sizes (Small / Normal / Large / Huge).</p>
+        <h3>A live cost &amp; time breakdown, right in the booking <span class="tag">new</span></h3>
+        <p>Every instrument and core-staff line updates as you build the booking: instrument cost by the hour (or by an amount you type, for per-unit / per-weight pricing), staff cost by hourly rate with a one-hour minimum, then a standing lab discount plus overhead and tax rolled up into a final total.</p>
         <ul>
-          <li>Formatting is preserved in Word (.docx) and PDF exports; Excel / CSV get clean plain text.</li>
-          <li>Stored as a safe HTML subset; legacy plain-text notes still display correctly.</li>
+          <li>Staff billing floors at 1 hour and rounds up — 10 minutes bills as 1 hour, 65 minutes as 2.</li>
+          <li>Discounts apply to time-billed instrument cost only, never to staff time.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/19-rich-notes.png" alt="A saved meeting showing bold text and a bullet list in the notes" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/19-rich-notes.png</code></span></div>
-        <figcaption>Meeting notes rendered with bold and bullets, in-app.</figcaption>
+        <img src="screenshots/22-booking-cost-breakdown.png" alt="The Cost & Time Breakdown showing instrument and staff lines, discount, overhead, tax and total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/22-booking-cost-breakdown.png</code></span></div>
+        <figcaption>The live Cost &amp; Time Breakdown — instrument and staff lines, discount, overhead, tax, and total.</figcaption>
       </figure>
     </div>
 
-    <!-- Guided tour -->
+    <!-- Group discounts / admin mode / billing rates -->
     <div class="feature reverse">
       <div class="txt">
-        <h3>Guided tour walks every dialog <span class="tag">changed</span></h3>
-        <p>The walkthrough grew from a screen tour into a full 19-step guide that opens each real dialog — New Project, Add Milestone, Custom Field, Attach File, Register Person, Add Instrument, New Booking, and Today’s Agenda — so you see the actual forms. Steps glide with a soft cross-fade instead of a hard cut; each one spotlights a stable, precise target and always scrolls it into view first; a Back button lets you revisit an earlier step; and any dialog a step opens is dismissed automatically when you move on.</p>
+        <h3>Group discounts, an admin override, and facility-wide billing rates <span class="tag">new</span></h3>
+        <p>Settings gains a Billing Rates card (internal / external overhead %, tax %, currency) and an Admin Mode switch that reveals a per-lab Group Discounts editor plus a manual per-booking override. This app has no accounts, so Admin Mode is a local convenience toggle — not real access control.</p>
+        <ul>
+          <li>A lab’s standing discount auto-applies to any booking under a project whose PI belongs to that lab.</li>
+          <li>Both the group and manual discount show up, live, in the booking’s cost breakdown.</li>
+        </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/20-guided-tour.png" alt="Guided tour spotlighting the New Project dialog with an explanatory bubble" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/20-guided-tour.png</code></span></div>
-        <figcaption>The tour spotlighting a live dialog, with its explanatory bubble alongside.</figcaption>
+        <img src="screenshots/29-settings-admin-group-discounts.png" alt="Admin Mode switched on, revealing the Group Discounts editor with one row per lab" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/29-settings-admin-group-discounts.png</code></span></div>
+        <figcaption>Admin Mode on — the Group Discounts editor, one row per lab on record.</figcaption>
       </figure>
+    </div>
+
+    <!-- Project Costs + exports -->
+    <div class="feature">
+      <div class="txt">
+        <h3>Project Costs, and richer exports <span class="tag">new</span></h3>
+        <p>Every project page now lists its bookings with their stored subtotal, pre-tax, and final totals — snapshotted at save time, so re-pricing an instrument later never rewrites a past invoice. Instrument cost/unit and staff rate now flow through to XLSX/DOCX/PDF, and the facility-wide export gains a dedicated Bookings &amp; Costs sheet.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/30-project-costs-list.png" alt="Project Costs list showing each booking's subtotal, before-tax, and total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/30-project-costs-list.png</code></span></div>
+        <figcaption>Project Costs — every booking’s stored subtotal, pre-tax figure, and total, in one place.</figcaption>
+      </figure>
+    </div>
+
+    <!-- Custom project statuses -->
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Custom project statuses <span class="tag">new</span></h3>
+        <p>Project status is no longer a fixed five-item list — it’s the same “+ Add New” vocabulary pattern used everywhere else in the app, seeded with a review → kickoff → billing workflow (Submitted for review, Under review, Kickoff scheduled, Invoiced, Paid) so a facility can track a lab’s request from submission through payment.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/26-project-status-workflow.png" alt="Project status bar with the extended review/kickoff/billing workflow and an Add status button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/26-project-status-workflow.png</code></span></div>
+        <figcaption>The project status bar, extended with a review/kickoff/billing workflow and its own “+ Add status”.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Also new in 1.3.0</h2>
+    <p class="section-sub">The rest of what shipped with this release.</p>
+    <div class="cards">
+      <figure class="shot shot-thumb"><img src="screenshots/24-instrument-cost-unit-fields.png" alt="Edit Instrument dialog with Cost and Billed per fields" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/24-instrument-cost-unit-fields.png</code></span></div><figcaption>Instrument Cost &amp; billing unit</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/25-person-core-staff-fields.png" alt="Edit Profile dialog with Core Staff checkbox and hourly Rate field" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/25-person-core-staff-fields.png</code></span></div><figcaption>Core Staff &amp; hourly rate</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/27-add-custom-status.png" alt="Add New Status dialog" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/27-add-custom-status.png</code></span></div><figcaption>Add a custom status</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/28-settings-billing-rates.png" alt="Settings Billing Rates card with overhead, tax and currency fields" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/28-settings-billing-rates.png</code></span></div><figcaption>Billing Rates settings</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/31-instruments-list-cost-unit.png" alt="Instruments list with new Cost and Unit columns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/31-instruments-list-cost-unit.png</code></span></div><figcaption>Instruments list — Cost &amp; Unit</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/32-people-list-staff-rate.png" alt="People list with new Staff and Rate columns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/32-people-list-staff-rate.png</code></span></div><figcaption>People list — Staff &amp; Rate</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/33-calendar-timed-bookings.png" alt="Calendar month showing a booking chip prefixed with its start time" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/33-calendar-timed-bookings.png</code></span></div><figcaption>Calendar — timed booking chips</figcaption></figure>
     </div>
   </div>
 </section>
@@ -275,6 +293,12 @@
       <figure class="shot shot-thumb"><img src="screenshots/12-instruments.png" alt="Instruments" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/12-instruments.png</code></span></div><figcaption>Core instruments</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/13-calendar.png" alt="Calendar" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/13-calendar.png</code></span></div><figcaption>Schedule &amp; calendar</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/14-settings.png" alt="Settings" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/14-settings.png</code></span></div><figcaption>Settings &amp; backups</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/15-booking-pickers.png" alt="Booking dialog with dropdown pickers" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/15-booking-pickers.png</code></span></div><figcaption>Booking pickers (1.2.0)</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/16-register-person.png" alt="Register Researcher / Staff dialog" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/16-register-person.png</code></span></div><figcaption>Register a person (1.2.0)</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/17-people-department.png" alt="People table with Department column" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/17-people-department.png</code></span></div><figcaption>People directory (1.2.0)</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/18-add-new-value.png" alt="Add New Lab / Group / Company dialog" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/18-add-new-value.png</code></span></div><figcaption>“+ Add New” dropdowns (1.2.0)</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/19-rich-notes.png" alt="Meeting notes with bold text and a bullet list" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/19-rich-notes.png</code></span></div><figcaption>Rich-text notes (1.2.0)</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/20-guided-tour.png" alt="Guided tour spotlighting a dialog" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/20-guided-tour.png</code></span></div><figcaption>Guided tour (1.2.0)</figcaption></figure>
     </div>
   </div>
 </section>
@@ -289,7 +313,7 @@
 
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · v1.2.3 · Bioimaging Facility</div>
+    <div>Core Facility Tracker · v1.3.0 · Bioimaging Facility</div>
     <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>
