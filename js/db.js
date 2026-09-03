@@ -835,11 +835,14 @@
 
     // Global billing rates (Settings > Billing Rates) and one standing group discount, so the
     // cost breakdown above is reproducible from Settings rather than a one-off hardcoded total.
-    run("INSERT INTO app_config (key, value) VALUES ('overhead_internal', '10')");
-    run("INSERT INTO app_config (key, value) VALUES ('overhead_external', '5')");
-    run("INSERT INTO app_config (key, value) VALUES ('tax_pct', '8')");
-    run("INSERT INTO app_config (key, value) VALUES ('currency', '$')");
-    run("INSERT INTO group_discounts (org, percent) VALUES ('Bio-Photonics Lab', 5)");
+    // Uses the upsert helpers, not a plain INSERT — clearAllData() deliberately leaves app_config
+    // and group_discounts alone (they're facility settings, not "data" to wipe on Clear/Reseed),
+    // so re-running Load Sample Data would otherwise hit a UNIQUE constraint on the second run.
+    setConfig('overhead_internal', '10');
+    setConfig('overhead_external', '5');
+    setConfig('tax_pct', '8');
+    setConfig('currency', '$');
+    setGroupDiscount('Bio-Photonics Lab', 5);
 
     // 8. Custom KV Metadata
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Biosafety Level", "BSL-2 (Murine Live In-Vivo)")');

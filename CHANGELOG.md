@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.2] — 2026-09-03
+
+### Fixed
+- **"Load Sample Data" broke on the second run, silently.** `seedSampleData()` re-inserted the billing rates and the Bio-Photonics Lab group discount with a plain `INSERT`, but `clearAllData()` deliberately never clears `app_config`/`group_discounts` (they're facility settings, not sample data to wipe). Re-running it — including via the welcome screen's "Load Demo & Start Tour", which calls it on every click — hit a `UNIQUE constraint failed` that aborted the whole handler mid-flight: no toast, no dismissal, and (from the welcome screen) the tour never started, leaving it looking like the button just didn't work. Now uses the existing `DB.setConfig`/`DB.setGroupDiscount` upserts, so reseeding is safe to run any number of times.
+
 ## [1.3.1] — 2026-09-03
 
 ### Added
