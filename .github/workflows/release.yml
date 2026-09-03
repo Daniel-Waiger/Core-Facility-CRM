@@ -112,4 +112,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file notes.md $prerelease_flag
-          gh release view "$TAG" --json tagName,htmlUrl --jq '"Created \(.tagName): \(.htmlUrl)"'
+          gh release view "$TAG" --json tagName,url --jq '"Created \(.tagName): \(.url)"'
