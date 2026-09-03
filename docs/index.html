@@ -128,11 +128,17 @@
 </head>
 <body>
 
+<!--
+  This hero (through the "In detail" section below) is hand-written, not derived from
+  CHANGELOG.md — see the note right before the changelog-rendering script near the bottom
+  of this file for why, and update it manually on every release that changes booking/billing
+  behavior enough to warrant a highlight card or screenshot.
+-->
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.3.0 · 03 Sep 2026</span>
+    <span class="eyebrow">Release 1.3.1 – 1.3.6 · 03 Sep 2026</span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">Bookings grow up: instruments and core staff now get a start/end time, double-booking the same instrument or person is blocked outright, and every booking computes a live bill of materials — instrument and staff cost, a standing lab discount, overhead, and tax — down to a final total. Project status is now yours to extend.</p>
+    <p class="lede">Six releases in one day, all pointed at the same seam opened up by 1.3.0’s billing work: a booking is only as good as the Group/Lab it’s filed under. Assigning people or core staff now waits for one; the lab’s standing discount follows automatically and can be revoked per-booking or for good; and a handful of smaller fixes — safer sample-data reseeding, a real favicon, a lockable single-instrument booking, a full screenshot gallery — round out the batch.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="#changelog">Full changelog</a>
@@ -145,14 +151,14 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">The headline changes in this release.</p>
+    <p class="section-sub">The headline changes across 1.3.1–1.3.6.</p>
     <div class="cards">
-      <div class="card"><div class="ic">🕒</div><h3>Timed bookings</h3><p>Instrument and core-staff bookings carry a start/end time now, not just a date.</p></div>
-      <div class="card"><div class="ic">🚫</div><h3>No double-booking</h3><p>Saving is blocked outright if an instrument or staff member already has an overlapping booking that day.</p></div>
-      <div class="card"><div class="ic">💵</div><h3>Live cost breakdown</h3><p>Every booking computes its own bill of materials: instrument + staff cost, discounts, overhead, tax.</p></div>
-      <div class="card"><div class="ic">🏷️</div><h3>Group discounts</h3><p>A standing per-lab discount plus a manual admin override, both shown live in the breakdown.</p></div>
-      <div class="card"><div class="ic">🧾</div><h3>Project Costs</h3><p>Every project page lists its bookings’ costs; exports gain a dedicated Bookings &amp; Costs sheet.</p></div>
-      <div class="card"><div class="ic">🔀</div><h3>Custom statuses</h3><p>Add your own project status tags to match a review → kickoff → billing workflow.</p></div>
+      <div class="card"><div class="ic">🔒</div><h3>Group/Lab comes first</h3><p>Assign People and Assign Core Staff both stay locked until a Group/Lab is picked — directly, or auto-filled from the project’s PI.</p></div>
+      <div class="card"><div class="ic">🏷️</div><h3>Discounts follow the lab</h3><p>Picking a Group/Lab offers its standing discount automatically; Admin Mode can Revoke or Apply it, for just this booking or for the lab going forward.</p></div>
+      <div class="card"><div class="ic">🧰</div><h3>One instrument, locked in</h3><p>The first instrument added to a booking can be marked as the only one needed, locking further additions until it’s removed.</p></div>
+      <div class="card"><div class="ic">🖼️</div><h3>Screenshot gallery</h3><p>A full-size, keyboard/swipe-navigable carousel of every screenshot, listing <code>docs/screenshots/</code> live from GitHub.</p></div>
+      <div class="card"><div class="ic">🩹</div><h3>Load Sample Data, fixed</h3><p>Reseeding demo data no longer crashes on a second run — “Load Demo &amp; Start Tour” is safe to click more than once.</p></div>
+      <div class="card"><div class="ic">🖥️</div><h3>Real favicon everywhere</h3><p>Browser tabs and bookmarks now show the app logo instead of a generic globe, with PNG/ICO fallbacks alongside the SVG.</p></div>
     </div>
   </div>
 </section>
@@ -160,116 +166,54 @@
 <section>
   <div class="wrap">
     <h2>In detail</h2>
-    <p class="section-sub">Each change, with a snapshot.</p>
+    <p class="section-sub">The three changes worth a screenshot.</p>
 
-    <!-- Timed bookings + core staff picker -->
+    <!-- Group/Lab required for People (1.3.4) and Core Staff (1.3.6) -->
     <div class="feature">
       <div class="txt">
-        <h3>Timed instrument &amp; core-staff bookings <span class="tag">new</span></h3>
-        <p>The New / Edit Booking dialog gains Start Time and End Time alongside the date, plus a brand-new <strong>Assign Core Staff</strong> picker — separate from the plain attendee list — for the facility staff who actually run the session and get billed for it.</p>
+        <h3>Assign People and Assign Core Staff both wait for a Group/Lab <span class="tag">new</span></h3>
+        <p>Both pickers now lock the same way: with no Group/Lab chosen yet, clicking either dropdown shows a not-allowed cursor and a “Choose Group/Lab First” hint instead of opening the list. It makes sense once you notice every person <em>and</em> every core-staff member on record already belongs to a lab or group — the picker has nothing meaningful to filter until it knows which one.</p>
         <ul>
-          <li>Core Staff options are anyone flagged “Core Staff” on their profile, with an hourly rate.</li>
-          <li>Times are optional — a booking with no times still behaves like a plain meeting.</li>
+          <li>People got the lock in 1.3.4; Core Staff got the identical lock two releases later, in 1.3.6.</li>
+          <li>Already-assigned people or staff are never removed by this — only adding more is blocked.</li>
+          <li>Picking a Group/Lab — directly, or auto-filled from the project’s PI — unlocks both immediately.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/21-new-booking-modal.png" alt="New Booking dialog with Date, Start Time, End Time fields and Assign Core Staff picker" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/21-new-booking-modal.png</code></span></div>
-        <figcaption>New Booking — Start/End time fields and the new Assign Core Staff picker, above the live Cost &amp; Time Breakdown.</figcaption>
+        <img src="screenshots/35-booking-group-required-lock.png" alt="Booking modal with the people and core-staff pickers locked until a Group/Lab is chosen" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/35-booking-group-required-lock.png</code></span></div>
+        <figcaption>No Group/Lab chosen yet — Assign People and Assign Core Staff both stay locked with the same hint.</figcaption>
       </figure>
     </div>
 
-    <!-- Conflict prevention -->
+    <!-- Group selector driving the standing discount (1.3.1) -->
     <div class="feature reverse">
       <div class="txt">
-        <h3>Double-booking is blocked, not just discouraged <span class="tag">new</span></h3>
-        <p>Save a booking whose time window overlaps another booking on the same instrument — or the same core-staff member — and the save is rejected outright, with a toast naming exactly which booking it clashes with.</p>
+        <h3>The lab’s standing discount, applied automatically — and revocable <span class="tag">new</span></h3>
+        <p>Choosing a Group/Lab for a booking offers that lab’s standing discount right away, live in the cost breakdown. In Admin Mode, a Revoke/Apply control on that line lets you turn it off — and asks whether that’s <strong>just for this booking</strong> or <strong>for every future booking under that lab</strong> (the latter edits the lab’s standing rate in Settings, same as changing it there directly). Re-applying restores the rate with no further prompt.</p>
         <ul>
-          <li>Checked independently for every selected instrument and every selected staff member.</li>
-          <li>No override: a facility has exactly one of each instrument, and a person can’t be in two places.</li>
+          <li>Picking a project auto-fills the Group from its PI’s lab; it can also be set directly for a facility-wide booking.</li>
+          <li>A booking now stores which Group/Lab it was made under, so reopening it restores the exact filter and discount state rather than re-deriving it live.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/23-booking-conflict-blocked.png" alt="Toast rejecting a booking because the instrument is already booked in an overlapping window" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/23-booking-conflict-blocked.png</code></span></div>
-        <figcaption>Saving a second, overlapping booking on the same instrument is rejected — the toast names the clash.</figcaption>
+        <img src="screenshots/34-booking-group-discount-revoke.png" alt="Booking modal showing the live cost breakdown with an applied group discount and its Revoke control" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/34-booking-group-discount-revoke.png</code></span></div>
+        <figcaption>A lab’s standing discount, applied live in the Cost &amp; Time Breakdown, with its admin-only Revoke control.</figcaption>
       </figure>
     </div>
 
-    <!-- Live cost breakdown -->
+    <!-- Consequence: Project Costs' running total reflects the discount (existing 1.3.0 feature, shown post-1.3.1) -->
     <div class="feature">
       <div class="txt">
-        <h3>A live cost &amp; time breakdown, right in the booking <span class="tag">new</span></h3>
-        <p>Every instrument and core-staff line updates as you build the booking: instrument cost by the hour (or by an amount you type, for per-unit / per-weight pricing), staff cost by hourly rate with a one-hour minimum, then a standing lab discount plus overhead and tax rolled up into a final total.</p>
-        <ul>
-          <li>Staff billing floors at 1 hour and rounds up — 10 minutes bills as 1 hour, 65 minutes as 2.</li>
-          <li>Discounts apply to time-billed instrument cost only, never to staff time.</li>
-        </ul>
+        <h3>And it rolls straight into the project’s running total</h3>
+        <p>Project Costs — the per-project list of booking subtotals, pre-tax figures, and totals, with a running total for the project — already existed as of 1.3.0. It didn’t need a code change to pick up 1.3.1’s discount work: each booking’s total is computed and snapshotted at save time, discount included, so the running total downstream was always going to reflect whatever discount that booking actually got.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/22-booking-cost-breakdown.png" alt="The Cost & Time Breakdown showing instrument and staff lines, discount, overhead, tax and total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/22-booking-cost-breakdown.png</code></span></div>
-        <figcaption>The live Cost &amp; Time Breakdown — instrument and staff lines, discount, overhead, tax, and total.</figcaption>
+        <img src="screenshots/36-project-costs-running-total.png" alt="Project Costs card listing each booking's subtotal, before-tax amount and total with a running project total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/36-project-costs-running-total.png</code></span></div>
+        <figcaption>Project Costs — the running total already reflects each booking’s group discount.</figcaption>
       </figure>
-    </div>
-
-    <!-- Group discounts / admin mode / billing rates -->
-    <div class="feature reverse">
-      <div class="txt">
-        <h3>Group discounts, an admin override, and facility-wide billing rates <span class="tag">new</span></h3>
-        <p>Settings gains a Billing Rates card (internal / external overhead %, tax %, currency) and an Admin Mode switch that reveals a per-lab Group Discounts editor plus a manual per-booking override. This app has no accounts, so Admin Mode is a local convenience toggle — not real access control.</p>
-        <ul>
-          <li>A lab’s standing discount auto-applies to any booking under a project whose PI belongs to that lab.</li>
-          <li>Both the group and manual discount show up, live, in the booking’s cost breakdown.</li>
-        </ul>
-      </div>
-      <figure class="shot">
-        <img src="screenshots/29-settings-admin-group-discounts.png" alt="Admin Mode switched on, revealing the Group Discounts editor with one row per lab" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/29-settings-admin-group-discounts.png</code></span></div>
-        <figcaption>Admin Mode on — the Group Discounts editor, one row per lab on record.</figcaption>
-      </figure>
-    </div>
-
-    <!-- Project Costs + exports -->
-    <div class="feature">
-      <div class="txt">
-        <h3>Project Costs, and richer exports <span class="tag">new</span></h3>
-        <p>Every project page now lists its bookings with their stored subtotal, pre-tax, and final totals — snapshotted at save time, so re-pricing an instrument later never rewrites a past invoice. Instrument cost/unit and staff rate now flow through to XLSX/DOCX/PDF, and the facility-wide export gains a dedicated Bookings &amp; Costs sheet.</p>
-      </div>
-      <figure class="shot">
-        <img src="screenshots/30-project-costs-list.png" alt="Project Costs list showing each booking's subtotal, before-tax, and total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/30-project-costs-list.png</code></span></div>
-        <figcaption>Project Costs — every booking’s stored subtotal, pre-tax figure, and total, in one place.</figcaption>
-      </figure>
-    </div>
-
-    <!-- Custom project statuses -->
-    <div class="feature reverse">
-      <div class="txt">
-        <h3>Custom project statuses <span class="tag">new</span></h3>
-        <p>Project status is no longer a fixed five-item list — it’s the same “+ Add New” vocabulary pattern used everywhere else in the app, seeded with a review → kickoff → billing workflow (Submitted for review, Under review, Kickoff scheduled, Invoiced, Paid) so a facility can track a lab’s request from submission through payment.</p>
-      </div>
-      <figure class="shot">
-        <img src="screenshots/26-project-status-workflow.png" alt="Project status bar with the extended review/kickoff/billing workflow and an Add status button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/26-project-status-workflow.png</code></span></div>
-        <figcaption>The project status bar, extended with a review/kickoff/billing workflow and its own “+ Add status”.</figcaption>
-      </figure>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap">
-    <h2>Also new in 1.3.0</h2>
-    <p class="section-sub">The rest of what shipped with this release.</p>
-    <div class="cards">
-      <figure class="shot shot-thumb"><img src="screenshots/24-instrument-cost-unit-fields.png" alt="Edit Instrument dialog with Cost and Billed per fields" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/24-instrument-cost-unit-fields.png</code></span></div><figcaption>Instrument Cost &amp; billing unit</figcaption></figure>
-      <figure class="shot shot-thumb"><img src="screenshots/25-person-core-staff-fields.png" alt="Edit Profile dialog with Core Staff checkbox and hourly Rate field" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/25-person-core-staff-fields.png</code></span></div><figcaption>Core Staff &amp; hourly rate</figcaption></figure>
-      <figure class="shot shot-thumb"><img src="screenshots/27-add-custom-status.png" alt="Add New Status dialog" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/27-add-custom-status.png</code></span></div><figcaption>Add a custom status</figcaption></figure>
-      <figure class="shot shot-thumb"><img src="screenshots/28-settings-billing-rates.png" alt="Settings Billing Rates card with overhead, tax and currency fields" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/28-settings-billing-rates.png</code></span></div><figcaption>Billing Rates settings</figcaption></figure>
-      <figure class="shot shot-thumb"><img src="screenshots/31-instruments-list-cost-unit.png" alt="Instruments list with new Cost and Unit columns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/31-instruments-list-cost-unit.png</code></span></div><figcaption>Instruments list — Cost &amp; Unit</figcaption></figure>
-      <figure class="shot shot-thumb"><img src="screenshots/32-people-list-staff-rate.png" alt="People list with new Staff and Rate columns" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/32-people-list-staff-rate.png</code></span></div><figcaption>People list — Staff &amp; Rate</figcaption></figure>
-      <figure class="shot shot-thumb"><img src="screenshots/33-calendar-timed-bookings.png" alt="Calendar month showing a booking chip prefixed with its start time" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/33-calendar-timed-bookings.png</code></span></div><figcaption>Calendar — timed booking chips</figcaption></figure>
     </div>
   </div>
 </section>
@@ -303,6 +247,16 @@
   </div>
 </section>
 
+<!--
+  This is the one section that IS mechanical: it fetches ../CHANGELOG.md and reformats its
+  Markdown headings/bullets as HTML below, so it never goes stale on its own. The hero,
+  Highlights cards, and "In detail" screenshots above it can't work the same way — CHANGELOG.md
+  is a flat list of bullets with no signal for which entries deserve a headline card versus a
+  one-line mention, no link from a bullet to the screenshot that illustrates it, and no shorter
+  "highlight" phrasing distinct from the changelog's own wording. Picking, pairing, and rewriting
+  are editorial judgment calls a template can't make, so that content stays hand-maintained —
+  bump it on any release worth a highlight card or a new screenshot; see the note above the hero.
+-->
 <section id="changelog">
   <div class="wrap">
     <h2>Full changelog</h2>
