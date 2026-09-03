@@ -1796,7 +1796,12 @@
   }
 
   /* Token-picker: <select> of not-yet-picked items + accumulating removable badges.
-     Source of truth is the badge DOM; `wrap._setSelected(ids)` seeds it (edit mode). */
+     Source of truth is the badge DOM; `wrap._setSelected(ids)` seeds it (edit mode).
+
+     Instrument precheck: the first time the user (not `_setSelected` seeding an edit modal)
+     picks an instrument, we ask whether the booking only needs that one. Answering yes "locks"
+     the picker — the dropdown is disabled so no further instrument can be added — until the
+     user removes that instrument badge, which unlocks it again. */
   function mountTokenPicker(m, kind, items, onChange) {
     const wrap = m.querySelector(`.token-picker[data-kind="${kind}"]`);
     if (!wrap) return;
@@ -1807,6 +1812,7 @@
     const selected = new Set();
     let locked = false, lockMsg = '';
     let filterFn = null; // narrows the dropdown only — an already-picked badge never disappears
+    let singleInstrumentLock = false; // 'inst' picker only — set once the user confirms one instrument is enough
 
     function render() {
       list.innerHTML = [...selected].map((id) => {
@@ -1817,14 +1823,27 @@
       }).join('');
       let avail = items.filter((it) => !selected.has(String(it.id)));
       if (filterFn) avail = avail.filter(filterFn);
-      sel.innerHTML = `<option value="">${esc(addLabel)}</option>` +
+      sel.innerHTML = `<option value="">${esc(singleInstrumentLock ? 'Remove the instrument above to add another' : addLabel)}</option>` +
         avail.map((it) => `<option value="${it.id}">${esc(it.name)}${it.meta ? ' — ' + esc(it.meta) : ''}</option>`).join('');
       sel.value = '';
+      sel.disabled = singleInstrumentLock;
       // Cost-relevant pickers (instruments/staff) pass this so the BOM re-renders whenever the
       // selection itself changes; the attendees picker doesn't bother — it isn't billed.
       if (onChange) onChange();
     }
-    sel.addEventListener('change', () => { if (sel.value) { selected.add(sel.value); render(); } });
+    sel.addEventListener('change', () => {
+      if (!sel.value) return;
+      selected.add(sel.value);
+      render();
+      // Ask only the first time an instrument is picked by hand (not when an edit modal seeds
+      // existing badges via _setSelected) — and only while it's the sole instrument selected.
+      if (kind === 'inst' && selected.size === 1) {
+        UI.confirmModal(
+          'Single Instrument Booking?',
+          'Is only one instrument needed for this booking? If yes, you won’t be able to add another instrument until you remove this one.'
+        ).then((ok) => { if (ok && selected.size === 1) { singleInstrumentLock = true; render(); } });
+      }
+    });
     // Blocks opening the native dropdown while locked (e.g. no Group/Lab picked yet) —
     // preventDefault on mousedown stops the browser from popping the option list open, and
     // Enter/Space (keyboard) gets the same treatment. Already-picked badges are unaffected.
@@ -1847,6 +1866,7 @@
       const x = e.target.closest('.token-x');
       if (!x) return;
       selected.delete(x.parentElement.dataset.id);
+      if (kind === 'inst' && selected.size === 0) singleInstrumentLock = false;
       render();
     });
     wrap._setSelected = (ids) => {
