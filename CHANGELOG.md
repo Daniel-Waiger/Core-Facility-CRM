@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.3] — 2026-09-03
+
+### Fixed
+- **Browser tab and bookmarks bar showed a generic globe/sphere icon instead of the app logo.** The only favicon declared was an SVG (`favicon.svg`), and Chrome's bookmarks bar (along with some other browser surfaces) doesn't render SVG-only favicons, falling back to its default globe icon. Added PNG (`icons/icon-16.png`, `icons/icon-32.png`) and `.ico` fallbacks alongside the existing SVG, plus an `apple-touch-icon`, so every surface shows the real logo. The PWA manifest also now lists PNG icons (192/512) alongside the SVG.
+
 ## [1.3.2] — 2026-09-03
 
 ### Fixed
