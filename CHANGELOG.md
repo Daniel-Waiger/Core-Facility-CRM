@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.7] — 2026-09-04
+
+### Changed
+- **Restyled color palette and motion tokens.** Moved off the stock Tailwind indigo/violet palette (shared with other apps built on the same starting template) onto a distinct neutral/violet "Facility Design Language" system, in both light and dark themes: backgrounds, borders, text, and status colors (success/warning/danger) all recolored, with WCAG-AA-verified contrast. The logo gradient and PWA theme colors (favicon, manifest, meta tag) moved to the same violet identity. Dark-mode primary buttons now use a dedicated dark-ink text color instead of white, fixing a contrast failure against the lighter dark-mode primary. Added shared motion tokens (`--dur-fast`, `--dur-move`, `--ease`) and retargeted existing transitions to them, plus a `prefers-reduced-motion` override. No layout, typography, or component structure changes.
+
 ## [1.3.6] — 2026-09-03
 
 ### Added
