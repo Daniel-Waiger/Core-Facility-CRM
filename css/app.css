@@ -1,45 +1,57 @@
 /* ============ Modern SaaS Minimalist — Design System ============ */
 :root {
-  --bg: #f8fafc;
+  --bg: #f4f7f7;
   --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --text: #0f172a;
-  --text-muted: #64748b;
-  --text-faint: #94a3b8;
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-soft: #eef2ff;
-  --success: #059689;
-  --success-soft: #ccfbf1;
-  --warning: #f59e0b;
-  --warning-soft: #fef3c7;
-  --danger: #e11d48;
-  --danger-soft: #ffe4e6;
+  --surface-2: #ecf1f1;
+  --border: #dce4e4;
+  --border-strong: #bfcccc;
+  --text: #17272b;
+  --text-muted: #58696e;
+  --text-faint: #87979b;
+  --primary: #5b48c7;
+  --primary-hover: #4938ad;
+  --primary-soft: #eeeafb;
+  --primary-ink: #ffffff;
+  --success: #157a50;
+  --success-soft: #e0f5ea;
+  --warning: #9a5c05;
+  --warning-soft: #fbf1dc;
+  --danger: #bb3350;
+  --danger-soft: #fceaee;
   --radius: 0.75rem;
-  --shadow: 0 1px 2px rgba(15,23,42,.04), 0 1px 3px rgba(15,23,42,.06);
-  --shadow-lg: 0 10px 24px rgba(15,23,42,.12);
+  --shadow: 0 1px 2px rgba(23,39,43,.04), 0 1px 3px rgba(23,39,43,.06);
+  --shadow-lg: 0 10px 24px rgba(23,39,43,.12);
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  --dur-fast: 130ms;
+  --dur-move: 220ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 [data-theme="dark"] {
-  --bg: #0b1120;
-  --surface: #111a2c;
-  --surface-2: #16233a;
-  --border: #24334d;
-  --border-strong: #33466a;
-  --text: #e6ebf3;
-  --text-muted: #93a4bd;
-  --text-faint: #6b7c97;
-  --primary: #6366f1;
-  --primary-hover: #818cf0;
-  --primary-soft: #1e1b4b;
-  --success-soft: #04302c;
-  --warning-soft: #3a2a06;
-  --danger-soft: #3a1120;
+  --bg: #101a1d;
+  --surface: #162226;
+  --surface-2: #1c2b30;
+  --border: #2a3c42;
+  --border-strong: #3b525a;
+  --text: #e8eeef;
+  --text-muted: #96a8ad;
+  --text-faint: #6d8085;
+  --primary: #a094f2;
+  --primary-hover: #b3a9f5;
+  --primary-soft: #262052;
+  --primary-ink: #171233;
+  --success: #4bc48f;
+  --success-soft: #0f3a2a;
+  --warning: #e6ab45;
+  --warning-soft: #3d2e10;
+  --danger: #f0798e;
+  --danger-soft: #421a24;
   --shadow: 0 1px 2px rgba(0,0,0,.4);
   --shadow-lg: 0 10px 24px rgba(0,0,0,.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 
 * { box-sizing: border-box; }
@@ -64,7 +76,7 @@ body {
   top: 0;
   height: 100vh;
   max-height: 100vh;
-  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width var(--dur-move) var(--ease);
   z-index: 25;
   overflow-y: auto;
   overflow-x: hidden;
@@ -112,7 +124,7 @@ body {
 .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
 .brand .logo {
   width: 34px; height: 34px; border-radius: 9px;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: linear-gradient(135deg, #5b48c7, #8a4ccf);
   display: grid; place-items: center; color: #fff; flex-shrink: 0;
 }
 .brand .name { font-weight: 600; letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -130,7 +142,7 @@ body {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 12px; border-radius: 8px; color: var(--text-muted);
   cursor: pointer; font-weight: 500; user-select: none;
-  transition: all 0.12s;
+  transition: all var(--dur-fast);
   position: relative;
 }
 .nav-item:hover { background: var(--surface-2); color: var(--text); }
@@ -228,12 +240,12 @@ body {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   font-size: 13.5px; font-weight: 500; padding: 8px 13px;
   border-radius: 8px; cursor: pointer; border: 1px solid transparent;
-  transition: background .12s, border-color .12s, color .12s, transform .08s;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast);
   font-family: inherit; user-select: none;
 }
 .btn:active { transform: scale(0.98); }
 .btn svg { width: 15px; height: 15px; flex-shrink: 0; }
-.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary { background: var(--primary); color: var(--primary-ink); }
 .btn-primary:hover { background: var(--primary-hover); }
 .btn-secondary { background: var(--surface); color: var(--text); border-color: var(--border); }
 .btn-secondary:hover { background: var(--surface-2); border-color: var(--border-strong); }
@@ -322,35 +334,35 @@ body {
 
 /* ---------- Theme Switch Button (Previews Next Theme Colors) ---------- */
 .sidebar-theme-btn {
-  background: #0b1120 !important;
-  color: #ffffff !important;
-  border: 1px solid #24334d !important;
+  background: #101a1d !important;
+  color: #e8eeef !important;
+  border: 1px solid #2a3c42 !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   font-weight: 600;
 }
 .sidebar-theme-btn:hover {
-  background: #111a2c !important;
-  color: #ffffff !important;
-  border-color: #3b5074 !important;
+  background: #162226 !important;
+  color: #e8eeef !important;
+  border-color: #3b525a !important;
 }
 .sidebar-theme-btn svg {
-  stroke: #ffffff;
+  stroke: #e8eeef;
 }
 
 [data-theme="dark"] .sidebar-theme-btn {
   background: #ffffff !important;
-  color: #0f172a !important;
-  border: 1px solid #e2e8f0 !important;
+  color: #17272b !important;
+  border: 1px solid #dce4e4 !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   font-weight: 600;
 }
 [data-theme="dark"] .sidebar-theme-btn:hover {
-  background: #f8fafc !important;
-  color: #0f172a !important;
-  border-color: #cbd5e1 !important;
+  background: #f4f7f7 !important;
+  color: #17272b !important;
+  border-color: #bfcccc !important;
 }
 [data-theme="dark"] .sidebar-theme-btn svg {
-  stroke: #0f172a;
+  stroke: #17272b;
 }
 
 /* ---------- Theme Switch Knob ---------- */
@@ -391,7 +403,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 .progress { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .progress > i { display: block; height: 100%; background: var(--primary); border-radius: 999px; }
 .progress .seg { position: relative; }
-.progress .seg i { background: linear-gradient(90deg, var(--primary), #7c3aed); }
+.progress .seg i { background: linear-gradient(90deg, var(--primary), #8a4ccf); }
 .progress.seg + span, .row .progress + span { white-space: nowrap; flex: none; }
 
 /* ---------- KVS (key-value table) ---------- */
@@ -407,7 +419,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 .chip {
   font-size: 11.5px; font-weight: 500; padding: 3px 8px; border-radius: 7px;
   background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-  cursor: pointer; user-select: none; transition: all .1s;
+  cursor: pointer; user-select: none; transition: all var(--dur-fast);
 }
 .chip.on { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); font-weight: 600; }
 .chip-sm { font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 6px; background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
@@ -432,7 +444,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 /* Transient hint shown when the Assign People dropdown is locked pending a Group/Lab pick */
 .lock-hint {
   position: fixed; z-index: 1060; transform: translateY(-50%);
-  background: #0f172a; color: #f8fafc; font-size: 11.5px; font-weight: 500;
+  background: #17272b; color: #f4f7f7; font-size: 11.5px; font-weight: 500;
   padding: 6px 10px; border-radius: 8px; white-space: nowrap;
   box-shadow: 0 4px 12px rgba(0,0,0,.2);
   opacity: 0; visibility: hidden; pointer-events: none;
@@ -498,7 +510,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 .tour-box {
   position: fixed; z-index: 1000; border-radius: 10px;
   border: 2.5px solid var(--primary);
-  box-shadow: 0 0 0 9999px rgba(15,23,42,.65);
+  box-shadow: 0 0 0 9999px rgba(23,39,43,.65);
   pointer-events: none;
   /* Reused across steps → these props glide when they change (soft move/resize). */
   transition: left .34s cubic-bezier(.4,0,.2,1), top .34s cubic-bezier(.4,0,.2,1),
@@ -531,7 +543,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 .tour-bubble .foot .step { font-size: 11.5px; color: var(--text-faint); }
 
 /* ---------- Modal ---------- */
-.modal-dim { position: fixed; inset: 0; z-index: 900; background: rgba(15,23,42,.55); backdrop-filter: blur(2px); display: grid; place-items: center; padding: 20px; }
+.modal-dim { position: fixed; inset: 0; z-index: 900; background: rgba(23,39,43,.55); backdrop-filter: blur(2px); display: grid; place-items: center; padding: 20px; }
 .modal {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 14px; box-shadow: var(--shadow-lg); width: min(620px, 94vw);
@@ -547,7 +559,7 @@ textarea.input { resize: vertical; min-height: 74px; }
   content: attr(data-tooltip);
   position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) translateY(-6px);
   padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 500;
-  white-space: nowrap; background: #0f172a; color: #f8fafc;
+  white-space: nowrap; background: #17272b; color: #f4f7f7;
   pointer-events: none; opacity: 0; visibility: hidden;
   transition: opacity 0.15s ease, transform 0.15s ease;
   z-index: 1020; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
@@ -607,7 +619,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 /* ---------- Timeline (Milestones) ---------- */
 .ms { display: grid; grid-template-columns: 22px 1fr; gap: 10px; }
 .ms .rail { display: flex; flex-direction: column; align-items: center; }
-.ms .node { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border-strong); background: var(--surface); transition: transform .1s; }
+.ms .node { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border-strong); background: var(--surface); transition: transform var(--dur-fast); }
 .ms .node:hover { transform: scale(1.2); }
 .ms .node.done { background: var(--success); border-color: var(--success); }
 .ms .node.overdue { background: var(--danger); border-color: var(--danger); }
@@ -632,7 +644,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 .cal-cell.other-month { opacity: 0.35; background: var(--surface-2); }
 .today-tag { font-size: 9px; font-weight: 700; background: var(--primary); color: #fff; padding: 1px 5px; border-radius: 999px; }
 .cal-events { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden; max-height: 80px; min-width: 0; }
-.cal-cell .ev { min-width: 0; max-width: 100%; font-size: 10.5px; padding: 2px 5px; border-radius: 5px; background: var(--primary-soft); color: var(--primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: transform 0.1s; }
+.cal-cell .ev { min-width: 0; max-width: 100%; font-size: 10.5px; padding: 2px 5px; border-radius: 5px; background: var(--primary-soft); color: var(--primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: transform var(--dur-fast); }
 .cal-cell .ev:hover { transform: scale(1.02); }
 .cal-cell .ev.mt { background: var(--success-soft); color: var(--success); }
 .cal-cell .ev.done { opacity: 0.6; text-decoration: line-through; background: var(--surface-2); color: var(--text-muted); }
@@ -656,10 +668,10 @@ textarea.input { resize: vertical; min-height: 74px; }
 }
 .startup-brand-icon {
   width: 48px; height: 48px; border-radius: 12px;
-  background: linear-gradient(135deg, var(--primary), #7c3aed);
+  background: linear-gradient(135deg, var(--primary), #8a4ccf);
   display: grid; place-items: center; color: #fff;
   margin-bottom: 12px;
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 4px 14px rgba(91, 72, 199, 0.35);
 }
 .startup-brand-icon svg { width: 26px; height: 26px; }
 .startup-modal-title {
@@ -677,7 +689,7 @@ textarea.input { resize: vertical; min-height: 74px; }
   background: var(--surface); border: 2px solid var(--border);
   border-radius: 13px; padding: 18px 18px 16px;
   display: flex; flex-direction: column; align-items: flex-start;
-  cursor: pointer; transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer; transition: all var(--dur-fast) var(--ease);
   position: relative;
 }
 .startup-card:hover {
@@ -868,7 +880,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 .boot-icon {
   width: 48px; height: 48px; margin: 0 auto 16px; border-radius: 12px;
   display: grid; place-items: center; color: #fff;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: linear-gradient(135deg, #5b48c7, #8a4ccf);
 }
 .boot-card-error .boot-icon { background: linear-gradient(135deg, var(--danger), #f97316); }
 .boot-card h1 { font-size: 19px; margin: 0 0 10px; }
