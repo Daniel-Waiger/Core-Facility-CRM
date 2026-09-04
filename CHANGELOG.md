@@ -3,6 +3,17 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.8] — 2026-09-04
+
+### Fixed
+- **One-click deletes now ask first.** The trash icons for meetings/bookings (in a project's meeting list), milestones, custom key-value fields, and file links deleted immediately with no confirmation — a stray tap permanently removed the record (and, for a booking, its billing line items). All four now show the same danger-styled confirmation dialog every other delete in the app already used, naming the record about to be deleted.
+- **Deleting a person now fully unlinks them.** Their meeting attendee and core-staff assignments are removed, the denormalized attendee display list on affected meetings is recomputed so it no longer shows the deleted name, and any project that had them as PI has its PI cleared (that reference carries no foreign key, so nothing else would ever have cleaned it up).
+- **Booking cost breakdown no longer overstates discounts.** When a group discount plus a manual discount together exceeded 100%, the actual deduction was correctly capped at 100% of the instrument-time charge, but the two summary rows still displayed their uncapped amounts. The displayed rows are now scaled so they always sum to the real deduction.
+
+### Changed
+- **The Delete Project dialog now tells the truth about meetings.** It claimed the project's "meeting records" would be deleted; they never were — bookings are kept and become facility-wide (the schema unlinks them via `ON DELETE SET NULL`). The dialog now says milestones, files, and custom fields are deleted while meetings are kept as facility-wide bookings.
+- **Delete paths clean up linked records explicitly.** Deleting a project, person, instrument, or booking now removes its dependent join-table rows directly instead of relying on SQLite cascades alone — a belt-and-suspenders guard, since sql.js's `export()` silently disables foreign-key enforcement as a side effect (the app reasserts it after every autosave, verified working, but explicit cleanup survives even if a future code path forgets to). Person and instrument delete dialogs now also warn that affected bookings keep their historical cost snapshots while losing the deleted line items.
+
 ## [1.3.7] — 2026-09-04
 
 ### Changed

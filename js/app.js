@@ -1170,10 +1170,26 @@
   async function deleteProject() {
     const p = DB.row('SELECT title FROM projects WHERE id=?', [ctx.project]);
     if (!p) return;
-    const ok = await UI.confirmModal('Delete Project', `Are you sure you want to permanently delete "${esc(p.title)}" and all its milestones, files, and meeting records?`, { danger: true });
+    const ok = await UI.confirmModal('Delete Project', `Are you sure you want to permanently delete "${esc(p.title)}" and all its milestones, files, and custom fields? Meetings/bookings linked to this project are kept — they become facility-wide bookings rather than being deleted.`, { danger: true });
     if (!ok) return;
 
-    DB.run('DELETE FROM projects WHERE id=?', [ctx.project]);
+    // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is verified
+    // working (see CLAUDE.md's cascading-deletes section) — grandchildren, children, then parent.
+    const pid = ctx.project;
+    DB.rows('SELECT id FROM milestones WHERE project_id=?', [pid]).forEach((ms) => {
+      DB.run('DELETE FROM milestone_owners WHERE milestone_id=?', [ms.id]);
+      DB.run('DELETE FROM milestone_instruments WHERE milestone_id=?', [ms.id]);
+    });
+    DB.run('DELETE FROM project_people WHERE project_id=?', [pid]);
+    DB.run('DELETE FROM project_instruments WHERE project_id=?', [pid]);
+    DB.run('DELETE FROM milestones WHERE project_id=?', [pid]);
+    DB.run('DELETE FROM files WHERE project_id=?', [pid]);
+    DB.run('DELETE FROM kv WHERE project_id=?', [pid]);
+    // Meetings are NOT deleted — schema declares ON DELETE SET NULL, so unlink them explicitly
+    // to preserve that semantics regardless of whether cascade/SET NULL actually fires.
+    DB.run('UPDATE meetings SET project_id=NULL WHERE project_id=?', [pid]);
+
+    DB.run('DELETE FROM projects WHERE id=?', [pid]);
     UI.toast('Project deleted');
     route('projects');
   }
@@ -1345,7 +1361,16 @@
     refresh();
   }
 
-  function msDel(id) {
+  async function msDel(id) {
+    const ms = DB.row('SELECT name FROM milestones WHERE id=?', [id]);
+    if (!ms) return;
+    const ok = await UI.confirmModal('Delete Milestone', `Delete milestone "${esc(ms.name)}"? This cannot be undone.`, { danger: true });
+    if (!ok) return;
+
+    // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is
+    // verified working (see CLAUDE.md's cascading-deletes section).
+    DB.run('DELETE FROM milestone_owners WHERE milestone_id=?', [id]);
+    DB.run('DELETE FROM milestone_instruments WHERE milestone_id=?', [id]);
     DB.run('DELETE FROM milestones WHERE id=?', [id]);
     UI.toast('Milestone removed');
     refresh();
@@ -1457,10 +1482,34 @@
   }
 
   async function deletePerson(id) {
-    const p = DB.row('SELECT name FROM people WHERE id=?', [id]);
+    const p = DB.row('SELECT name, is_staff FROM people WHERE id=?', [id]);
     if (!p) return;
-    const ok = await UI.confirmModal('Delete Person', `Are you sure you want to remove "${esc(p.name)}"? This will unlink them from projects.`, { danger: true });
+    const ok = await UI.confirmModal('Delete Person', `Are you sure you want to remove "${esc(p.name)}"? This unlinks them from projects and milestones, and removes them from meeting attendee/staff records.` +
+      (p.is_staff ? ' Saved bookings they were billable staff on keep their historical snapshot amounts — only the link to this person is removed.' : ''), { danger: true });
     if (!ok) return;
+
+    // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is
+    // verified working (see CLAUDE.md's cascading-deletes section).
+    DB.run('DELETE FROM project_people WHERE person_id=?', [id]);
+    DB.run('DELETE FROM milestone_owners WHERE person_id=?', [id]);
+    // meeting_people/meeting_staff drive meetings.attendees (a denormalized display string) —
+    // recompute it for every affected meeting from the remaining join rows before removing this
+    // person's rows, so the display string and the join table stay in sync (see CLAUDE.md).
+    const affectedMeetingIds = DB.rows(
+      'SELECT DISTINCT meeting_id FROM meeting_people WHERE person_id=?', [id]
+    ).map((r) => r.meeting_id);
+    DB.run('DELETE FROM meeting_people WHERE person_id=?', [id]);
+    DB.run('DELETE FROM meeting_staff WHERE person_id=?', [id]);
+    affectedMeetingIds.forEach((mid) => {
+      const names = DB.rows(
+        'SELECT p.name FROM meeting_people mp JOIN people p ON p.id = mp.person_id WHERE mp.meeting_id=?', [mid]
+      ).map((r) => r.name).join(', ');
+      DB.run('UPDATE meetings SET attendees=? WHERE id=?', [names, mid]);
+    });
+    // projects.pi_id has no REFERENCES/foreign key clause in the schema, so a dangling reference
+    // would otherwise silently survive the person's deletion.
+    DB.run('UPDATE projects SET pi_id=NULL WHERE pi_id=?', [id]);
+
     DB.run('DELETE FROM people WHERE id=?', [id]);
     UI.toast('Person deleted');
     refresh();
@@ -1541,8 +1590,14 @@
   async function deleteInstrument(id) {
     const i = DB.row('SELECT name FROM instruments WHERE id=?', [id]);
     if (!i) return;
-    const ok = await UI.confirmModal('Delete Instrument', `Are you sure you want to delete "${esc(i.name)}"?`, { danger: true });
+    const ok = await UI.confirmModal('Delete Instrument', `Are you sure you want to delete "${esc(i.name)}"? This unlinks it from projects and milestones. Bookings that included this instrument lose its line item — their saved totals keep the historical snapshot amounts.`, { danger: true });
     if (!ok) return;
+
+    // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is
+    // verified working (see CLAUDE.md's cascading-deletes section).
+    DB.run('DELETE FROM project_instruments WHERE instrument_id=?', [id]);
+    DB.run('DELETE FROM milestone_instruments WHERE instrument_id=?', [id]);
+    DB.run('DELETE FROM meeting_instruments WHERE instrument_id=?', [id]);
     DB.run('DELETE FROM instruments WHERE id=?', [id]);
     UI.toast('Instrument deleted');
     refresh();
@@ -2176,16 +2231,27 @@
           ? `<button type="button" class="btn btn-ghost btn-xs" data-act="bom-group-revoke" data-tooltip="Remove this lab's discount">Revoke</button>`
           : `<button type="button" class="btn btn-ghost btn-xs" data-act="bom-group-apply" data-tooltip="Restore this lab's standing discount">Apply</button>`;
       }
+      // groupPct + manualPct can exceed 100% (computeBookingBOM caps the actual deduction —
+      // bom.discPct/bom.discountAmt — at 100%, but the two rows below are otherwise independent
+      // of that cap). Scale each row's displayed amount down proportionally so they always sum
+      // to bom.discountAmt instead of overstating the real deduction.
+      const rawGroupAmt = bom.instrTime * bom.groupPct / 100;
+      const rawManualAmt = bom.instrTime * bom.manualPct / 100;
+      const rawDiscTotal = rawGroupAmt + rawManualAmt;
+      const discScale = rawDiscTotal > 0 ? bom.discountAmt / rawDiscTotal : 1;
+      const groupAmt = rawGroupAmt * discScale;
+      const manualAmt = rawManualAmt * discScale;
+
       const groupLabel = 'Group discount' + (org ? ` (${esc(org)}, ${bom.groupPct}%)` : ` (${bom.groupPct}%)`);
       const groupRow = `<div class="row" style="justify-content:space-between;gap:8px">
         <span class="faint small">${groupLabel}</span>
-        <span class="row" style="gap:8px;align-items:center">${groupControl}<span class="mono">−${fmtMoney(bom.instrTime * bom.groupPct / 100)}</span></span>
+        <span class="row" style="gap:8px;align-items:center">${groupControl}<span class="mono">−${fmtMoney(groupAmt)}</span></span>
       </div>`;
 
       summaryEl.innerHTML =
         row('Subtotal', fmtMoney(bom.subtotal)) +
         groupRow +
-        (bom.manualPct ? row(`Manual discount (${bom.manualPct}%)`, '−' + fmtMoney(bom.instrTime * bom.manualPct / 100)) : '') +
+        (bom.manualPct ? row(`Manual discount (${bom.manualPct}%)`, '−' + fmtMoney(manualAmt)) : '') +
         row(`Overhead (${bom.ohInternal + bom.ohExternal}%)`, '+' + fmtMoney(bom.overheadAmt)) +
         row('Before tax', fmtMoney(bom.beforeTax), { strong: true }) +
         row(`Tax (${bom.taxPct}%)`, '+' + fmtMoney(bom.taxAmt)) +
@@ -2466,14 +2532,28 @@
     refresh();
   }
 
-  function deleteMeeting(id) {
-    // foreign_keys enforcement is off for this app's sql.js connection, so ON DELETE CASCADE
-    // on meeting_people/meeting_instruments/meeting_staff never actually fires — clean them up
-    // explicitly.
+  // Raw deletion, no confirmation — deleteBookingFromModal shows its own confirmation before
+  // calling this, and meeting-del (the dispatcher case for a booking's list-row delete icon)
+  // confirms via deleteMeeting() below. Keeping the unconfirmed version separate avoids either
+  // caller double-confirming.
+  function deleteMeetingRaw(id) {
+    // Child rows are deleted explicitly as a defensive measure. Cascade DOES fire in the current
+    // codebase (verified empirically — see CLAUDE.md's cascading-deletes section): currentBytes()
+    // reasserts PRAGMA foreign_keys after every export. The explicit deletes guard against any
+    // future code path that exports without that reassert, silently turning cascades back off.
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meetings WHERE id=?', [id]);
+  }
+
+  async function deleteMeeting(id) {
+    const mt = DB.row('SELECT title FROM meetings WHERE id=?', [id]);
+    if (!mt) return;
+    const ok = await UI.confirmModal('Delete Booking', `Delete booking "${esc(mt.title)}"? Its billing line items (instruments, core staff) are deleted too. This cannot be undone.`, { danger: true });
+    if (!ok) return;
+
+    deleteMeetingRaw(id);
     UI.toast('Booking removed');
     refresh();
   }
@@ -2558,9 +2638,11 @@
   // edit modal — unlike a project-attached one, it has no list row with its own delete icon —
   // so the edit modal needs its own delete entry point, confirmed and closing itself on delete.
   async function deleteBookingFromModal(id) {
-    const ok = await UI.confirmModal('Delete Booking', 'Are you sure you want to delete this booking? This cannot be undone.', { danger: true });
+    const ok = await UI.confirmModal('Delete Booking', 'Are you sure you want to delete this booking? Its billing line items (instruments, core staff) are deleted too. This cannot be undone.', { danger: true });
     if (!ok) return;
-    deleteMeeting(id);
+    deleteMeetingRaw(id);
+    UI.toast('Booking removed');
+    refresh();
     const dim = document.querySelector('.modal-dim');
     if (dim) UI.closeDim(dim);
   }
@@ -2619,7 +2701,12 @@
     refresh();
   }
 
-  function kvDel(id) {
+  async function kvDel(id) {
+    const item = DB.row('SELECT key FROM kv WHERE id=?', [id]);
+    if (!item) return;
+    const ok = await UI.confirmModal('Delete Field', `Delete custom field "${esc(item.key)}"? This cannot be undone.`, { danger: true });
+    if (!ok) return;
+
     DB.run('DELETE FROM kv WHERE id=?', [id]);
     UI.toast('Field deleted');
     refresh();
@@ -2690,7 +2777,12 @@
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
 
-  function deleteFile(id) {
+  async function deleteFile(id) {
+    const f = DB.row('SELECT name FROM files WHERE id=?', [id]);
+    if (!f) return;
+    const ok = await UI.confirmModal('Delete Attachment', `Delete "${esc(f.name)}"? This cannot be undone.`, { danger: true });
+    if (!ok) return;
+
     DB.run('DELETE FROM files WHERE id=?', [id]);
     UI.toast('Attachment removed');
     refresh();
