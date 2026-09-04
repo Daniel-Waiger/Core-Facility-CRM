@@ -83,21 +83,26 @@ rows, so a demo meeting displayed attendee names while any join-based feature sa
 Milestones' analogous tables (`milestone_owners`) didn't have this gap. When adding seed data or
 a new denormalized+relational pair, populate both, and check for this class of drift.
 
-### Cascading deletes are inconsistent — don't assume `ON DELETE CASCADE` fires
+### Cascading deletes: cascade works, but delete paths clean up child rows explicitly anyway
 
-The schema declares `ON DELETE CASCADE` on child tables, but sql.js's `db.export()` (called by
-every autosave) silently resets the connection's `foreign_keys` pragma to OFF as a side effect;
-`db.js`'s `currentBytes()` reasserts `PRAGMA foreign_keys = ON` right after every export to keep
-cascades working for the rest of the session. Despite that fix, `deleteMeeting()` in `app.js`
-still manually deletes `meeting_people`/`meeting_instruments` rows before deleting the meeting
-itself (with a comment claiming cascade "never fires" for those tables), while `deleteProject()`
-and `deletePerson()` delete only the parent row and rely on cascade alone. This is an unresolved
-inconsistency in the existing code, not a documented, verified rule — treat it as a warning, not
-settled fact: when writing a new delete path, the safer option (matching the more defensive
-existing pattern) is to explicitly delete dependent join-table/child rows rather than assume
-cascade will handle it, and if you need to know definitively whether cascade fires for a given
-table, verify empirically (delete a row, then query the child table) rather than trust either
-existing comment.
+Verified empirically (running the bundled `libs/sql-asm.js` under Node against this schema):
+sql.js's `db.export()` (called by every autosave) really does silently reset the connection's
+`foreign_keys` pragma to OFF as a side effect — it reads 1 right up until the first `export()`
+call, then 0. `db.js`'s `currentBytes()` reasserts `PRAGMA foreign_keys = ON` immediately after
+every export, and with that reassert in place `ON DELETE CASCADE` verifiably fires for every
+child/join table (`meeting_people`, `meeting_instruments`, `meeting_staff`, `milestones` and
+their joins, `project_people`, …) and `ON DELETE SET NULL` fires for `meetings.project_id`.
+A database reopened from exported bytes starts with the pragma OFF (standard SQLite
+per-connection behavior); `db.js` re-sets it on boot and restore.
+
+Despite cascade working, all delete paths in `app.js` (`deleteProject`, `deletePerson`,
+`deleteInstrument`, `deleteMeetingRaw`) delete dependent join-table/child rows explicitly as a
+defensive belt-and-suspenders measure: if any future code path ever calls `db.export()` directly
+without the pragma reassert, cascades would silently stop firing and only the explicit deletes
+would keep data consistent. Follow the same pattern in any new delete path. Note two things
+cascade can never handle here: `projects.pi_id` carries no `REFERENCES` clause (a deleted
+person's pi_id must be nulled explicitly), and the denormalized `meetings.attendees` display
+string must be recomputed from `meeting_people` when attendee rows are removed.
 
 ### Modal system
 
