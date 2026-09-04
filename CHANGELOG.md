@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.3.9] — 2026-09-04
+
+### Fixed
+- **A custom metadata field's Edit and Delete icons were invisible and impossible to click.** On a project's Metadata & Custom Fields card, both icons are bare `<span>`s, so none of the CSS rules that size the app's inline SVG icons (`.btn svg`, `.card-title svg`, …) applied to them. Unsized inside an inline span, each SVG collapsed to 0×0 — measured in a browser, the controls were 0px wide and a click at their position landed on the row behind them, so a custom field could never be edited or removed once saved. Both icons now have a real 22×22 hit area with a 14px glyph and a hover background, fitting the row's existing 48px action column. (This also made 1.3.8's new "Delete Field" confirmation reachable — it was previously behind an unclickable icon.)
+
 ## [1.3.8] — 2026-09-04
 
 ### Fixed
@@ -13,6 +18,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - **The Delete Project dialog now tells the truth about meetings.** It claimed the project's "meeting records" would be deleted; they never were — bookings are kept and become facility-wide (the schema unlinks them via `ON DELETE SET NULL`). The dialog now says milestones, files, and custom fields are deleted while meetings are kept as facility-wide bookings.
 - **Delete paths clean up linked records explicitly.** Deleting a project, person, instrument, or booking now removes its dependent join-table rows directly instead of relying on SQLite cascades alone — a belt-and-suspenders guard, since sql.js's `export()` silently disables foreign-key enforcement as a side effect (the app reasserts it after every autosave, verified working, but explicit cleanup survives even if a future code path forgets to). Person and instrument delete dialogs now also warn that affected bookings keep their historical cost snapshots while losing the deleted line items.
+- **Documentation refresh (docs-only, no app change).** Every screenshot in `docs/screenshots/` was re-captured: the whole set still showed the pre-1.3.7 stock palette. Added shots for the new confirmation dialogs, and rewrote the hosted release-notes page (`docs/index.html`) for 1.3.7–1.3.8 — its hero, highlight cards, and screenshot walkthrough are hand-maintained rather than generated from this changelog. The README gained a "Safe deletes" section covering the same ground.
 
 ## [1.3.7] — 2026-09-04
 

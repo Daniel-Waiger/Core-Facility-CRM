@@ -4,7 +4,7 @@
 
 // Bump this on any deploy that changes cached files, so clients pick up the new version
 // instead of serving a stale cache forever. Kept in step with the app version.
-const CACHE_VERSION = '1.3.8';
+const CACHE_VERSION = '1.3.9';
 const CACHE_NAME = 'core-facility-tracker-' + CACHE_VERSION;
 
 // Precache the app shell. Paths are relative to this file's own scope, so this works
@@ -22,13 +22,13 @@ const PRECACHE_URLS = [
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './css/app.css?v=1.3.8',
-  './js/consts.js?v=1.3.8',
-  './js/db.js?v=1.3.8',
-  './js/ui.js?v=1.3.8',
-  './js/views.js?v=1.3.8',
-  './js/exports.js?v=1.3.8',
-  './js/app.js?v=1.3.8',
+  './css/app.css?v=1.3.9',
+  './js/consts.js?v=1.3.9',
+  './js/db.js?v=1.3.9',
+  './js/ui.js?v=1.3.9',
+  './js/views.js?v=1.3.9',
+  './js/exports.js?v=1.3.9',
+  './js/app.js?v=1.3.9',
   './libs/sql-asm.js',
   './libs/xlsx.full.min.js',
   './libs/jspdf.umd.min.js',

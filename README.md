@@ -31,6 +31,7 @@ Track research projects from initiation to completion with full lifecycle tracki
   - **PDF:** Multi-page paginated report with headers, footers, and page numbers via `jsPDF`.
 - **Single-File Backup & Recovery:** Export your entire facility database (including attached files) into a self-contained `.json` backup file and restore it on any machine anytime. An automatic backup also runs roughly once every 24 hours while the app is open (toggleable in Settings), so you're never relying solely on browser storage — in Chrome/Edge, point it at the app's folder once and it writes silently into a `backups/` subfolder there with no download prompts; otherwise it falls back to a normal file download.
 - **Modern SaaS Minimalist UI:** Hand-written CSS design system with Dark/Light theme switching, toast feedback, custom brand favicon, and guided onboarding tour.
+- **Guarded Destructive Actions:** Every delete — project, person, instrument, booking, milestone, custom field, attachment — confirms first, naming the record and spelling out what goes with it (a booking's billing lines, a project's milestones vs. its kept bookings) and what is preserved (saved cost snapshots). Deletes clean up their linked records rather than leaving dangling references behind.
 
 ---
 
@@ -125,6 +126,20 @@ A selection follows.
 <img src="docs/screenshots/36-project-costs-running-total.png" width="720" alt="Project Costs card listing each booking's subtotal, before-tax amount and total with a running project total">
 
 *Figure 17 — Project Costs: every booking's saved cost snapshot (subtotal → before tax → total) with a running total for the project.*
+
+**Safe deletes**
+
+<img src="docs/screenshots/37-delete-booking-confirm.png" width="520" alt="Confirmation dialog before deleting a booking, naming the booking and warning that its billing line items go too">
+
+*Figure 18 — Every delete asks first. Bookings, milestones, custom fields, and attachments used to delete on a single click of their trash icon; each now names the record it is about to remove — and, for a booking, warns that its instrument and core-staff billing lines go with it.*
+
+<img src="docs/screenshots/41-delete-project-meetings-kept.png" width="520" alt="Delete Project dialog explaining that milestones, files and custom fields are deleted while meetings are kept as facility-wide bookings">
+
+*Figure 19 — The Delete Project dialog spells out exactly what happens: milestones, files, and custom fields are deleted, while the project's bookings are kept and become facility-wide rather than disappearing with it.*
+
+<img src="docs/screenshots/42-delete-person-unlink-warning.png" width="520" alt="Delete Person dialog warning that the person is unlinked from projects, milestones and meeting records, and that bookings keep their historical cost snapshots">
+
+*Figure 20 — Deleting a person unlinks them everywhere (projects, milestones, meeting attendee and core-staff records, and any project that had them as PI) and says so. Bookings they were billable staff on keep their historical cost snapshots — the saved totals are a record of what was billed, not a live recalculation.*
 
 ---
 

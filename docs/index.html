@@ -136,9 +136,9 @@
 -->
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.3.1 – 1.3.6 · 03 Sep 2026</span>
+    <span class="eyebrow">Release 1.3.7 – 1.3.9 · 04 Sep 2026</span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">Six releases in one day, all pointed at the same seam opened up by 1.3.0’s billing work: a booking is only as good as the Group/Lab it’s filed under. Assigning people or core staff now waits for one; the lab’s standing discount follows automatically and can be revoked per-booking or for good; and a handful of smaller fixes — safer sample-data reseeding, a real favicon, a lockable single-instrument booking, a full screenshot gallery — round out the batch.</p>
+    <p class="lede">Three releases about trust rather than new features. 1.3.7 moved the whole app off a stock template palette onto one of its own, recoloured in both themes with contrast checked. 1.3.8 came out of an architecture and feature review of the codebase and fixes what that review found: four trash icons that deleted your data on a single click now ask first, a dialog that misdescribed what deleting a project does now tells the truth, deletes no longer leave dangling references behind, and a discount line that could overstate itself now adds up. Then documenting 1.3.8 turned up one more — a pair of controls that had been invisible all along.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="#changelog">Full changelog</a>
@@ -151,14 +151,15 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">The headline changes across 1.3.1–1.3.6.</p>
+    <p class="section-sub">The headline changes across 1.3.7–1.3.9.</p>
     <div class="cards">
-      <div class="card"><div class="ic">🔒</div><h3>Group/Lab comes first</h3><p>Assign People and Assign Core Staff both stay locked until a Group/Lab is picked — directly, or auto-filled from the project’s PI.</p></div>
-      <div class="card"><div class="ic">🏷️</div><h3>Discounts follow the lab</h3><p>Picking a Group/Lab offers its standing discount automatically; Admin Mode can Revoke or Apply it, for just this booking or for the lab going forward.</p></div>
-      <div class="card"><div class="ic">🧰</div><h3>One instrument, locked in</h3><p>The first instrument added to a booking can be marked as the only one needed, locking further additions until it’s removed.</p></div>
-      <div class="card"><div class="ic">🖼️</div><h3>Screenshot gallery</h3><p>A full-size, keyboard/swipe-navigable carousel of every screenshot, listing <code>docs/screenshots/</code> live from GitHub.</p></div>
-      <div class="card"><div class="ic">🩹</div><h3>Load Sample Data, fixed</h3><p>Reseeding demo data no longer crashes on a second run — “Load Demo &amp; Start Tour” is safe to click more than once.</p></div>
-      <div class="card"><div class="ic">🖥️</div><h3>Real favicon everywhere</h3><p>Browser tabs and bookmarks now show the app logo instead of a generic globe, with PNG/ICO fallbacks alongside the SVG.</p></div>
+      <div class="card"><div class="ic">🛑</div><h3>Deletes ask first</h3><p>Bookings, milestones, custom fields, and attachments used to delete on a single click of their trash icon. All four now confirm, naming the record.</p></div>
+      <div class="card"><div class="ic">🧾</div><h3>And they say what it costs you</h3><p>Deleting a booking warns that its instrument and core-staff billing lines go too; deleting a person or instrument explains what happens to bookings that referenced them.</p></div>
+      <div class="card"><div class="ic">✅</div><h3>Delete Project tells the truth</h3><p>It claimed your meetings would be deleted. They never were — bookings are kept and become facility-wide. The dialog now says so.</p></div>
+      <div class="card"><div class="ic">🔗</div><h3>Nothing left dangling</h3><p>Every delete path clears its linked records. A deleted person is removed from attendee and staff records, drops out of the attendee list shown on a booking, and is cleared as any project’s PI.</p></div>
+      <div class="card"><div class="ic">💸</div><h3>Discount rows that add up</h3><p>A group and manual discount totalling over 100% was correctly capped in the maths but not in the summary rows, which showed more than was actually deducted.</p></div>
+      <div class="card"><div class="ic">🎨</div><h3>A palette of its own</h3><p>1.3.7 moved off the stock Tailwind indigo/violet shared with every other app built on the same template, onto a distinct system — recoloured in both themes, contrast verified to WCAG AA.</p></div>
+      <div class="card"><div class="ic">👻</div><h3>Two invisible buttons, found</h3><p>1.3.9: a custom field’s Edit and Delete icons had collapsed to zero size, so a field could never be changed or removed once saved. Caught while screenshotting the new confirmations.</p></div>
     </div>
   </div>
 </section>
@@ -166,54 +167,109 @@
 <section>
   <div class="wrap">
     <h2>In detail</h2>
-    <p class="section-sub">The three changes worth a screenshot.</p>
+    <p class="section-sub">The four changes worth a screenshot.</p>
 
-    <!-- Group/Lab required for People (1.3.4) and Core Staff (1.3.6) -->
+    <!-- Delete confirmations on the four one-click delete paths (1.3.8) -->
     <div class="feature">
       <div class="txt">
-        <h3>Assign People and Assign Core Staff both wait for a Group/Lab <span class="tag">new</span></h3>
-        <p>Both pickers now lock the same way: with no Group/Lab chosen yet, clicking either dropdown shows a not-allowed cursor and a “Choose Group/Lab First” hint instead of opening the list. It makes sense once you notice every person <em>and</em> every core-staff member on record already belongs to a lab or group — the picker has nothing meaningful to filter until it knows which one.</p>
+        <h3>Four one-click deletes now ask first <span class="tag">new</span></h3>
+        <p>A review of the codebase turned up an inconsistency nobody would have enjoyed discovering the hard way: while deleting a project, a person, or an instrument had always asked for confirmation, four trash icons deleted immediately on a single click. A stray tap on a phone or a mis-click in a long list took the record with it, and there is no undo in a local-first app.</p>
         <ul>
-          <li>People got the lock in 1.3.4; Core Staff got the identical lock two releases later, in 1.3.6.</li>
-          <li>Already-assigned people or staff are never removed by this — only adding more is blocked.</li>
-          <li>Picking a Group/Lab — directly, or auto-filled from the project’s PI — unlocks both immediately.</li>
+          <li><strong>Bookings</strong> (in a project’s Meetings &amp; Syncs card), <strong>milestones</strong>, <strong>custom metadata fields</strong>, and <strong>file attachments</strong> now each confirm first, naming the record about to go.</li>
+          <li>A booking’s confirmation also warns that its billing line items — assigned instruments and core staff — are deleted along with it.</li>
+          <li>The booking edit dialog’s own Delete button keeps its single confirmation; the two paths share one deletion routine, so nothing double-prompts.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/35-booking-group-required-lock.png" alt="Booking modal with the people and core-staff pickers locked until a Group/Lab is chosen" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/35-booking-group-required-lock.png</code></span></div>
-        <figcaption>No Group/Lab chosen yet — Assign People and Assign Core Staff both stay locked with the same hint.</figcaption>
+        <img src="screenshots/37-delete-booking-confirm.png" alt="Confirmation dialog before deleting a booking, naming the booking and warning that its billing line items go too" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/37-delete-booking-confirm.png</code></span></div>
+        <figcaption>Deleting a booking from a project’s meeting list — named, and explicit about the billing lines going with it.</figcaption>
       </figure>
     </div>
 
-    <!-- Group selector driving the standing discount (1.3.1) -->
+    <!-- Delete Project dialog corrected (1.3.8) -->
     <div class="feature reverse">
       <div class="txt">
-        <h3>The lab’s standing discount, applied automatically — and revocable <span class="tag">new</span></h3>
-        <p>Choosing a Group/Lab for a booking offers that lab’s standing discount right away, live in the cost breakdown. In Admin Mode, a Revoke/Apply control on that line lets you turn it off — and asks whether that’s <strong>just for this booking</strong> or <strong>for every future booking under that lab</strong> (the latter edits the lab’s standing rate in Settings, same as changing it there directly). Re-applying restores the rate with no further prompt.</p>
+        <h3>Delete Project stops claiming it will delete your bookings <span class="tag">fixed</span></h3>
+        <p>The old dialog offered to delete the project “and all its milestones, files, and meeting records”. The first two were true. The third never was: the database unlinks a deleted project’s bookings rather than removing them, so they survive as facility-wide bookings — which is the right behaviour for billing history, and the opposite of what the dialog promised. Anyone who read it carefully would have been reluctant to delete a finished project at all.</p>
         <ul>
-          <li>Picking a project auto-fills the Group from its PI’s lab; it can also be set directly for a facility-wide booking.</li>
-          <li>A booking now stores which Group/Lab it was made under, so reopening it restores the exact filter and discount state rather than re-deriving it live.</li>
+          <li>The dialog now states plainly what is deleted (milestones, files, custom fields) and what is kept (the bookings, as facility-wide).</li>
+          <li>The delete itself now clears the project’s linked records explicitly instead of trusting the database to cascade — see the note below.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/34-booking-group-discount-revoke.png" alt="Booking modal showing the live cost breakdown with an applied group discount and its Revoke control" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/34-booking-group-discount-revoke.png</code></span></div>
-        <figcaption>A lab’s standing discount, applied live in the Cost &amp; Time Breakdown, with its admin-only Revoke control.</figcaption>
+        <img src="screenshots/41-delete-project-meetings-kept.png" alt="Delete Project dialog explaining that milestones, files and custom fields are deleted while meetings are kept as facility-wide bookings" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/41-delete-project-meetings-kept.png</code></span></div>
+        <figcaption>What actually happens, in the dialog itself: milestones and files go, bookings stay.</figcaption>
       </figure>
     </div>
 
-    <!-- Consequence: Project Costs' running total reflects the discount (existing 1.3.0 feature, shown post-1.3.1) -->
+    <!-- Person/instrument deletes: unlinking + snapshot preservation (1.3.8) -->
     <div class="feature">
       <div class="txt">
-        <h3>And it rolls straight into the project’s running total</h3>
-        <p>Project Costs — the per-project list of booking subtotals, pre-tax figures, and totals, with a running total for the project — already existed as of 1.3.0. It didn’t need a code change to pick up 1.3.1’s discount work: each booking’s total is computed and snapshotted at save time, discount included, so the running total downstream was always going to reflect whatever discount that booking actually got.</p>
+        <h3>Deleting a person or an instrument says what happens to the billing <span class="tag">new</span></h3>
+        <p>Removing someone who has been on bookings raises a fair question: what happens to what was already billed? The answer is that saved totals stay exactly as they were — a booking’s cost is snapshotted when you save it, so it remains a record of what was charged rather than a live recalculation that quietly changes when the roster does. The dialogs now say that instead of leaving you to guess.</p>
+        <ul>
+          <li>A deleted person is unlinked from projects, milestones, and meeting attendee and core-staff records, and is cleared as PI from any project that listed them.</li>
+          <li>The attendee names shown on a booking are recomputed, so a deleted person stops appearing there — that display list is stored separately from the actual attendee links and used to drift out of sync.</li>
+          <li>A deleted instrument is unlinked from projects, milestones, and bookings; affected bookings lose the line item but keep their saved totals.</li>
+        </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/36-project-costs-running-total.png" alt="Project Costs card listing each booking's subtotal, before-tax amount and total with a running project total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/36-project-costs-running-total.png</code></span></div>
-        <figcaption>Project Costs — the running total already reflects each booking’s group discount.</figcaption>
+        <img src="screenshots/42-delete-person-unlink-warning.png" alt="Delete Person dialog warning that the person is unlinked from projects, milestones and meeting records, and that bookings keep their historical cost snapshots" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/42-delete-person-unlink-warning.png</code></span></div>
+        <figcaption>Deleting a core-staff member — every place they are unlinked from, and what their past bookings keep.</figcaption>
       </figure>
+    </div>
+
+    <!-- The 1.3.7 palette restyle -->
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>A palette of its own <span class="tag">1.3.7</span></h3>
+        <p>The app had been wearing the stock Tailwind indigo/violet it inherited from the template it started life on — the same colours as a great many other apps. 1.3.7 recoloured it end to end onto a distinct neutral/violet system: backgrounds, borders, text, and the success/warning/danger states, in both light and dark themes, with every pairing checked to WCAG AA contrast. Dark-mode primary buttons picked up a dedicated dark-ink label colour, fixing a contrast failure against the lighter dark-mode primary.</p>
+        <ul>
+          <li>The logo gradient and the PWA theme colours (favicon, manifest, theme-color meta) moved to the same identity.</li>
+          <li>Shared motion tokens replaced hand-tuned transition timings, with a <code>prefers-reduced-motion</code> override for anyone who asks their system for less animation.</li>
+          <li>No layout, typography, or component-structure changes — same app, new colours. Every screenshot on this page and in the README was re-captured for it.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/02c-light-theme.png" alt="The app in light theme showing the current palette" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/02c-light-theme.png</code></span></div>
+        <figcaption>The current palette in light theme — one click switches the whole UI to dark.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Every confirmation, side by side</h2>
+    <p class="section-sub">The four dialogs that were previously a single unguarded click.</p>
+    <div class="cards">
+      <figure class="shot shot-thumb"><img src="screenshots/37-delete-booking-confirm.png" alt="Delete Booking confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/37-delete-booking-confirm.png</code></span></div><figcaption>Booking — plus its billing lines</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/38-delete-milestone-confirm.png" alt="Delete Milestone confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/38-delete-milestone-confirm.png</code></span></div><figcaption>Milestone</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/39-delete-custom-field-confirm.png" alt="Delete custom field confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/39-delete-custom-field-confirm.png</code></span></div><figcaption>Custom metadata field</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/40-delete-attachment-confirm.png" alt="Delete attachment confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/40-delete-attachment-confirm.png</code></span></div><figcaption>File attachment</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/43-delete-instrument-billing-warning.png" alt="Delete Instrument dialog warning about booking line items and preserved totals" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/43-delete-instrument-billing-warning.png</code></span></div><figcaption>Instrument — bookings keep their totals</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>A bug the screenshots found <span class="tag">1.3.9</span></h3>
+      <p>Capturing the “Delete Field” dialog above turned out to be impossible by clicking, because the icon that opens it could not be clicked at all. A custom field’s <strong>Edit</strong> and <strong>Delete</strong> icons are bare spans, so none of the CSS rules that size the app’s inline icons applied to them — measured in a browser, both were <strong>0 pixels wide</strong>, and a click where they should be landed on the row behind. Once a custom field was saved, it could never be edited or removed. Both now have a proper 22×22 hit area, which is also what makes 1.3.8’s new confirmation reachable in the first place.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>Under the hood: cascades, verified</h3>
+      <p>The codebase carried two contradictory comments about whether the database’s <code>ON DELETE CASCADE</code> rules actually fire, after an old note claimed the SQLite build silently disables foreign keys when it saves. That got settled empirically for 1.3.8 by running the app’s own bundled SQLite build headlessly: saving <em>does</em> reset the foreign-key setting, and the app’s existing re-assert after every save <em>does</em> restore it, so cascades work. The delete paths clean up their child records explicitly anyway — belt and suspenders, in case some future save path ever forgets that re-assert.</p>
     </div>
   </div>
 </section>
@@ -269,14 +325,14 @@
   <div class="wrap">
     <div class="callout">
       <h3>Browse every screenshot</h3>
-      <p>The <a href="gallery.html">interactive screenshot gallery</a> is a full-size carousel of every screen — thumbnails, keyboard/swipe navigation, and a shareable link per shot. It lists <code>docs/screenshots/</code> live from the repository, so it always reflects the current set. (Docs-only addition, added post-1.3.6 — no version bump.)</p>
+      <p>The <a href="gallery.html">interactive screenshot gallery</a> is a full-size carousel of every screen — thumbnails, keyboard/swipe navigation, and a shareable link per shot. It lists <code>docs/screenshots/</code> live from the repository, so it always reflects the current set — including the shots re-captured for 1.3.7’s palette and the new 1.3.8 confirmation dialogs. (The gallery itself was a docs-only addition post-1.3.6 — no version bump.)</p>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · <span id="footer-version">v1.3.6</span> · Bioimaging Facility</div>
+    <div>Core Facility Tracker · <span id="footer-version">v1.3.8</span> · Bioimaging Facility</div>
     <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>
