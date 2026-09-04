@@ -13,6 +13,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - **The Delete Project dialog now tells the truth about meetings.** It claimed the project's "meeting records" would be deleted; they never were — bookings are kept and become facility-wide (the schema unlinks them via `ON DELETE SET NULL`). The dialog now says milestones, files, and custom fields are deleted while meetings are kept as facility-wide bookings.
 - **Delete paths clean up linked records explicitly.** Deleting a project, person, instrument, or booking now removes its dependent join-table rows directly instead of relying on SQLite cascades alone — a belt-and-suspenders guard, since sql.js's `export()` silently disables foreign-key enforcement as a side effect (the app reasserts it after every autosave, verified working, but explicit cleanup survives even if a future code path forgets to). Person and instrument delete dialogs now also warn that affected bookings keep their historical cost snapshots while losing the deleted line items.
+- **Documentation refresh (docs-only, no app change).** Every screenshot in `docs/screenshots/` was re-captured: the whole set still showed the pre-1.3.7 stock palette. Added shots for the new confirmation dialogs, and rewrote the hosted release-notes page (`docs/index.html`) for 1.3.7–1.3.8 — its hero, highlight cards, and screenshot walkthrough are hand-maintained rather than generated from this changelog. The README gained a "Safe deletes" section covering the same ground.
 
 ## [1.3.7] — 2026-09-04
 
