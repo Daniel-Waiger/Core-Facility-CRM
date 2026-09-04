@@ -8,3 +8,6 @@ sandbox/
 Thumbs.db
 .vscode/
 .idea/
+
+# Outreach / marketing drafts — private working folder, never ships
+outreach/
