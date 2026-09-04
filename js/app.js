@@ -1492,9 +1492,10 @@
     // verified working (see CLAUDE.md's cascading-deletes section).
     DB.run('DELETE FROM project_people WHERE person_id=?', [id]);
     DB.run('DELETE FROM milestone_owners WHERE person_id=?', [id]);
-    // meeting_people/meeting_staff drive meetings.attendees (a denormalized display string) —
-    // recompute it for every affected meeting from the remaining join rows before removing this
-    // person's rows, so the display string and the join table stay in sync (see CLAUDE.md).
+    // meeting_people drives meetings.attendees (a denormalized display string; meeting_staff
+    // doesn't feed it). Capture the affected meeting ids first, delete this person's join rows,
+    // THEN recompute attendees from what remains — recomputing before the delete would write the
+    // deleted name right back (see CLAUDE.md on keeping the pair in sync).
     const affectedMeetingIds = DB.rows(
       'SELECT DISTINCT meeting_id FROM meeting_people WHERE person_id=?', [id]
     ).map((r) => r.meeting_id);
