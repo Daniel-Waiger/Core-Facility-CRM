@@ -413,8 +413,13 @@ textarea.input { resize: vertical; min-height: 74px; }
 .kv-row { display: grid; grid-template-columns: 140px 1fr 48px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--border); }
 .kv-row .k { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 .kv-row .v { font-size: 13.5px; word-break: break-word; }
-.kv-row .del { cursor: pointer; color: var(--text-faint); text-align: center; }
-.kv-row .del:hover { color: var(--danger); }
+/* The edit/delete icons on a custom field are bare spans, so no .btn/.card-title svg rule
+   sizes their inline SVG — unsized, it collapsed to 0x0 inside the inline span, leaving both
+   controls invisible and impossible to click. Size the icon and give the span a real box. */
+.kv-row .del { cursor: pointer; color: var(--text-faint); display: flex; align-items: center;
+  justify-content: center; width: 22px; height: 22px; border-radius: 6px; }
+.kv-row .del svg { width: 14px; height: 14px; }
+.kv-row .del:hover { color: var(--danger); background: var(--surface-2); }
 
 /* ---------- Chips / tags ---------- */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
