@@ -12,6 +12,7 @@
   --primary-hover: #4938ad;
   --primary-soft: #eeeafb;
   --primary-ink: #ffffff;
+  --danger-ink: #ffffff;
   --success: #157a50;
   --success-soft: #e0f5ea;
   --warning: #9a5c05;
@@ -46,6 +47,7 @@
   --warning-soft: #3d2e10;
   --danger: #f0798e;
   --danger-soft: #421a24;
+  --danger-ink: #3d0d17;
   --shadow: 0 1px 2px rgba(0,0,0,.4);
   --shadow-lg: 0 10px 24px rgba(0,0,0,.5);
 }
@@ -251,8 +253,8 @@ body {
 .btn-secondary:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .btn-ghost { background: transparent; color: var(--text-muted); }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
-.btn-danger { background: var(--danger); color: #fff; }
-.btn-danger:hover { background: #be123c; }
+.btn-danger { background: var(--danger); color: var(--danger-ink); }
+.btn-danger:hover { background: #96263f; }
 .btn-sm { padding: 5px 9px; font-size: 12px; }
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
 
@@ -448,7 +450,7 @@ textarea.input { resize: vertical; min-height: 74px; }
   padding: 6px 10px; border-radius: 8px; white-space: nowrap;
   box-shadow: 0 4px 12px rgba(0,0,0,.2);
   opacity: 0; visibility: hidden; pointer-events: none;
-  transition: opacity .15s ease, transform .15s ease;
+  transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 .lock-hint.show { opacity: 1; visibility: visible; }
 
@@ -513,8 +515,8 @@ textarea.input { resize: vertical; min-height: 74px; }
   box-shadow: 0 0 0 9999px rgba(23,39,43,.65);
   pointer-events: none;
   /* Reused across steps → these props glide when they change (soft move/resize). */
-  transition: left .34s cubic-bezier(.4,0,.2,1), top .34s cubic-bezier(.4,0,.2,1),
-              width .34s cubic-bezier(.4,0,.2,1), height .34s cubic-bezier(.4,0,.2,1),
+  transition: left .34s var(--ease), top .34s var(--ease),
+              width .34s var(--ease), height .34s var(--ease),
               border-color .2s ease, opacity .2s ease;
 }
 .tour-box.bare { border-color: transparent; }   /* no spotlight target: just the dim backdrop */
@@ -524,7 +526,7 @@ textarea.input { resize: vertical; min-height: 74px; }
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; box-shadow: var(--shadow-lg); padding: 16px;
   font-size: 13px;
-  transition: left .3s cubic-bezier(.4,0,.2,1), top .3s cubic-bezier(.4,0,.2,1),
+  transition: left .3s var(--ease), top .3s var(--ease),
               opacity .17s ease, transform .17s ease;
 }
 /* Faded/offset while the next step's target settles, then eased back in. */
@@ -561,7 +563,7 @@ textarea.input { resize: vertical; min-height: 74px; }
   padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 500;
   white-space: nowrap; background: #17272b; color: #f4f7f7;
   pointer-events: none; opacity: 0; visibility: hidden;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
   z-index: 1020; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 [data-tooltip]:hover::before { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(-3px); }
@@ -642,7 +644,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 .cal-cell-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .cal-cell.today { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
 .cal-cell.other-month { opacity: 0.35; background: var(--surface-2); }
-.today-tag { font-size: 9px; font-weight: 700; background: var(--primary); color: #fff; padding: 1px 5px; border-radius: 999px; }
+.today-tag { font-size: 9px; font-weight: 700; background: var(--primary); color: var(--primary-ink); padding: 1px 5px; border-radius: 999px; }
 .cal-events { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overflow-x: hidden; max-height: 80px; min-width: 0; }
 .cal-cell .ev { min-width: 0; max-width: 100%; font-size: 10.5px; padding: 2px 5px; border-radius: 5px; background: var(--primary-soft); color: var(--primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: transform var(--dur-fast); }
 .cal-cell .ev:hover { transform: scale(1.02); }
