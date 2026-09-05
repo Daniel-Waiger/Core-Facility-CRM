@@ -905,7 +905,8 @@
       case 'booking-save': return bookingSave();
       case 'edit-booking': return editBooking(el.dataset.id);
       case 'booking-edit-save': return bookingEditSave(el.dataset.id);
-      case 'meeting-del': return deleteMeeting(el.dataset.id);
+      case 'meeting-cancel': return cancelBooking(el.dataset.id);
+      case 'booking-reinstate': return reinstateBooking(el.dataset.id);
       case 'booking-del': return deleteBookingFromModal(el.dataset.id);
       case 'email-attendees': return emailAttendees(el.dataset.id);
       case 'email-open-blank': return void (window.location.href = 'mailto:');
@@ -2425,7 +2426,8 @@
   // other starts.
   function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds }) {
     if (!start || !end) return [];
-    const overlapSql = `m.date = ? AND m.id != ? AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
+    // is_cancelled=0: a cancelled booking has given its slot back, so it never blocks a new one.
+    const overlapSql = `m.date = ? AND m.id != ? AND m.is_cancelled = 0 AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
     const conflicts = [];
     if (instrumentIds && instrumentIds.length) {
       DB.rows(`
@@ -2575,7 +2577,9 @@
         <div class="field"><label>Next Steps / Action Items</label><input class="input" id="bke-act" value="${esc(mt.actions || '')}" /></div>
       </div></div>
       <div class="foot">
-        <button class="btn btn-danger" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('trash')} Delete</button>
+        ${mt.is_cancelled
+          ? `<button class="btn btn-secondary" data-act="booking-reinstate" data-id="${mt.id}" style="margin-right:auto">${ic('rocket')} Reinstate</button>`
+          : `<button class="btn btn-secondary" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('archive')} Cancel Booking</button>`}
         <button class="btn btn-secondary" data-act="email-attendees" data-id="${mt.id}">${ic('mail')} Email Attendees</button>
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-edit-save" data-id="${mt.id}">Save Changes</button>
@@ -2637,10 +2641,9 @@
     refresh();
   }
 
-  // Raw deletion, no confirmation — deleteBookingFromModal shows its own confirmation before
-  // calling this, and meeting-del (the dispatcher case for a booking's list-row delete icon)
-  // confirms via deleteMeeting() below. Keeping the unconfirmed version separate avoids either
-  // caller double-confirming.
+  // Raw deletion, no confirmation. Only reached from cancelBooking's empty-booking branch — a
+  // booking with no attendees, line items or cost, where there is no record worth keeping.
+  // Anything else is cancelled instead of deleted.
   function deleteMeetingRaw(id) {
     // Child rows are deleted explicitly as a defensive measure. Cascade DOES fire in the current
     // codebase (verified empirically — see CLAUDE.md's cascading-deletes section): currentBytes()
@@ -2652,14 +2655,113 @@
     DB.run('DELETE FROM meetings WHERE id=?', [id]);
   }
 
-  async function deleteMeeting(id) {
-    const mt = DB.row('SELECT title FROM meetings WHERE id=?', [id]);
-    if (!mt) return;
-    const ok = await UI.confirmModal('Delete Booking', `Delete booking "${esc(mt.title)}"? Its billing line items (instruments, core staff) are deleted too. This cannot be undone.`, { danger: true });
-    if (!ok) return;
+  // Has the session's intended start time passed? Cancelling before it means nothing was held;
+  // cancelling after it means the facility kept the slot open and the charge may still stand.
+  function bookingHasStarted(mt) {
+    if (!mt.date) return false;
+    const t = /^\d{1,2}:\d{2}$/.test(mt.start_time || '') ? mt.start_time : '00:00';
+    const dt = new Date(mt.date + 'T' + (t.length === 4 ? '0' + t : t) + ':00');
+    return !isNaN(dt.getTime()) && dt.getTime() <= Date.now();
+  }
 
-    deleteMeetingRaw(id);
-    UI.toast('Booking removed');
+  /* Three-way choice for an admin cancelling a session that has already started: keep the charge
+     (a late cancellation the facility still held time for) or waive it. Mirrors chooseDiscountScope's
+     promise-resolves-null-on-dismiss shape. */
+  function chooseCancelBilling(title, total) {
+    return new Promise((resolve) => {
+      const m = UI.openModal(`
+        <div class="head"><span class="t" style="font-weight:600">Cancel Booking</span></div>
+        <div class="body"><p class="mt-0 mb-8">"${esc(title)}" has already passed its start time, so the facility held that slot. The booking stays on the record either way — does its ${esc(fmtMoney(total))} charge still count toward Project Costs?</p></div>
+        <div class="foot">
+          <button class="btn btn-danger" data-act="cancel">Keep Booking</button>
+          <button class="btn btn-secondary" data-act="waive">Cancel &amp; Waive Charge</button>
+          <button class="btn btn-secondary" data-act="keep">Cancel &amp; Keep Charge</button>
+        </div>`, null, () => resolve(null));
+      const dim = m.closest('.modal-dim');
+      m.querySelector('[data-act="cancel"]').onclick = () => { UI.closeDim(dim); resolve(null); };
+      m.querySelector('[data-act="waive"]').onclick = () => { UI.closeDim(dim); resolve('waive'); };
+      m.querySelector('[data-act="keep"]').onclick = () => { UI.closeDim(dim); resolve('keep'); };
+    });
+  }
+
+  /* Cancelling, not deleting. A booking is an accounting record as much as a diary entry: it says
+     the facility held instrument time and staff time on a date, and what that was worth. So a
+     cancelled booking stays logged with its line items intact — it just stops blocking the
+     instrument's slot, and may or may not keep counting toward Project Costs:
+
+       - cancelled BEFORE its start time  → nothing was held, so the charge is dropped;
+       - cancelled AFTER its start time   → the slot was held, so the charge stands. Admin Mode
+         (which already gates every other billing decision in this app) offers the choice to
+         waive it instead.
+
+     A booking with no line items, no attendees and no cost is an empty note, and can be deleted. */
+  async function cancelBooking(id) {
+    const mt = DB.row('SELECT id, title, date, start_time, total_cost, is_cancelled FROM meetings WHERE id=?', [id]);
+    if (!mt) return;
+    if (mt.is_cancelled) { reinstateBooking(id); return; }
+
+    const refs = DB.countBookingRefs(id);
+    if (!refs.any) {
+      const ok = await UI.confirmModal(
+        'Delete Booking',
+        `"${esc(mt.title)}" has no attendees, instruments, staff or cost recorded against it, so there's no record to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      deleteMeetingRaw(id);
+      UI.toast('Booking deleted');
+      refresh();
+      return;
+    }
+
+    const started = bookingHasStarted(mt);
+    const total = mt.total_cost || 0;
+    const adminOn = UI.storage.getItem('admin-mode') === '1';
+    let retained;
+
+    if (started && adminOn && total > 0) {
+      const choice = await chooseCancelBilling(mt.title, total);
+      if (!choice) return;
+      retained = choice === 'keep';
+    } else {
+      const line = started
+        ? (total > 0
+          ? `Its start time has passed, so the slot was held and its ${esc(fmtMoney(total))} charge still counts toward Project Costs.${adminOn ? '' : ' Only Admin Mode can waive it.'}`
+          : 'Its start time has passed, so it stays on the record as a late cancellation.')
+        : (total > 0
+          ? `It hasn't started yet, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`
+          : "It hasn't started yet, so nothing is charged.");
+      const ok = await UI.confirmModal(
+        'Cancel Booking',
+        `Cancel "${esc(mt.title)}"? ${line} The booking stays logged with its line items, and its instrument and staff time is freed up for other bookings.`,
+        { confirmText: 'Cancel Booking', cancelText: 'Keep Booking' }
+      );
+      if (!ok) return;
+      retained = started && total > 0;
+    }
+
+    DB.setBookingCancelled(id, true, retained);
+    UI.toast(retained ? 'Booking cancelled — charge kept' : 'Booking cancelled');
+    refresh();
+  }
+
+  /* Reinstating puts the booking back in the schedule, so it starts blocking its instrument and
+     staff slots again — which means it has to clear the same conflict check a new booking does. */
+  async function reinstateBooking(id) {
+    const mt = DB.row('SELECT * FROM meetings WHERE id=?', [id]);
+    if (!mt) return;
+    const instIds = DB.rows('SELECT instrument_id FROM meeting_instruments WHERE meeting_id=?', [id]).map((r) => r.instrument_id);
+    const staffIds = DB.rows('SELECT person_id FROM meeting_staff WHERE meeting_id=?', [id]).map((r) => r.person_id);
+    const conflicts = findBookingConflicts({
+      date: mt.date, start: mt.start_time, end: mt.end_time, excludeId: id,
+      instrumentIds: instIds, staffIds
+    });
+    if (conflicts.length) {
+      UI.toast('Cannot reinstate — ' + conflicts.join('; '), 'error');
+      return;
+    }
+    DB.setBookingCancelled(id, false, false);
+    UI.toast('Booking reinstated');
     refresh();
   }
 
@@ -2743,13 +2845,13 @@
   // edit modal — unlike a project-attached one, it has no list row with its own delete icon —
   // so the edit modal needs its own delete entry point, confirmed and closing itself on delete.
   async function deleteBookingFromModal(id) {
-    const ok = await UI.confirmModal('Delete Booking', 'Are you sure you want to delete this booking? Its billing line items (instruments, core staff) are deleted too. This cannot be undone.', { danger: true });
-    if (!ok) return;
-    deleteMeetingRaw(id);
-    UI.toast('Booking removed');
-    refresh();
-    const dim = document.querySelector('.modal-dim');
-    if (dim) UI.closeDim(dim);
+    await cancelBooking(id);
+    // cancelBooking refreshes the page underneath; close the edit modal if it acted.
+    const mt = DB.row('SELECT is_cancelled FROM meetings WHERE id=?', [id]);
+    if (!mt || mt.is_cancelled) {
+      const dim = document.querySelector('.modal-dim');
+      if (dim) UI.closeDim(dim);
+    }
   }
 
   /* ---------------- Custom Key-Value Fields ---------------- */

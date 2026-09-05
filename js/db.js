@@ -101,6 +101,9 @@
     subtotal REAL DEFAULT 0,
     total_before_tax REAL DEFAULT 0,
     total_cost REAL DEFAULT 0,
+    is_cancelled INTEGER DEFAULT 0,
+    cancelled_at TEXT DEFAULT '',
+    billing_retained INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -281,6 +284,12 @@
         `);
       }
     } catch (e) { console.warn('meetings.project_id migration skipped:', e); }
+
+    // Cancellation. Runs AFTER the meetings rebuild above on purpose: that rebuild copies an
+    // explicit column list into a fresh table, so anything added before it would be dropped.
+    try { db.exec("ALTER TABLE meetings ADD COLUMN is_cancelled INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN cancelled_at TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN billing_retained INTEGER DEFAULT 0"); } catch (_) {}
   }
 
   async function boot() {
@@ -691,6 +700,35 @@
     parts.total = parts.team + parts.instruments + parts.milestones + parts.bookings + parts.files + parts.fields;
     return parts;
   }
+  /* What a booking carries: billing line items, its saved total, and the people recorded as
+     having been there. A booking with none of that is an empty note and can be deleted; anything
+     else is cancelled instead, so the session stays on the record. */
+  function countBookingRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM meeting_instruments WHERE meeting_id=?) AS instruments,
+      (SELECT COUNT(*) FROM meeting_staff WHERE meeting_id=?) AS staff,
+      (SELECT COUNT(*) FROM meeting_people WHERE meeting_id=?) AS attendees,
+      (SELECT COALESCE(total_cost,0) FROM meetings WHERE id=?) AS total`,
+      [id, id, id, id]) || {};
+    const parts = {
+      instruments: r.instruments || 0, staff: r.staff || 0,
+      attendees: r.attendees || 0, total: Number(r.total) || 0
+    };
+    parts.lines = parts.instruments + parts.staff;
+    parts.any = parts.lines + parts.attendees + (parts.total > 0 ? 1 : 0);
+    return parts;
+  }
+  /* retained: does this cancelled booking's cost still count toward Project Costs? A session
+     cancelled after its start time was still time the facility held; one cancelled beforehand
+     was not. Either way the booking itself stays logged. */
+  function setBookingCancelled(id, cancelled, retained) {
+    if (cancelled) {
+      run("UPDATE meetings SET is_cancelled=1, cancelled_at=datetime('now'), billing_retained=?, updated_at=datetime('now') WHERE id=?",
+        [retained ? 1 : 0, id]);
+    } else {
+      run("UPDATE meetings SET is_cancelled=0, cancelled_at='', billing_retained=0, updated_at=datetime('now') WHERE id=?", [id]);
+    }
+  }
   function setProjectArchived(id, archived) {
     if (archived) {
       run("UPDATE projects SET is_archived=1, archived_at=datetime('now'), updated_at=datetime('now') WHERE id=?", [id]);
@@ -987,6 +1025,8 @@
     countInstrumentRefs,
     countProjectRefs,
     setProjectArchived,
+    countBookingRefs,
+    setBookingCancelled,
     setRetired,
     seedSampleData,
     clearAllData

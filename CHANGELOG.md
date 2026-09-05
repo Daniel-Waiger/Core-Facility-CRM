@@ -12,9 +12,14 @@ This project uses [Semantic Versioning](https://semver.org/).
   - Lists hide them by default behind a **Show retired / Show archived (N)** toggle that only appears when there are any. The dashboard's counters and overdue alerts now cover active projects only.
   - Both are reversible with **Restore**. Only a record that nothing references at all — a typo or duplicate, with no history to protect — still offers a permanent delete.
 - **On a destructive confirmation, the red button is now Cancel, not Confirm.** Colour is what the eye lands on first, and on a dialog whose whole purpose is to prevent an accident, the safe way out deserves that attention rather than the irreversible choice. The destructive action stays plainly labelled — the buttons now read "Delete", "Retire" or "Archive" instead of a generic "Confirm" — but is styled quietly. Non-destructive confirmations keep the ordinary neutral-Cancel / primary-Confirm pairing.
+- **Bookings are cancelled, not deleted.** A booking is an accounting record as much as a diary entry — it says the facility held instrument and staff time on a date, and what that was worth. Cancelling keeps the booking and its line items logged, and frees the instrument and staff time so the slot can be booked by someone else. Whether the charge still stands follows when it was cancelled:
+  - cancelled **before** its start time — nothing was held, so the charge is dropped from Project Costs;
+  - cancelled **after** its start time — the slot was held, so the charge stands. **Admin Mode** (which already gates every other billing decision in this app) offers a three-way choice to waive it instead; without Admin Mode the charge stands and the dialog says so.
+  - Cancelled bookings are badged in the project's Meetings and Project Costs cards (waived charges struck through and excluded from the running total), struck through on the calendar, and carry a Status column in the XLSX exports plus an inline marker in DOCX/PDF. **Reinstate** puts one back, re-running the double-booking check first since it starts holding its slot again.
+  - A booking with no attendees, line items or cost is an empty note and can still be deleted.
 
 ### Added
-- `people.is_retired` / `retired_at`, `instruments.is_retired` / `retired_at`, and `projects.is_archived` / `archived_at`, with additive migrations so existing databases pick them up on load.
+- `people.is_retired` / `retired_at`, `instruments.is_retired` / `retired_at`, `projects.is_archived` / `archived_at`, and `meetings.is_cancelled` / `cancelled_at` / `billing_retained`, with additive migrations so existing databases pick them up on load.
 
 ## [1.3.9] — 2026-09-04
 

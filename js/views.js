@@ -376,7 +376,7 @@
     <div class="card mb-16">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Project Costs</span></div>
-        <span class="mono font-medium">${esc(costCur)}${mtgs.reduce((s, m) => s + (m.total_cost || 0), 0).toFixed(2)} total</span>
+        <span class="mono font-medium">${esc(costCur)}${mtgs.reduce((s, m) => s + ((m.is_cancelled && !m.billing_retained) ? 0 : (m.total_cost || 0)), 0).toFixed(2)} total</span>
       </div>
       <div class="card-body">
         ${mtgs.length ? `
@@ -384,15 +384,17 @@
           <table class="tbl">
             <thead><tr><th>Booking</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
             <tbody>
-              ${mtgs.map((m) => `
-                <tr>
-                  <td class="font-medium small">${esc(m.title)}</td>
+              ${mtgs.map((m) => {
+                const waived = m.is_cancelled && !m.billing_retained;
+                return `
+                <tr class="${m.is_cancelled ? 'row-retired' : ''}">
+                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled before it started — charge dropped' : 'Cancelled after its start time — charge stands'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>
-                  <td class="mono font-medium" style="text-align:right">${esc(costCur)}${(m.total_cost || 0).toFixed(2)}</td>
+                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(costCur)}${(m.total_cost || 0).toFixed(2)}</span>` : esc(costCur) + (m.total_cost || 0).toFixed(2)}</td>
                   <td style="text-align:right"><button class="btn btn-ghost btn-xs" data-act="edit-booking" data-id="${m.id}" title="View full cost breakdown">${ic('eye')}</button></td>
-                </tr>`).join('')}
+                </tr>`; }).join('')}
             </tbody>
           </table>
         </div>` : emptyState('tag', 'No bookings yet', 'Costs from instrument/staff bookings will appear here once you add one.')}
@@ -432,13 +434,15 @@
         </div>
         <div class="card-body">
           ${mtgs.length ? mtgs.map((m) => `
-            <div class="meeting-box mb-8">
+            <div class="meeting-box mb-8 ${m.is_cancelled ? 'row-retired' : ''}">
               <div class="row">
-                <span class="font-medium grow">${esc(m.title)}</span>
+                <span class="font-medium grow">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email attendees">${ic('mail')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
-                <button class="btn btn-ghost btn-sm" data-act="meeting-del" data-id="${m.id}" title="Delete meeting">${ic('trash')}</button>
+                ${m.is_cancelled
+                  ? `<button class="btn btn-ghost btn-sm" data-act="booking-reinstate" data-id="${m.id}" title="Reinstate — puts it back in the schedule">${ic('rocket')}</button>`
+                  : `<button class="btn btn-ghost btn-sm" data-act="meeting-cancel" data-id="${m.id}" title="Cancel — keeps the record, frees the slot">${ic('archive')}</button>`}
               </div>
               ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
               ${m.note ? `<div class="small muted mt-8 rte-content">${global.UI.noteHtml(m.note)}</div>` : ''}
@@ -714,6 +718,7 @@
         id: mt.id,
         name: mt.title,
         kind: 'mt',
+        cancelled: !!mt.is_cancelled,
         start_time: mt.start_time || '',
         end_time: mt.end_time || '',
         project_id: mt.project_id,
@@ -754,7 +759,7 @@
         </div>
         <div class="cal-events">
           ${evs.map((e) => `
-            <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''}"
+            <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
                  data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
                  title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
               ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}

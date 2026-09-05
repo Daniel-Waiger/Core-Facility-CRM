@@ -941,6 +941,10 @@ textarea.input { resize: vertical; min-height: 74px; }
 }
 .archived-banner svg { width: 17px; height: 17px; flex-shrink: 0; }
 
+/* A cancelled booking stays on the calendar — it is a record of a session that was held and
+   then called off — but reads as struck through rather than as live scheduled time. */
+.ev.ev-cancelled { opacity: .55; text-decoration: line-through; }
+
 /* Extra-small icon-only button (e.g. copy-code next to a project code) */
 .btn.btn-xs { padding: 2px 5px; font-size: 11px; line-height: 1; vertical-align: middle; }
 .btn.btn-xs svg { width: 13px; height: 13px; }

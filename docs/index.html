@@ -158,6 +158,7 @@
       <div class="card"><div class="ic">🧾</div><h3>Billing survives intact</h3><p>A cost snapshot is only auditable while the lines behind it exist. Retiring and archiving never touch a booking’s instruments, staff or totals.</p></div>
       <div class="card"><div class="ic">🏷️</div><h3>Labelled, not hidden</h3><p>Retired and archived records read as <em>(Retired)</em> / <em>Archived</em> everywhere — lists, team cards, milestone assignees, booking badges and every export.</p></div>
       <div class="card"><div class="ic">↩️</div><h3>Reversible</h3><p>Restore puts a record back on the active roster. Only something nothing references at all — a typo, a duplicate — can still be deleted outright.</p></div>
+      <div class="card"><div class="ic">📅</div><h3>Bookings are cancelled</h3><p>A cancelled session stays logged with its line items and frees its instrument slot. Whether the charge stands depends on whether it had already started.</p></div>
       <div class="card"><div class="ic">🔴</div><h3>Red is now Cancel</h3><p>On a dialog that exists to prevent an accident, the safe way out gets the colour. The destructive button says exactly what it does — Delete, Retire, Archive — and is styled quietly.</p></div>
     </div>
   </div>
@@ -240,6 +241,15 @@
       <figure class="shot shot-thumb"><img src="screenshots/43-retire-instrument.png" alt="Retire Instrument dialog listing the projects, milestones and bookings that are kept" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/43-retire-instrument.png</code></span></div><figcaption>Instrument — retired, bookings intact</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/46-project-archived-banner.png" alt="An archived project's detail page with its banner and Restore button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/46-project-archived-banner.png</code></span></div><figcaption>An archived project, restorable</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/45-projects-archived.png" alt="Projects registry with Show archived enabled" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/45-projects-archived.png</code></span></div><figcaption>Registry, archived shown</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>Cancelling a booking, and what happens to the charge <span class="tag">new</span></h3>
+      <p>A booking is an accounting record as much as a diary entry: it says the facility held instrument time and staff time on a date, and what that was worth. So a cancelled booking stays logged with its line items intact — it just stops blocking the instrument’s slot, so someone else can take it. Whether its charge still counts toward Project Costs follows from <em>when</em> it was cancelled: <strong>before</strong> the start time nothing was held, so the charge is dropped; <strong>after</strong> the start time the slot was held, so the charge stands. Admin Mode — which already gates every other billing decision here — offers the choice to waive it instead. <strong>Reinstate</strong> puts a booking back, re-running the double-booking check first.</p>
     </div>
   </div>
 </section>

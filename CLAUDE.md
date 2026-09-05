@@ -134,6 +134,25 @@ Lists hide retired/archived rows behind a "Show retired/archived (N)" toggle hel
 `views.js`'s `peopleFilter` / `instrumentFilter` / `projectFilter` state; the dashboard's counters
 and overdue feeds are scoped to `is_archived=0`.
 
+### Bookings are cancelled, not deleted
+
+`meetings.is_cancelled` / `cancelled_at` / `billing_retained`, written only by
+`DB.setBookingCancelled(id, cancelled, retained)`. `DB.countBookingRefs(id)` decides whether a
+booking is an empty note (no attendees, line items or cost → deletable) or a record (→ cancelled).
+
+Two rules drive `billing_retained`, both in `cancelBooking`:
+- **Before the start time** → nothing was held, charge dropped (`retained = 0`).
+- **After the start time** → the slot was held, charge stands (`retained = 1`). Admin Mode
+  (`UI.storage.getItem('admin-mode') === '1'`) offers `chooseCancelBilling`, a three-way dialog
+  to waive it instead. Without Admin Mode the charge stands — billing decisions are admin-gated
+  here exactly as the group-discount Revoke/Apply control is.
+
+`bookingHasStarted()` compares `date` + `start_time` (missing time ⇒ `00:00`) against now.
+A cancelled booking stops blocking its slot: `findBookingConflicts` filters on `m.is_cancelled = 0`.
+`reinstateBooking` therefore re-runs that conflict check before clearing the flag, since the
+booking starts holding its slot again. Project Costs sums `is_cancelled && !billing_retained`
+rows as 0, and the XLSX/DOCX/PDF exports carry the status so a total reconciles against its rows.
+
 ### Confirmation dialogs: the red button is Cancel
 
 `UI.confirmModal(title, body, { danger, confirmText, cancelText })`. On a `danger` dialog the
