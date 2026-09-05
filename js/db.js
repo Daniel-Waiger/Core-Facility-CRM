@@ -20,6 +20,8 @@
     start_date TEXT,
     end_date TEXT,
     notes TEXT DEFAULT '',
+    is_archived INTEGER DEFAULT 0,
+    archived_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -34,6 +36,8 @@
     is_staff INTEGER DEFAULT 0,
     rate REAL DEFAULT 0,
     rate_unit TEXT DEFAULT 'hour',
+    is_retired INTEGER DEFAULT 0,
+    retired_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS instruments (
@@ -45,6 +49,8 @@
     note TEXT DEFAULT '',
     cost REAL DEFAULT 0,
     cost_unit TEXT DEFAULT 'time',
+    is_retired INTEGER DEFAULT 0,
+    retired_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS project_people (
@@ -185,6 +191,17 @@
     try { db.exec("ALTER TABLE meetings ADD COLUMN total_before_tax REAL DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN total_cost REAL DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN amount REAL DEFAULT 0"); } catch (_) {}
+    // Retirement: a person or instrument that leaves the facility is retired, never deleted, so
+    // every historical record that references them (bookings, milestones, projects) stays intact.
+    try { db.exec("ALTER TABLE people ADD COLUMN is_retired INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN retired_at TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE instruments ADD COLUMN is_retired INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE instruments ADD COLUMN retired_at TEXT DEFAULT ''"); } catch (_) {}
+    // A project is archived rather than deleted, for the same reason: its bookings, their cost
+    // snapshots, and the team and instruments that worked on it are the facility's record of
+    // what was actually done and billed.
+    try { db.exec("ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE projects ADD COLUMN archived_at TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN line_cost REAL DEFAULT 0"); } catch (_) {}
     try {
       db.exec(`
@@ -619,6 +636,78 @@
     return rows('SELECT org, percent FROM group_discounts ORDER BY org');
   }
 
+  /* ---------------- Retirement (people & instruments) ----------------
+     A person who leaves the facility, or an instrument that is decommissioned, must never be
+     deleted while anything references them: who actually attended a booking and which
+     instrument a session actually ran on are historical facts, and a booking's cost snapshot
+     is only meaningful if the line items behind it still exist. So the object is marked
+     retired instead — it keeps every link it ever had, is labelled "(Retired)" wherever it
+     appears, and simply stops being offered when assigning new work.
+
+     countPersonRefs/countInstrumentRefs report how much history a record carries. Zero
+     references means there is nothing to preserve, so a genuine delete is safe and offered
+     instead of retirement (otherwise a mistyped entry could never be tidied away). */
+  function countPersonRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM project_people WHERE person_id=?) AS projects,
+      (SELECT COUNT(*) FROM milestone_owners WHERE person_id=?) AS milestones,
+      (SELECT COUNT(*) FROM meeting_people WHERE person_id=?) AS bookings,
+      (SELECT COUNT(*) FROM meeting_staff WHERE person_id=?) AS staffed,
+      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi`, [id, id, id, id, id]) || {};
+    const parts = {
+      projects: r.projects || 0, milestones: r.milestones || 0,
+      bookings: r.bookings || 0, staffed: r.staffed || 0, pi: r.pi || 0
+    };
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.pi;
+    return parts;
+  }
+  function countInstrumentRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM project_instruments WHERE instrument_id=?) AS projects,
+      (SELECT COUNT(*) FROM milestone_instruments WHERE instrument_id=?) AS milestones,
+      (SELECT COUNT(*) FROM meeting_instruments WHERE instrument_id=?) AS bookings`,
+      [id, id, id]) || {};
+    const parts = {
+      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0
+    };
+    parts.total = parts.projects + parts.milestones + parts.bookings;
+    return parts;
+  }
+  function countProjectRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM project_people WHERE project_id=?) AS team,
+      (SELECT COUNT(*) FROM project_instruments WHERE project_id=?) AS instruments,
+      (SELECT COUNT(*) FROM milestones WHERE project_id=?) AS milestones,
+      (SELECT COUNT(*) FROM meetings WHERE project_id=?) AS bookings,
+      (SELECT COUNT(*) FROM files WHERE project_id=?) AS files,
+      (SELECT COUNT(*) FROM kv WHERE project_id=?) AS fields,
+      (SELECT COALESCE(SUM(total_cost),0) FROM meetings WHERE project_id=?) AS billed`,
+      [id, id, id, id, id, id, id]) || {};
+    const parts = {
+      team: r.team || 0, instruments: r.instruments || 0, milestones: r.milestones || 0,
+      bookings: r.bookings || 0, files: r.files || 0, fields: r.fields || 0,
+      billed: Number(r.billed) || 0
+    };
+    parts.total = parts.team + parts.instruments + parts.milestones + parts.bookings + parts.files + parts.fields;
+    return parts;
+  }
+  function setProjectArchived(id, archived) {
+    if (archived) {
+      run("UPDATE projects SET is_archived=1, archived_at=datetime('now'), updated_at=datetime('now') WHERE id=?", [id]);
+    } else {
+      run("UPDATE projects SET is_archived=0, archived_at='', updated_at=datetime('now') WHERE id=?", [id]);
+    }
+  }
+  // table is 'people' or 'instruments' — nothing else is retirable.
+  function setRetired(table, id, retired) {
+    if (table !== 'people' && table !== 'instruments') return;
+    if (retired) {
+      run(`UPDATE ${table} SET is_retired=1, retired_at=datetime('now') WHERE id=?`, [id]);
+    } else {
+      run(`UPDATE ${table} SET is_retired=0, retired_at='' WHERE id=?`, [id]);
+    }
+  }
+
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
   function clearAllData() {
     db.exec(`
@@ -894,6 +983,11 @@
     getGroupDiscount,
     setGroupDiscount,
     listGroupDiscounts,
+    countPersonRefs,
+    countInstrumentRefs,
+    countProjectRefs,
+    setProjectArchived,
+    setRetired,
     seedSampleData,
     clearAllData
   };

@@ -920,6 +920,27 @@ textarea.input { resize: vertical; min-height: 74px; }
    svg rule to size them), so constrain them here or they render at the SVG default (huge). */
 #device-notice-folder-card svg { width: 15px; height: 15px; vertical-align: -3px; }
 
+/* Retired people/instruments: still listed (their history depends on them existing) but
+   visibly stepped back from the active roster. */
+.row-retired > td { opacity: .62; }
+.row-retired:hover > td { opacity: 1; }
+.retired-toggle {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12.5px; color: var(--text-muted); cursor: pointer;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface);
+}
+.retired-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.retired-toggle input { cursor: pointer; margin: 0; }
+
+.archived-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: var(--radius);
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 13px;
+}
+.archived-banner svg { width: 17px; height: 17px; flex-shrink: 0; }
+
 /* Extra-small icon-only button (e.g. copy-code next to a project code) */
 .btn.btn-xs { padding: 2px 5px; font-size: 11px; line-height: 1; vertical-align: middle; }
 .btn.btn-xs svg { width: 13px; height: 13px; }

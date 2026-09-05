@@ -95,14 +95,52 @@ their joins, `project_people`, …) and `ON DELETE SET NULL` fires for `meetings
 A database reopened from exported bytes starts with the pragma OFF (standard SQLite
 per-connection behavior); `db.js` re-sets it on boot and restore.
 
-Despite cascade working, all delete paths in `app.js` (`deleteProject`, `deletePerson`,
-`deleteInstrument`, `deleteMeetingRaw`) delete dependent join-table/child rows explicitly as a
+Despite cascade working, the remaining delete paths in `app.js` (`deleteMeetingRaw`, and the
+zero-reference delete branches of `archiveProject`/`retirePerson`/`retireInstrument`) delete
+dependent join-table/child rows explicitly as a
 defensive belt-and-suspenders measure: if any future code path ever calls `db.export()` directly
 without the pragma reassert, cascades would silently stop firing and only the explicit deletes
 would keep data consistent. Follow the same pattern in any new delete path. Note two things
 cascade can never handle here: `projects.pi_id` carries no `REFERENCES` clause (a deleted
 person's pi_id must be nulled explicitly), and the denormalized `meetings.attendees` display
 string must be recomputed from `meeting_people` when attendee rows are removed.
+
+### History is preserved: people/instruments retire, projects archive
+
+Deleting a person, instrument or project would destroy historical fact — who attended a booking,
+which instrument ran a session, who was PI, and the billing behind a saved cost snapshot. So
+those three are never deleted while anything references them:
+
+- `people.is_retired` / `retired_at`, `instruments.is_retired` / `retired_at`,
+  `projects.is_archived` / `archived_at` (all additive migrations in `db.js`).
+- `DB.countPersonRefs` / `countInstrumentRefs` / `countProjectRefs` report how much history a
+  record carries. **Zero references is the only case where a real delete is offered** (a typo or
+  duplicate, with nothing to protect); anything else retires/archives instead.
+- `DB.setRetired('people'|'instruments', id, bool)` and `DB.setProjectArchived(id, bool)` are the
+  only writers of those flags. Retiring/archiving never touches a join table.
+- Display only: `UI.retiredName(name, isRetired)` appends " (Retired)"; the stored name is never
+  modified, so historical records read back exactly as entered. SQL that renders a concatenated
+  list (milestone owners, exports) appends the same suffix with a `CASE WHEN ... is_retired`.
+
+**The rule for any picker or form that assigns work: "selectable = not retired OR already
+selected here."** This is not cosmetic. `msEditSave`, `bookingSave`/`bookingEditSave` and the
+project PI form all rebuild their join rows from whatever the form currently renders, so a
+retired assignee that is filtered out of the form is silently deleted from that record on the
+next save. `editMilestone` and `editProject` therefore keep a retired record in the list when it
+is the one already assigned, and `mountTokenPicker` keeps retired entries in `items` (so an
+existing badge still renders) while excluding them from the dropdown via `it.retired`.
+
+Lists hide retired/archived rows behind a "Show retired/archived (N)" toggle held in
+`views.js`'s `peopleFilter` / `instrumentFilter` / `projectFilter` state; the dashboard's counters
+and overdue feeds are scoped to `is_archived=0`.
+
+### Confirmation dialogs: the red button is Cancel
+
+`UI.confirmModal(title, body, { danger, confirmText, cancelText })`. On a `danger` dialog the
+**Cancel** button carries `btn-danger` and the action button is `btn-secondary` — colour draws
+the eye, and on a dialog meant to prevent an accident that attention belongs to the safe way out.
+Always pass `confirmText` naming the actual verb ("Delete", "Retire", "Archive") rather than
+leaving the generic "Confirm". Non-destructive confirmations keep neutral Cancel / primary Confirm.
 
 ### Modal system
 

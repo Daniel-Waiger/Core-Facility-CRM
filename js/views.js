@@ -12,7 +12,7 @@
     const now = today();
     const counts = {};
     for (const s of global.DB.vocabList('STATUS')) counts[s] = 0;
-    const stRows = global.DB.rows('SELECT status, COUNT(*) as n FROM projects GROUP BY status');
+    const stRows = global.DB.rows('SELECT status, COUNT(*) as n FROM projects WHERE is_archived=0 GROUP BY status');
     for (const r of stRows) counts[r.status] = r.n;
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     const active = counts['Active'] || 0;
@@ -22,13 +22,13 @@
     const upcoming = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
-      WHERE m.due_date IS NOT NULL AND m.due_date <= ? AND m.status != 'done'
+      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date <= ? AND m.status != 'done'
       ORDER BY m.due_date ASC LIMIT 10`, [winStr]);
 
     const overdue = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
-      WHERE m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
+      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
       ORDER BY m.due_date ASC LIMIT 10`, [now]);
 
     return `
@@ -67,7 +67,7 @@
   }
 
   /* ---------------- Projects list ---------------- */
-  let projectFilter = { query: '', status: '', priority: '', modality: '' };
+  let projectFilter = { query: '', status: '', priority: '', modality: '', showArchived: false };
   function setProjectFilter(f) {
     projectFilter = Object.assign(projectFilter, f);
     global.App.refresh();
@@ -81,11 +81,15 @@
              pe.name as pi_name
       FROM projects p
       LEFT JOIN people pe ON pe.id = p.pi_id
-      ORDER BY p.updated_at DESC`);
+      ORDER BY p.is_archived, p.updated_at DESC`);
+    const archivedCount = allProjects.filter((p) => p.is_archived).length;
 
     // Apply client-side filters
     const qLower = (projectFilter.query || '').trim().toLowerCase();
     const rows = allProjects.filter((p) => {
+      // Archived projects keep everything (team, instruments, bookings and their billing) but
+      // step out of the day-to-day registry until the toggle brings them back.
+      if (p.is_archived && !projectFilter.showArchived) return false;
       if (projectFilter.status && p.status !== projectFilter.status) return false;
       if (projectFilter.priority && p.priority !== projectFilter.priority) return false;
       if (projectFilter.modality && !(p.modality || '').includes(projectFilter.modality)) return false;
@@ -116,6 +120,7 @@
           ${C.MODALITY.map((m) => `<option value="${m}" ${projectFilter.modality === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
         <button class="btn btn-secondary" data-act="export-all-xlsx" title="Export all projects to one spreadsheet">${ic('file')} Export All</button>
+        ${archivedCount ? `<label class="retired-toggle" data-tooltip="Archived projects keep their team, instruments, bookings and billing"><input type="checkbox" id="proj-archived-filter" ${projectFilter.showArchived ? 'checked' : ''} /> Show archived (${archivedCount})</label>` : ''}
         <button class="btn btn-primary" data-act="new-project">${ic('plus')} New Project</button>
       </div>
     </div>
@@ -147,9 +152,9 @@
               const pct = total ? Math.round((done / total) * 100) : 0;
               const flags = (p.flags || '').split(',').filter(Boolean);
               return `
-              <tr class="row-link" data-goto="project" data-id="${p.id}">
+              <tr class="row-link ${p.is_archived ? 'row-retired' : ''}" data-goto="project" data-id="${p.id}">
                 <td>
-                  <div style="font-weight:600;font-size:14px;color:var(--text)">${esc(p.title)}</div>
+                  <div style="font-weight:600;font-size:14px;color:var(--text)">${esc(p.title)}${p.is_archived ? ' <span class="badge neutral" data-tooltip="Archived — every record kept, out of the active registry">Archived</span>' : ''}</div>
                   <div class="faint mono small">Code: ${esc(p.code)}</div>
                 </td>
                 <td>${statusBadge(p.status)}</td>
@@ -200,21 +205,21 @@
     if (!p) return emptyState('folder', 'Project not found', 'This project may have been deleted.');
 
     const ppl = global.DB.rows(`
-      SELECT pp.role, pe.id, pe.name, pe.type, pe.email
+      SELECT pp.role, pe.id, pe.name, pe.type, pe.email, pe.is_retired
       FROM project_people pp
       JOIN people pe ON pe.id = pp.person_id
       WHERE pp.project_id=?`, [id]);
 
     const inst = global.DB.rows(`
-      SELECT pi.instrument_id, i.name, i.kind, i.status
+      SELECT pi.instrument_id, i.name, i.kind, i.status, i.is_retired
       FROM project_instruments pi
       JOIN instruments i ON i.id = pi.instrument_id
       WHERE pi.project_id=?`, [id]);
 
     const ms = global.DB.rows(`
       SELECT m.*,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
       FROM milestones m
       WHERE m.project_id=?
       ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
@@ -248,9 +253,13 @@
           <button class="btn btn-secondary btn-sm" data-act="export-xlsx" title="Export Spreadsheet">${ic('file')} XLSX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-docx" title="Export Word Document">${ic('file')} DOCX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-pdf" title="Export Formatted PDF">${ic('file')} PDF</button>
-          <button class="btn btn-danger btn-sm" data-act="delete-project" title="Delete Project">${ic('trash')} Delete</button>
+          ${p.is_archived
+            ? `<button class="btn btn-secondary btn-sm" data-act="restore-project" data-id="${p.id}" title="Restore to the active registry">${ic('rocket')} Restore</button>`
+            : `<button class="btn btn-secondary btn-sm" data-act="archive-project" title="Archive — keeps the team, instruments, bookings and billing">${ic('archive')} Archive</button>`}
         </div>
       </div>
+
+      ${p.is_archived ? `<div class="archived-banner mt-16">${ic('archive')} <span>This project is archived. Its team, instruments, milestones, bookings and billing are all kept — it's simply out of the active registry. Use <strong>Restore</strong> to bring it back.</span></div>` : ''}
 
       <!-- Quick Status Lifecycle Bar -->
       <div class="lifecycle-bar mt-16">
@@ -319,7 +328,7 @@
             <div class="person-card">
               <div class="avatar">${esc((r.name || '?')[0])}</div>
               <div class="grow">
-                <div style="font-weight:600">${esc(r.name)} <span class="badge neutral" style="font-size:10.5px">${esc(r.type)}</span></div>
+                <div style="font-weight:600">${esc(global.UI.retiredName(r.name, r.is_retired))} <span class="badge neutral" style="font-size:10.5px">${esc(r.type)}</span></div>
                 <div class="faint small">${r.role ? 'Role: ' + esc(r.role) + ' · ' : ''}${esc(r.email || '')}</div>
               </div>
               <button class="btn btn-ghost btn-sm" data-act="remove-project-person" data-id="${r.id}" title="Remove member">${ic('trash')}</button>
@@ -340,7 +349,7 @@
           ${inst.map((i) => `
             <div class="instrument-box">
               <div class="row">
-                <span class="font-medium grow">${esc(i.name)}</span>
+                <span class="font-medium grow">${esc(global.UI.retiredName(i.name, i.is_retired))}</span>
                 <span class="badge neutral">${esc(i.status)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="remove-project-instrument" data-id="${i.instrument_id}" title="Remove instrument">${ic('trash')}</button>
               </div>
@@ -474,7 +483,7 @@
   }
 
   /* ---------------- People ---------------- */
-  let peopleFilter = { query: '', type: '' };
+  let peopleFilter = { query: '', type: '', showRetired: false };
   function setPeopleFilter(f) {
     peopleFilter = Object.assign(peopleFilter, f);
     global.App.refresh();
@@ -485,10 +494,14 @@
       SELECT pe.*,
              (SELECT COUNT(*) FROM project_people pp WHERE pp.person_id = pe.id) as proj_count
       FROM people pe
-      ORDER BY pe.type, pe.name`);
+      ORDER BY pe.is_retired, pe.type, pe.name`);
+    const retiredCount = allRows.filter((r) => r.is_retired).length;
 
     const qLower = (peopleFilter.query || '').trim().toLowerCase();
     const rows = allRows.filter((r) => {
+      // Retired people are kept out of the everyday view but never deleted — the toggle in the
+      // filter bar brings them back into sight (it only appears once there are any).
+      if (r.is_retired && !peopleFilter.showRetired) return false;
       if (peopleFilter.type && r.type !== peopleFilter.type) return false;
       if (qLower) {
         const textToSearch = `${r.name} ${r.type} ${r.organization || ''} ${r.department || ''} ${r.email || ''} ${r.note || ''}`.toLowerCase();
@@ -508,6 +521,7 @@
           <option value="">All Roles</option>
           ${C.PERSON_TYPES.map((t) => `<option value="${t}" ${peopleFilter.type === t ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
+        ${retiredCount ? `<label class="retired-toggle" data-tooltip="Retired people stay on every record they were ever part of"><input type="checkbox" id="people-retired-filter" ${peopleFilter.showRetired ? 'checked' : ''} /> Show retired (${retiredCount})</label>` : ''}
         <button class="btn btn-primary" data-act="add-person" data-tooltip="Register a new researcher or staff">${ic('plus')} Add Person</button>
       </div>
     </div>
@@ -540,8 +554,8 @@
           </thead>
           <tbody>
             ${rows.map((r) => `
-              <tr>
-                <td style="font-weight:600">${esc(r.name)}</td>
+              <tr class="${r.is_retired ? 'row-retired' : ''}">
+                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
                 <td><span class="badge neutral">${esc(r.type)}</span></td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td>${r.department ? `<span class="chip-sm" style="font-weight:600">${esc(r.department)}</span>` : '<span class="faint small">—</span>'}</td>
@@ -552,7 +566,9 @@
                 <td class="mono small">${r.is_staff ? esc(r.rate || 0) : '—'}</td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
-                  <button class="btn btn-ghost btn-xs" data-act="delete-person" data-id="${r.id}" title="Delete Person">${ic('trash')}</button>
+                  ${r.is_retired
+                    ? `<button class="btn btn-ghost btn-xs" data-act="restore-person" data-id="${r.id}" title="Restore — make available for new work again">${ic('rocket')}</button>`
+                    : `<button class="btn btn-ghost btn-xs" data-act="retire-person" data-id="${r.id}" title="Retire — keeps every record they appear on">${ic('archive')}</button>`}
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -562,7 +578,7 @@
   }
 
   /* ---------------- Instruments ---------------- */
-  let instrumentFilter = { query: '', status: '', kind: '' };
+  let instrumentFilter = { query: '', status: '', kind: '', showRetired: false };
   function setInstrumentFilter(f) {
     instrumentFilter = Object.assign(instrumentFilter, f);
     global.App.refresh();
@@ -573,10 +589,13 @@
       SELECT i.*,
              (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count
       FROM instruments i
-      ORDER BY i.name`);
+      ORDER BY i.is_retired, i.name`);
+    const retiredCount = allRows.filter((r) => r.is_retired).length;
 
     const qLower = (instrumentFilter.query || '').trim().toLowerCase();
     const rows = allRows.filter((r) => {
+      // Decommissioned instruments stay on every booking that used them; hidden here by default.
+      if (r.is_retired && !instrumentFilter.showRetired) return false;
       if (instrumentFilter.status && r.status !== instrumentFilter.status) return false;
       if (instrumentFilter.kind && r.kind !== instrumentFilter.kind) return false;
       if (qLower) {
@@ -601,6 +620,7 @@
           <option value="">All Modalities</option>
           ${C.MODALITY.map((m) => `<option value="${m}" ${instrumentFilter.kind === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
+        ${retiredCount ? `<label class="retired-toggle" data-tooltip="Retired instruments stay on every booking they were used for"><input type="checkbox" id="inst-retired-filter" ${instrumentFilter.showRetired ? 'checked' : ''} /> Show retired (${retiredCount})</label>` : ''}
         <button class="btn btn-primary" data-act="add-instrument">${ic('plus')} Add Instrument</button>
       </div>
     </div>
@@ -619,8 +639,8 @@
           <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
-              <tr>
-                <td style="font-weight:600">${esc(r.name)}</td>
+              <tr class="${r.is_retired ? 'row-retired' : ''}">
+                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new bookings">Retired</span>' : ''}</td>
                 <td class="muted small">${esc(r.kind || '—')}</td>
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
                 <td class="faint small">${esc(r.location || '—')}</td>
@@ -630,7 +650,9 @@
                 <td><span class="badge neutral">${r.proj_count} projects</span></td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
-                  <button class="btn btn-ghost btn-xs" data-act="delete-instrument" data-id="${r.id}" title="Delete Instrument">${ic('trash')}</button>
+                  ${r.is_retired
+                    ? `<button class="btn btn-ghost btn-xs" data-act="restore-instrument" data-id="${r.id}" title="Restore — make available for new bookings again">${ic('rocket')}</button>`
+                    : `<button class="btn btn-ghost btn-xs" data-act="retire-instrument" data-id="${r.id}" title="Retire — keeps every booking it appears on">${ic('archive')}</button>`}
                 </td>
               </tr>`).join('')}
           </tbody>

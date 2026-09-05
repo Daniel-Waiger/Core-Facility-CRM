@@ -3,6 +3,19 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-09-05
+
+### Changed
+- **People, instruments and projects are retired or archived instead of deleted.** Deleting them destroyed historical fact: who actually attended a booking, which instrument a session actually ran on, who was PI on a project, and the billing behind a cost snapshot. None of that should disappear because someone leaves the facility or a scope is decommissioned. The delete actions are now **Retire** (people, instruments) and **Archive** (projects), which keep every existing link exactly as it is and only take the record out of the day-to-day lists.
+  - Retired and archived records are labelled **(Retired)** / **Archived** everywhere they appear — lists, project team and instrument cards, milestone assignees, booking badges, and XLSX/DOCX/PDF exports (the facility-wide export gains an explicit status column). The stored name is never modified; the suffix is added at display time, so historical records read back exactly as they were entered.
+  - They stop being offered when assigning new work, but stay selected wherever they already are. This matters more than it sounds: saving a milestone or a booking rebuilds its assignees from what the form shows, so a hidden assignee would have been silently dropped on the next save. Retired records still render on the forms they already belong to.
+  - Lists hide them by default behind a **Show retired / Show archived (N)** toggle that only appears when there are any. The dashboard's counters and overdue alerts now cover active projects only.
+  - Both are reversible with **Restore**. Only a record that nothing references at all — a typo or duplicate, with no history to protect — still offers a permanent delete.
+- **On a destructive confirmation, the red button is now Cancel, not Confirm.** Colour is what the eye lands on first, and on a dialog whose whole purpose is to prevent an accident, the safe way out deserves that attention rather than the irreversible choice. The destructive action stays plainly labelled — the buttons now read "Delete", "Retire" or "Archive" instead of a generic "Confirm" — but is styled quietly. Non-destructive confirmations keep the ordinary neutral-Cancel / primary-Confirm pairing.
+
+### Added
+- `people.is_retired` / `retired_at`, `instruments.is_retired` / `retired_at`, and `projects.is_archived` / `archived_at`, with additive migrations so existing databases pick them up on load.
+
 ## [1.3.9] — 2026-09-04
 
 ### Fixed

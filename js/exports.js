@@ -9,14 +9,16 @@
     if (!p) return null;
 
     const ppl = DB.rows(`
-      SELECT pp.role, pe.name, pe.type, pe.organization, pe.department, pe.email, pe.is_staff, pe.rate
+      SELECT pp.role, pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END AS name,
+             pe.type, pe.organization, pe.department, pe.email, pe.is_staff, pe.rate
       FROM project_people pp
       JOIN people pe ON pe.id = pp.person_id
       WHERE pp.project_id=?
       ORDER BY pe.name`, [id]);
 
     const inst = DB.rows(`
-      SELECT i.name, i.kind, i.status, i.cost, i.cost_unit
+      SELECT i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END AS name,
+             i.kind, i.status, i.cost, i.cost_unit
       FROM project_instruments pi
       JOIN instruments i ON i.id = pi.instrument_id
       WHERE pi.project_id=?
@@ -24,8 +26,8 @@
 
     const ms = DB.rows(`
       SELECT m.*,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
       FROM milestones m
       WHERE m.project_id=?
       ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
@@ -637,21 +639,21 @@
     XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
 
     // Sheet 3: People
-    const peopleRows = [['Name', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Core Staff', 'Rate/hr']];
-    DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate FROM people ORDER BY name').forEach((pe) => {
-      peopleRows.push([pe.name, pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
+    const peopleRows = [['Name', 'Status', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Core Staff', 'Rate/hr']];
+    DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate, is_retired FROM people ORDER BY is_retired, name').forEach((pe) => {
+      peopleRows.push([pe.name, pe.is_retired ? 'Retired' : 'Active', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
     const wsPe = XLSX.utils.aoa_to_sheet(peopleRows);
-    wsPe['!cols'] = [{ wch: 25 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
+    wsPe['!cols'] = [{ wch: 25 }, { wch: 10 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsPe, 'People');
 
     // Sheet 4: Instruments
-    const instRows = [['Name', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Cost', 'Unit']];
-    DB.rows('SELECT name, kind, status, location, note, cost, cost_unit FROM instruments ORDER BY name').forEach((i) => {
-      instRows.push([i.name, i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.cost || 0, i.cost_unit || 'time']);
+    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Cost', 'Unit']];
+    DB.rows('SELECT name, kind, status, location, note, cost, cost_unit, is_retired FROM instruments ORDER BY is_retired, name').forEach((i) => {
+      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.cost || 0, i.cost_unit || 'time']);
     });
     const wsI = XLSX.utils.aoa_to_sheet(instRows);
-    wsI['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
+    wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
