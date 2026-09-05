@@ -221,9 +221,27 @@
         <p>A confirmation dialog exists to prevent an accident, so the choice that prevents it is the one that should catch the eye. Colour is what the eye lands on first, and a red “Confirm” spends that attention advertising the irreversible option. On destructive dialogs the red now belongs to <strong>Cancel</strong>; the destructive button is styled quietly and says exactly what it will do — Delete, Retire, Archive — rather than a generic “Confirm”, so going through with it is a deliberate read instead of a reflex. Non-destructive confirmations keep the ordinary pairing.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/37-delete-booking-confirm.png" alt="Delete Booking confirmation with a red Cancel button and a quietly styled Delete button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/37-delete-booking-confirm.png</code></span></div>
+        <img src="screenshots/38-delete-milestone-confirm.png" alt="Delete Milestone confirmation with a red Cancel button and a quietly styled Delete button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/38-delete-milestone-confirm.png</code></span></div>
         <figcaption>Red stops you; the quiet button is the one that acts.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>A cancelled booking keeps its record and frees its slot <span class="tag">new</span></h3>
+        <p>A booking says the facility held instrument time and staff time on a date, and what that was worth — so cancelling one keeps it logged with its line items, and only releases the slot so someone else can take it. Whether the charge still counts follows from <em>when</em> it was cancelled, because that is what decides whether the facility actually held anything.</p>
+        <ul>
+          <li><strong>Before the start time</strong> — nothing was held, so the charge is dropped from Project Costs.</li>
+          <li><strong>After the start time</strong> — the slot was held, so the charge stands. Admin Mode offers the three-way choice above to waive it instead; without it, the charge stands and the dialog says so.</li>
+          <li>Cancelled bookings are badged in the Meetings and Project Costs cards, struck through on the calendar, and carry a status in every export — a waived charge shows struck through and drops out of the running total, so the total always matches what is actually billed.</li>
+          <li><strong>Reinstate</strong> puts one back, re-running the double-booking check first, since it starts holding its slot again.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/37-cancel-booking-admin.png" alt="Three-way cancellation dialog offering Keep Booking, Cancel and Waive Charge, or Cancel and Keep Charge" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/37-cancel-booking-admin.png</code></span></div>
+        <figcaption>Cancelling a session that already started — the admin decides whether the charge stands.</figcaption>
       </figure>
     </div>
   </div>
@@ -234,7 +252,8 @@
     <h2>Every confirmation, side by side</h2>
     <p class="section-sub">The dialogs that guard the rest — and the two that now retire instead of delete.</p>
     <div class="cards">
-      <figure class="shot shot-thumb"><img src="screenshots/37-delete-booking-confirm.png" alt="Delete Booking confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/37-delete-booking-confirm.png</code></span></div><figcaption>Booking — plus its billing lines</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/47-booking-cancelled-costs.png" alt="Project Costs card showing a cancelled booking whose charge was kept" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/47-booking-cancelled-costs.png</code></span></div><figcaption>Cancelled, charge kept — still in the total</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/48-booking-cancelled-meetings.png" alt="Meetings card showing a cancelled booking with its Reinstate control" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/48-booking-cancelled-meetings.png</code></span></div><figcaption>Cancelled, logged, reinstatable</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/38-delete-milestone-confirm.png" alt="Delete Milestone confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/38-delete-milestone-confirm.png</code></span></div><figcaption>Milestone</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/39-delete-custom-field-confirm.png" alt="Delete custom field confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/39-delete-custom-field-confirm.png</code></span></div><figcaption>Custom metadata field</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/40-delete-attachment-confirm.png" alt="Delete attachment confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/40-delete-attachment-confirm.png</code></span></div><figcaption>File attachment</figcaption></figure>
@@ -248,8 +267,8 @@
 <section>
   <div class="wrap">
     <div class="callout">
-      <h3>Cancelling a booking, and what happens to the charge <span class="tag">new</span></h3>
-      <p>A booking is an accounting record as much as a diary entry: it says the facility held instrument time and staff time on a date, and what that was worth. So a cancelled booking stays logged with its line items intact — it just stops blocking the instrument’s slot, so someone else can take it. Whether its charge still counts toward Project Costs follows from <em>when</em> it was cancelled: <strong>before</strong> the start time nothing was held, so the charge is dropped; <strong>after</strong> the start time the slot was held, so the charge stands. Admin Mode — which already gates every other billing decision here — offers the choice to waive it instead. <strong>Reinstate</strong> puts a booking back, re-running the double-booking check first.</p>
+      <h3>Why Admin Mode decides the charge</h3>
+      <p>Waiving a late cancellation’s charge is a billing decision, and every other billing decision in this app already sits behind Admin Mode — the per-lab group discount’s Revoke/Apply control, the manual per-booking discount override, the overhead and tax rates. Cancellation follows the same line: anyone can cancel a booking and free the slot, but deciding that the facility will not bill for time it held is an administrator’s call. Without Admin Mode the charge simply stands, and the dialog says so rather than quietly dropping revenue.</p>
     </div>
   </div>
 </section>

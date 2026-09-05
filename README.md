@@ -141,9 +141,17 @@ A selection follows.
 
 *Figure 20 — Retired and archived records are hidden from day-to-day lists behind a "Show retired / Show archived" toggle that appears only when there are any — then shown badged, muted, and offering **Restore**. They remain visible wherever they are part of a historical record: a booking still lists the retired staff member who ran it.*
 
-<img src="docs/screenshots/37-delete-booking-confirm.png" width="520" alt="Delete Booking confirmation with a red Cancel button and a quietly styled Delete button">
+<img src="docs/screenshots/38-delete-milestone-confirm.png" width="520" alt="Delete Milestone confirmation with a red Cancel button and a quietly styled Delete button">
 
 *Figure 21 — On a destructive confirmation the red button is **Cancel**, not the destructive one. Colour is what the eye lands on first, and on a dialog that exists to prevent an accident, the safe way out is what deserves that attention. The destructive button stays plainly labelled ("Delete", "Retire", "Archive") but is styled quietly.*
+
+<img src="docs/screenshots/37-cancel-booking-admin.png" width="520" alt="Three-way cancellation dialog offering Keep Booking, Cancel and Waive Charge, or Cancel and Keep Charge">
+
+*Figure 22 — Bookings are cancelled, not deleted: the session stays logged with its line items and its instrument slot is freed for someone else. Whether the charge still counts toward Project Costs follows from when it was cancelled — dropped if it never started, kept if the slot was held. For a late cancellation, Admin Mode offers this three-way choice to waive it instead.*
+
+<img src="docs/screenshots/47-booking-cancelled-costs.png" width="720" alt="Project Costs card showing a cancelled booking badged as charged and still counted in the running total">
+
+*Figure 23 — Project Costs after a late cancellation where the charge was kept: the row is badged, and the running total still reflects it. A waived charge instead shows struck through and drops out of the total, so the figure always matches what is actually billed.*
 
 ---
 
