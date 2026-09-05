@@ -136,9 +136,9 @@
 -->
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.3.7 – 1.3.9 · 04 Sep 2026</span>
+    <span class="eyebrow">Release 1.4.0 · 05 Sep 2026</span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">Three releases about trust rather than new features. 1.3.7 moved the whole app off a stock template palette onto one of its own, recoloured in both themes with contrast checked. 1.3.8 came out of an architecture and feature review of the codebase and fixes what that review found: four trash icons that deleted your data on a single click now ask first, a dialog that misdescribed what deleting a project does now tells the truth, deletes no longer leave dangling references behind, and a discount line that could overstate itself now adds up. Then documenting 1.3.8 turned up one more — a pair of controls that had been invisible all along.</p>
+    <p class="lede">A facility's records are its memory: who ran a session, which scope it ran on, who was PI, what was charged. 1.3.8 made deleting those things ask first — but asking first is not the same as being safe, because the answer was still destruction. 1.4.0 changes the answer. People and instruments are <strong>retired</strong>, projects are <strong>archived</strong>, and nothing that has history behind it can be deleted at all. The object leaves the roster; the record of what it did stays.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="#changelog">Full changelog</a>
@@ -151,15 +151,15 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">The headline changes across 1.3.7–1.3.9.</p>
+    <p class="section-sub">What changed in 1.4.0.</p>
     <div class="cards">
-      <div class="card"><div class="ic">🛑</div><h3>Deletes ask first</h3><p>Bookings, milestones, custom fields, and attachments used to delete on a single click of their trash icon. All four now confirm, naming the record.</p></div>
-      <div class="card"><div class="ic">🧾</div><h3>And they say what it costs you</h3><p>Deleting a booking warns that its instrument and core-staff billing lines go too; deleting a person or instrument explains what happens to bookings that referenced them.</p></div>
-      <div class="card"><div class="ic">✅</div><h3>Delete Project tells the truth</h3><p>It claimed your meetings would be deleted. They never were — bookings are kept and become facility-wide. The dialog now says so.</p></div>
-      <div class="card"><div class="ic">🔗</div><h3>Nothing left dangling</h3><p>Every delete path clears its linked records. A deleted person is removed from attendee and staff records, drops out of the attendee list shown on a booking, and is cleared as any project’s PI.</p></div>
-      <div class="card"><div class="ic">💸</div><h3>Discount rows that add up</h3><p>A group and manual discount totalling over 100% was correctly capped in the maths but not in the summary rows, which showed more than was actually deducted.</p></div>
-      <div class="card"><div class="ic">🎨</div><h3>A palette of its own</h3><p>1.3.7 moved off the stock Tailwind indigo/violet shared with every other app built on the same template, onto a distinct system — recoloured in both themes, contrast verified to WCAG AA.</p></div>
-      <div class="card"><div class="ic">👻</div><h3>Two invisible buttons, found</h3><p>1.3.9: a custom field’s Edit and Delete icons had collapsed to zero size, so a field could never be changed or removed once saved. Caught while screenshotting the new confirmations.</p></div>
+      <div class="card"><div class="ic">🗄️</div><h3>Retire, don’t delete</h3><p>A person who leaves and an instrument that is decommissioned are retired. Every booking they were on, every milestone they owned, every project they served — all kept, exactly as recorded.</p></div>
+      <div class="card"><div class="ic">📁</div><h3>Projects are archived</h3><p>A project holds the thread between its team, its instruments and its billing. Archiving keeps the title and all of it, and only takes the project out of the active registry.</p></div>
+      <div class="card"><div class="ic">🧾</div><h3>Billing survives intact</h3><p>A cost snapshot is only auditable while the lines behind it exist. Retiring and archiving never touch a booking’s instruments, staff or totals.</p></div>
+      <div class="card"><div class="ic">🏷️</div><h3>Labelled, not hidden</h3><p>Retired and archived records read as <em>(Retired)</em> / <em>Archived</em> everywhere — lists, team cards, milestone assignees, booking badges and every export.</p></div>
+      <div class="card"><div class="ic">↩️</div><h3>Reversible</h3><p>Restore puts a record back on the active roster. Only something nothing references at all — a typo, a duplicate — can still be deleted outright.</p></div>
+      <div class="card"><div class="ic">📅</div><h3>Bookings are cancelled</h3><p>A cancelled session stays logged with its line items and frees its instrument slot. Whether the charge stands depends on whether it had already started.</p></div>
+      <div class="card"><div class="ic">🔴</div><h3>Red is now Cancel</h3><p>On a dialog that exists to prevent an accident, the safe way out gets the colour. The destructive button says exactly what it does — Delete, Retire, Archive — and is styled quietly.</p></div>
     </div>
   </div>
 </section>
@@ -167,76 +167,81 @@
 <section>
   <div class="wrap">
     <h2>In detail</h2>
-    <p class="section-sub">The four changes worth a screenshot.</p>
+    <p class="section-sub">The changes worth a screenshot.</p>
 
-    <!-- Delete confirmations on the four one-click delete paths (1.3.8) -->
     <div class="feature">
       <div class="txt">
-        <h3>Four one-click deletes now ask first <span class="tag">new</span></h3>
-        <p>A review of the codebase turned up an inconsistency nobody would have enjoyed discovering the hard way: while deleting a project, a person, or an instrument had always asked for confirmation, four trash icons deleted immediately on a single click. A stray tap on a phone or a mis-click in a long list took the record with it, and there is no undo in a local-first app.</p>
+        <h3>People are retired, and every record they touched stays <span class="tag">new</span></h3>
+        <p>The previous release deleted a person and carefully unlinked them from everything on the way out — from project teams, from milestones they owned, from the attendee list of every booking they sat in, from the staff line of every booking they were billed on. That tidiness was the bug. Who actually attended a session is a fact about the session, not a property of someone’s current employment, and a booking’s cost is only auditable while the staff line behind it still exists.</p>
         <ul>
-          <li><strong>Bookings</strong> (in a project’s Meetings &amp; Syncs card), <strong>milestones</strong>, <strong>custom metadata fields</strong>, and <strong>file attachments</strong> now each confirm first, naming the record about to go.</li>
-          <li>A booking’s confirmation also warns that its billing line items — assigned instruments and core staff — are deleted along with it.</li>
-          <li>The booking edit dialog’s own Delete button keeps its single confirmation; the two paths share one deletion routine, so nothing double-prompts.</li>
+          <li>The dialog counts up precisely where they appear before you decide, and commits to keeping all of it.</li>
+          <li>They stop being offered when assigning new work, but stay selected wherever they already are — which matters, because saving a milestone or booking rebuilds its assignees from the form, so a hidden one would be silently dropped.</li>
+          <li>Their stored name never changes; “(Retired)” is added at display time, so historical records read back exactly as entered.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/37-delete-booking-confirm.png" alt="Confirmation dialog before deleting a booking, naming the booking and warning that its billing line items go too" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/37-delete-booking-confirm.png</code></span></div>
-        <figcaption>Deleting a booking from a project’s meeting list — named, and explicit about the billing lines going with it.</figcaption>
+        <img src="screenshots/42-retire-person.png" alt="Retire Person dialog listing every project, milestone and booking the person appears on" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/42-retire-person.png</code></span></div>
+        <figcaption>Retiring a core-staff member — every place they appear, and a promise to keep it.</figcaption>
       </figure>
     </div>
 
-    <!-- Delete Project dialog corrected (1.3.8) -->
     <div class="feature reverse">
       <div class="txt">
-        <h3>Delete Project stops claiming it will delete your bookings <span class="tag">fixed</span></h3>
-        <p>The old dialog offered to delete the project “and all its milestones, files, and meeting records”. The first two were true. The third never was: the database unlinks a deleted project’s bookings rather than removing them, so they survive as facility-wide bookings — which is the right behaviour for billing history, and the opposite of what the dialog promised. Anyone who read it carefully would have been reluctant to delete a finished project at all.</p>
+        <h3>Projects are archived, billing and all <span class="tag">new</span></h3>
+        <p>A project is the thread tying together who worked on it, which instruments ran, and what was charged. Deleting one destroyed the facility’s record of work it actually did and money it actually billed — so there is no longer a way to do that. Archiving keeps the title, the team, the instruments, the milestones, the files, the custom fields and every booking with its cost snapshot; it only takes the project out of the day-to-day registry.</p>
         <ul>
-          <li>The dialog now states plainly what is deleted (milestones, files, custom fields) and what is kept (the bookings, as facility-wide).</li>
-          <li>The delete itself now clears the project’s linked records explicitly instead of trusting the database to cascade — see the note below.</li>
+          <li>The dialog names the billing total it is preserving, so you know what is at stake before you confirm.</li>
+          <li>An archived project keeps a banner explaining its state, and Restore brings it straight back.</li>
+          <li>The dashboard’s counters and overdue alerts now cover active projects only, so archived work stops raising flags.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/41-delete-project-meetings-kept.png" alt="Delete Project dialog explaining that milestones, files and custom fields are deleted while meetings are kept as facility-wide bookings" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/41-delete-project-meetings-kept.png</code></span></div>
-        <figcaption>What actually happens, in the dialog itself: milestones and files go, bookings stay.</figcaption>
+        <img src="screenshots/41-archive-project.png" alt="Archive Project dialog listing the team, instruments, milestones, bookings and billing that are preserved" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/41-archive-project.png</code></span></div>
+        <figcaption>Archiving names what it keeps — down to the billing total.</figcaption>
       </figure>
     </div>
 
-    <!-- Person/instrument deletes: unlinking + snapshot preservation (1.3.8) -->
     <div class="feature">
       <div class="txt">
-        <h3>Deleting a person or an instrument says what happens to the billing <span class="tag">new</span></h3>
-        <p>Removing someone who has been on bookings raises a fair question: what happens to what was already billed? The answer is that saved totals stay exactly as they were — a booking’s cost is snapshotted when you save it, so it remains a record of what was charged rather than a live recalculation that quietly changes when the roster does. The dialogs now say that instead of leaving you to guess.</p>
-        <ul>
-          <li>A deleted person is unlinked from projects, milestones, and meeting attendee and core-staff records, and is cleared as PI from any project that listed them.</li>
-          <li>The attendee names shown on a booking are recomputed, so a deleted person stops appearing there — that display list is stored separately from the actual attendee links and used to drift out of sync.</li>
-          <li>A deleted instrument is unlinked from projects, milestones, and bookings; affected bookings lose the line item but keep their saved totals.</li>
-        </ul>
+        <h3>Out of the way, never out of the record</h3>
+        <p>Retired people and archived projects would clutter a roster that grows for years, so they are hidden from the everyday lists behind a toggle that only appears once there is something to show. Reveal them and they are badged, muted, and offer Restore. Everywhere they form part of a historical record — a booking’s attendees, a milestone’s owners, a project’s team, an exported report — they simply stay, marked for what they are.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/42-delete-person-unlink-warning.png" alt="Delete Person dialog warning that the person is unlinked from projects, milestones and meeting records, and that bookings keep their historical cost snapshots" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/42-delete-person-unlink-warning.png</code></span></div>
-        <figcaption>Deleting a core-staff member — every place they are unlinked from, and what their past bookings keep.</figcaption>
+        <img src="screenshots/44-people-retired.png" alt="People directory with the Show retired toggle enabled, showing a retired person badged and muted" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/44-people-retired.png</code></span></div>
+        <figcaption>“Show retired (1)” — badged, muted, restorable.</figcaption>
       </figure>
     </div>
 
-    <!-- The 1.3.7 palette restyle -->
     <div class="feature reverse">
       <div class="txt">
-        <h3>A palette of its own <span class="tag">1.3.7</span></h3>
-        <p>The app had been wearing the stock Tailwind indigo/violet it inherited from the template it started life on — the same colours as a great many other apps. 1.3.7 recoloured it end to end onto a distinct neutral/violet system: backgrounds, borders, text, and the success/warning/danger states, in both light and dark themes, with every pairing checked to WCAG AA contrast. Dark-mode primary buttons picked up a dedicated dark-ink label colour, fixing a contrast failure against the lighter dark-mode primary.</p>
+        <h3>The red button is the one that stops you <span class="tag">changed</span></h3>
+        <p>A confirmation dialog exists to prevent an accident, so the choice that prevents it is the one that should catch the eye. Colour is what the eye lands on first, and a red “Confirm” spends that attention advertising the irreversible option. On destructive dialogs the red now belongs to <strong>Cancel</strong>; the destructive button is styled quietly and says exactly what it will do — Delete, Retire, Archive — rather than a generic “Confirm”, so going through with it is a deliberate read instead of a reflex. Non-destructive confirmations keep the ordinary pairing.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/38-delete-milestone-confirm.png" alt="Delete Milestone confirmation with a red Cancel button and a quietly styled Delete button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/38-delete-milestone-confirm.png</code></span></div>
+        <figcaption>Red stops you; the quiet button is the one that acts.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>A cancelled booking keeps its record and frees its slot <span class="tag">new</span></h3>
+        <p>A booking says the facility held instrument time and staff time on a date, and what that was worth — so cancelling one keeps it logged with its line items, and only releases the slot so someone else can take it. Whether the charge still counts follows from <em>when</em> it was cancelled, because that is what decides whether the facility actually held anything.</p>
         <ul>
-          <li>The logo gradient and the PWA theme colours (favicon, manifest, theme-color meta) moved to the same identity.</li>
-          <li>Shared motion tokens replaced hand-tuned transition timings, with a <code>prefers-reduced-motion</code> override for anyone who asks their system for less animation.</li>
-          <li>No layout, typography, or component-structure changes — same app, new colours. Every screenshot on this page and in the README was re-captured for it.</li>
+          <li><strong>Before the start time</strong> — nothing was held, so the charge is dropped from Project Costs.</li>
+          <li><strong>After the start time</strong> — the slot was held, so the charge stands. Admin Mode offers the three-way choice above to waive it instead; without it, the charge stands and the dialog says so.</li>
+          <li>Cancelled bookings are badged in the Meetings and Project Costs cards, struck through on the calendar, and carry a status in every export — a waived charge shows struck through and drops out of the running total, so the total always matches what is actually billed.</li>
+          <li><strong>Reinstate</strong> puts one back, re-running the double-booking check first, since it starts holding its slot again.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/02c-light-theme.png" alt="The app in light theme showing the current palette" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/02c-light-theme.png</code></span></div>
-        <figcaption>The current palette in light theme — one click switches the whole UI to dark.</figcaption>
+        <img src="screenshots/37-cancel-booking-admin.png" alt="Three-way cancellation dialog offering Keep Booking, Cancel and Waive Charge, or Cancel and Keep Charge" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/37-cancel-booking-admin.png</code></span></div>
+        <figcaption>Cancelling a session that already started — the admin decides whether the charge stands.</figcaption>
       </figure>
     </div>
   </div>
@@ -245,13 +250,16 @@
 <section>
   <div class="wrap">
     <h2>Every confirmation, side by side</h2>
-    <p class="section-sub">The four dialogs that were previously a single unguarded click.</p>
+    <p class="section-sub">The dialogs that guard the rest — and the two that now retire instead of delete.</p>
     <div class="cards">
-      <figure class="shot shot-thumb"><img src="screenshots/37-delete-booking-confirm.png" alt="Delete Booking confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/37-delete-booking-confirm.png</code></span></div><figcaption>Booking — plus its billing lines</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/47-booking-cancelled-costs.png" alt="Project Costs card showing a cancelled booking whose charge was kept" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/47-booking-cancelled-costs.png</code></span></div><figcaption>Cancelled, charge kept — still in the total</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/48-booking-cancelled-meetings.png" alt="Meetings card showing a cancelled booking with its Reinstate control" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/48-booking-cancelled-meetings.png</code></span></div><figcaption>Cancelled, logged, reinstatable</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/38-delete-milestone-confirm.png" alt="Delete Milestone confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/38-delete-milestone-confirm.png</code></span></div><figcaption>Milestone</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/39-delete-custom-field-confirm.png" alt="Delete custom field confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/39-delete-custom-field-confirm.png</code></span></div><figcaption>Custom metadata field</figcaption></figure>
       <figure class="shot shot-thumb"><img src="screenshots/40-delete-attachment-confirm.png" alt="Delete attachment confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/40-delete-attachment-confirm.png</code></span></div><figcaption>File attachment</figcaption></figure>
-      <figure class="shot shot-thumb"><img src="screenshots/43-delete-instrument-billing-warning.png" alt="Delete Instrument dialog warning about booking line items and preserved totals" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/43-delete-instrument-billing-warning.png</code></span></div><figcaption>Instrument — bookings keep their totals</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/43-retire-instrument.png" alt="Retire Instrument dialog listing the projects, milestones and bookings that are kept" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/43-retire-instrument.png</code></span></div><figcaption>Instrument — retired, bookings intact</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/46-project-archived-banner.png" alt="An archived project's detail page with its banner and Restore button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/46-project-archived-banner.png</code></span></div><figcaption>An archived project, restorable</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/45-projects-archived.png" alt="Projects registry with Show archived enabled" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/45-projects-archived.png</code></span></div><figcaption>Registry, archived shown</figcaption></figure>
     </div>
   </div>
 </section>
@@ -259,7 +267,16 @@
 <section>
   <div class="wrap">
     <div class="callout">
-      <h3>A bug the screenshots found <span class="tag">1.3.9</span></h3>
+      <h3>Why Admin Mode decides the charge</h3>
+      <p>Waiving a late cancellation’s charge is a billing decision, and every other billing decision in this app already sits behind Admin Mode — the per-lab group discount’s Revoke/Apply control, the manual per-booking discount override, the overhead and tax rates. Cancellation follows the same line: anyone can cancel a booking and free the slot, but deciding that the facility will not bill for time it held is an administrator’s call. Without Admin Mode the charge simply stands, and the dialog says so rather than quietly dropping revenue.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>Still true from 1.3.9: a bug the screenshots found <span class="tag">1.3.9</span></h3>
       <p>Capturing the “Delete Field” dialog above turned out to be impossible by clicking, because the icon that opens it could not be clicked at all. A custom field’s <strong>Edit</strong> and <strong>Delete</strong> icons are bare spans, so none of the CSS rules that size the app’s inline icons applied to them — measured in a browser, both were <strong>0 pixels wide</strong>, and a click where they should be landed on the row behind. Once a custom field was saved, it could never be edited or removed. Both now have a proper 22×22 hit area, which is also what makes 1.3.8’s new confirmation reachable in the first place.</p>
     </div>
   </div>
@@ -332,7 +349,7 @@
 
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · <span id="footer-version">v1.3.8</span> · Bioimaging Facility</div>
+    <div>Core Facility Tracker · <span id="footer-version">v1.4.0</span> · Bioimaging Facility</div>
     <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>

@@ -164,7 +164,13 @@
       toast('Could not copy — your browser blocked clipboard access', 'error');
     }
   }
-  function confirmModal(title, body, { danger = false } = {}) {
+  /* On a destructive confirmation the RED button is Cancel, not Confirm. Colour is what the eye
+     lands on first, and on a dialog that exists to prevent an accident the safe way out is what
+     deserves that attention — a red "Confirm" advertises the irreversible choice. The
+     destructive action stays plainly labelled ("Delete", "Retire" — see confirmText) but is
+     styled quietly, so going through with it is a deliberate read rather than a reflex.
+     Non-destructive confirmations keep the ordinary neutral-Cancel / primary-Confirm pairing. */
+  function confirmModal(title, body, { danger = false, confirmText = 'Confirm', cancelText = 'Cancel' } = {}) {
     return new Promise((resolve) => {
       // Tapping outside the dialog (easy to do by accident on a touch screen) still needs to
       // settle this promise — otherwise whatever's awaiting the answer hangs forever even
@@ -173,8 +179,8 @@
         <div class="head"><span class="t" style="font-weight:600">${title}</span></div>
         <div class="body"><p class="mt-0 mb-8">${body}</p></div>
         <div class="foot">
-          <button class="btn btn-secondary" data-act="no">Cancel</button>
-          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="yes">Confirm</button>
+          <button class="btn ${danger ? 'btn-danger' : 'btn-secondary'}" data-act="no">${esc(cancelText)}</button>
+          <button class="btn ${danger ? 'btn-secondary' : 'btn-primary'}" data-act="yes">${esc(confirmText)}</button>
         </div>`, null, () => resolve(false));
       const dim = m.closest('.modal-dim');
       const yes = m.querySelector('[data-act="yes"]');
@@ -442,7 +448,8 @@
     collapse: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9-3 3 3 3"/>',
     expand: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m11 9 3 3-3 3"/>',
     copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>'
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+    archive: '<rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/>'
   };
   function icon(name) {
     return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -466,6 +473,11 @@
     return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString();
   }
   function today() { return new Date().toISOString().slice(0, 10); }
+  /* A retired person/instrument keeps its real name in the database — the suffix is added at
+     display time only, so historical records still read back exactly as they were entered. */
+  function retiredName(name, isRetired) {
+    return isRetired ? String(name == null ? '' : name) + ' (Retired)' : String(name == null ? '' : name);
+  }
   function isSafeUrl(u) { return /^https?:\/\//i.test(String(u || '').trim()); }
 
   /* ---------------- Rich-text notes: sanitize + render ----------------
@@ -530,6 +542,7 @@
     noteHtml,
     fmtDate,
     today,
+    retiredName,
     isSafeUrl,
     detectOS,
     copyToClipboard,

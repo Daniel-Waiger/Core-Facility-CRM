@@ -31,7 +31,7 @@ Track research projects from initiation to completion with full lifecycle tracki
   - **PDF:** Multi-page paginated report with headers, footers, and page numbers via `jsPDF`.
 - **Single-File Backup & Recovery:** Export your entire facility database (including attached files) into a self-contained `.json` backup file and restore it on any machine anytime. An automatic backup also runs roughly once every 24 hours while the app is open (toggleable in Settings), so you're never relying solely on browser storage — in Chrome/Edge, point it at the app's folder once and it writes silently into a `backups/` subfolder there with no download prompts; otherwise it falls back to a normal file download.
 - **Modern SaaS Minimalist UI:** Hand-written CSS design system with Dark/Light theme switching, toast feedback, custom brand favicon, and guided onboarding tour.
-- **Guarded Destructive Actions:** Every delete — project, person, instrument, booking, milestone, custom field, attachment — confirms first, naming the record and spelling out what goes with it (a booking's billing lines, a project's milestones vs. its kept bookings) and what is preserved (saved cost snapshots). Deletes clean up their linked records rather than leaving dangling references behind.
+- **History Is Never Destroyed:** People and instruments are **retired**, projects are **archived**, and bookings are **cancelled** — never deleted — so who attended a session, which instrument ran it, who was PI, and the billing behind every cost snapshot all survive. Retired and archived records are labelled wherever they appear, drop out of the pickers for new work, stay put on everything they already belong to, and can be restored at any time. A cancelled booking stays logged with its line items and frees its instrument slot; whether its charge still counts toward Project Costs depends on whether it had already started, with Admin Mode able to waive a late cancellation's charge. Only records nothing references at all can still be deleted outright.
 
 ---
 
@@ -127,19 +127,31 @@ A selection follows.
 
 *Figure 17 — Project Costs: every booking's saved cost snapshot (subtotal → before tax → total) with a running total for the project.*
 
-**Safe deletes**
+**Retiring, archiving & safe deletes**
 
-<img src="docs/screenshots/37-delete-booking-confirm.png" width="520" alt="Confirmation dialog before deleting a booking, naming the booking and warning that its billing line items go too">
+<img src="docs/screenshots/42-retire-person.png" width="520" alt="Retire Person dialog listing every project, milestone and booking the person appears on and promising those records are kept">
 
-*Figure 18 — Every delete asks first. Bookings, milestones, custom fields, and attachments used to delete on a single click of their trash icon; each now names the record it is about to remove — and, for a booking, warns that its instrument and core-staff billing lines go with it.*
+*Figure 18 — People are retired, not deleted. The dialog counts up exactly where they appear — project teams, milestones, bookings they attended, bookings they were billable staff on — and every one of those records is kept untouched. Retiring only labels them "(Retired)" and stops them being offered for new work. It can be undone.*
 
-<img src="docs/screenshots/41-delete-project-meetings-kept.png" width="520" alt="Delete Project dialog explaining that milestones, files and custom fields are deleted while meetings are kept as facility-wide bookings">
+<img src="docs/screenshots/41-archive-project.png" width="520" alt="Archive Project dialog listing the team, instruments, milestones, bookings and billing that are preserved">
 
-*Figure 19 — The Delete Project dialog spells out exactly what happens: milestones, files, and custom fields are deleted, while the project's bookings are kept and become facility-wide rather than disappearing with it.*
+*Figure 19 — Projects are archived, not deleted. A project is the thread tying together who worked on it, which instruments ran, and what was charged — so archiving keeps the title, team, instruments, milestones, files, custom fields and every booking with its cost snapshot, and names the billing total it is preserving. It only leaves the active registry.*
 
-<img src="docs/screenshots/42-delete-person-unlink-warning.png" width="520" alt="Delete Person dialog warning that the person is unlinked from projects, milestones and meeting records, and that bookings keep their historical cost snapshots">
+<img src="docs/screenshots/44-people-retired.png" width="720" alt="People directory showing a retired person badged Retired, revealed by the Show retired toggle">
 
-*Figure 20 — Deleting a person unlinks them everywhere (projects, milestones, meeting attendee and core-staff records, and any project that had them as PI) and says so. Bookings they were billable staff on keep their historical cost snapshots — the saved totals are a record of what was billed, not a live recalculation.*
+*Figure 20 — Retired and archived records are hidden from day-to-day lists behind a "Show retired / Show archived" toggle that appears only when there are any — then shown badged, muted, and offering **Restore**. They remain visible wherever they are part of a historical record: a booking still lists the retired staff member who ran it.*
+
+<img src="docs/screenshots/38-delete-milestone-confirm.png" width="520" alt="Delete Milestone confirmation with a red Cancel button and a quietly styled Delete button">
+
+*Figure 21 — On a destructive confirmation the red button is **Cancel**, not the destructive one. Colour is what the eye lands on first, and on a dialog that exists to prevent an accident, the safe way out is what deserves that attention. The destructive button stays plainly labelled ("Delete", "Retire", "Archive") but is styled quietly.*
+
+<img src="docs/screenshots/37-cancel-booking-admin.png" width="520" alt="Three-way cancellation dialog offering Keep Booking, Cancel and Waive Charge, or Cancel and Keep Charge">
+
+*Figure 22 — Bookings are cancelled, not deleted: the session stays logged with its line items and its instrument slot is freed for someone else. Whether the charge still counts toward Project Costs follows from when it was cancelled — dropped if it never started, kept if the slot was held. For a late cancellation, Admin Mode offers this three-way choice to waive it instead.*
+
+<img src="docs/screenshots/47-booking-cancelled-costs.png" width="720" alt="Project Costs card showing a cancelled booking badged as charged and still counted in the running total">
+
+*Figure 23 — Project Costs after a late cancellation where the charge was kept: the row is badged, and the running total still reflects it. A waived charge instead shows struck through and drops out of the total, so the figure always matches what is actually billed.*
 
 ---
 

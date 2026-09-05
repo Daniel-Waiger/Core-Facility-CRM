@@ -268,6 +268,8 @@
       if (prFilter) prFilter.onchange = (e) => Views.setProjectFilter({ priority: e.target.value });
       const modFilter = document.getElementById('proj-modality-filter');
       if (modFilter) modFilter.onchange = (e) => Views.setProjectFilter({ modality: e.target.value });
+      const archivedToggle = document.getElementById('proj-archived-filter');
+      if (archivedToggle) archivedToggle.onchange = (e) => Views.setProjectFilter({ showArchived: e.target.checked });
     }
 
     if (name === 'people') {
@@ -275,6 +277,8 @@
       if (searchInput) searchInput.oninput = (e) => Views.setPeopleFilter({ query: e.target.value });
       const typeFilter = document.getElementById('people-type-filter');
       if (typeFilter) typeFilter.onchange = (e) => Views.setPeopleFilter({ type: e.target.value });
+      const retiredToggle = document.getElementById('people-retired-filter');
+      if (retiredToggle) retiredToggle.onchange = (e) => Views.setPeopleFilter({ showRetired: e.target.checked });
     }
 
     if (name === 'instruments') {
@@ -284,6 +288,8 @@
       if (stFilter) stFilter.onchange = (e) => Views.setInstrumentFilter({ status: e.target.value });
       const kindFilter = document.getElementById('inst-kind-filter');
       if (kindFilter) kindFilter.onchange = (e) => Views.setInstrumentFilter({ kind: e.target.value });
+      const instRetiredToggle = document.getElementById('inst-retired-filter');
+      if (instRetiredToggle) instRetiredToggle.onchange = (e) => Views.setInstrumentFilter({ showRetired: e.target.checked });
     }
 
     if (focusRestore) {
@@ -849,7 +855,8 @@
       case 'ep-add-person': return editProjectAddPerson(el.dataset.projectId);
       case 'set-project-status': return setProjectStatus(el.dataset.status);
       case 'duplicate-project': return duplicateProject(el.dataset.id || ctx.project);
-      case 'delete-project': return deleteProject();
+      case 'archive-project': return archiveProject();
+      case 'restore-project': return restoreProject(el.dataset.id);
 
       // Clipboard
       case 'copy': return UI.copyToClipboard(el.dataset.copy, el.dataset.copyLabel || 'Copied to clipboard');
@@ -873,7 +880,8 @@
       case 'p-save': return pSave();
       case 'edit-person': return editPerson(el.dataset.id);
       case 'p-edit-save': return pEditSave(el.dataset.id);
-      case 'delete-person': return deletePerson(el.dataset.id);
+      case 'retire-person': return retirePerson(el.dataset.id);
+      case 'restore-person': return restorePerson(el.dataset.id);
 
       // Project Collaborators & Instruments link
       case 'add-project-person': return addProjectPerson();
@@ -888,7 +896,8 @@
       case 'i-save': return iSave();
       case 'edit-instrument': return editInstrument(el.dataset.id);
       case 'i-edit-save': return iEditSave(el.dataset.id);
-      case 'delete-instrument': return deleteInstrument(el.dataset.id);
+      case 'retire-instrument': return retireInstrument(el.dataset.id);
+      case 'restore-instrument': return restoreInstrument(el.dataset.id);
 
       // Bookings (Meetings) CRUD
       case 'new-booking': return newBooking(el.dataset.date, ctx.project);
@@ -896,7 +905,8 @@
       case 'booking-save': return bookingSave();
       case 'edit-booking': return editBooking(el.dataset.id);
       case 'booking-edit-save': return bookingEditSave(el.dataset.id);
-      case 'meeting-del': return deleteMeeting(el.dataset.id);
+      case 'meeting-cancel': return cancelBooking(el.dataset.id);
+      case 'booking-reinstate': return reinstateBooking(el.dataset.id);
       case 'booking-del': return deleteBookingFromModal(el.dataset.id);
       case 'email-attendees': return emailAttendees(el.dataset.id);
       case 'email-open-blank': return void (window.location.href = 'mailto:');
@@ -934,7 +944,7 @@
 
   /* ---------------- Project Creation with Inline Person Adding ---------------- */
   function newProject() {
-    const peopleList = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name');
+    const peopleList = DB.rows('SELECT id, name, type, organization FROM people WHERE is_retired=0 ORDER BY name');
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('folder')} Initiate Facility Project</span></div>
@@ -1062,9 +1072,12 @@
   function editProject(id, selectPersonId = null) {
     const p = DB.row('SELECT * FROM projects WHERE id=?', [id]);
     if (!p) return;
-    const pis = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name');
     const currentFlags = (p.flags || '').split(',').filter(Boolean);
     const activePiId = selectPersonId !== null ? selectPersonId : p.pi_id;
+    // A retired person stays listed only if they are this project's current PI — otherwise
+    // re-saving the form would quietly drop the PI this project historically had.
+    const pis = DB.rows('SELECT id, name, type, organization, is_retired FROM people ORDER BY name')
+      .filter((pe) => !pe.is_retired || pe.id === activePiId);
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Project Details</span></div>
@@ -1086,7 +1099,7 @@
             </div>
             <select class="input" id="ep-pi">
               <option value="">-- Select or None --</option>
-              ${pis.map((pe) => `<option value="${pe.id}" ${pe.id === activePiId ? 'selected' : ''}>${esc(pe.name)} (${pe.type}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
+              ${pis.map((pe) => `<option value="${pe.id}" ${pe.id === activePiId ? 'selected' : ''}>${esc(UI.retiredName(pe.name, pe.is_retired))} (${pe.type}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
             </select>
           </div>
           ${vocabField({ category: 'MODALITY', id: 'ep-modality', label: 'Modality / Technique', selected: p.modality, placeholder: '-- Select Modality --' })}
@@ -1167,31 +1180,61 @@
     refresh();
   }
 
-  async function deleteProject() {
-    const p = DB.row('SELECT title FROM projects WHERE id=?', [ctx.project]);
-    if (!p) return;
-    const ok = await UI.confirmModal('Delete Project', `Are you sure you want to permanently delete "${esc(p.title)}" and all its milestones, files, and custom fields? Meetings/bookings linked to this project are kept — they become facility-wide bookings rather than being deleted.`, { danger: true });
-    if (!ok) return;
+  /* Archiving, not deleting. A project is the thread tying together who worked on it, which
+     instruments ran, and what was billed — deleting it would destroy the facility's record of
+     work it actually did and money it actually charged. Archiving keeps every one of those
+     records (title, team, instruments, milestones, files, custom fields, and every booking with
+     its cost snapshot) and only takes the project out of the day-to-day registry. Reversible.
 
-    // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is verified
-    // working (see CLAUDE.md's cascading-deletes section) — grandchildren, children, then parent.
+     As with people and instruments, an empty project nothing references — a mistyped entry —
+     can still be deleted outright, since there is no history to protect. */
+  async function archiveProject() {
     const pid = ctx.project;
-    DB.rows('SELECT id FROM milestones WHERE project_id=?', [pid]).forEach((ms) => {
-      DB.run('DELETE FROM milestone_owners WHERE milestone_id=?', [ms.id]);
-      DB.run('DELETE FROM milestone_instruments WHERE milestone_id=?', [ms.id]);
-    });
-    DB.run('DELETE FROM project_people WHERE project_id=?', [pid]);
-    DB.run('DELETE FROM project_instruments WHERE project_id=?', [pid]);
-    DB.run('DELETE FROM milestones WHERE project_id=?', [pid]);
-    DB.run('DELETE FROM files WHERE project_id=?', [pid]);
-    DB.run('DELETE FROM kv WHERE project_id=?', [pid]);
-    // Meetings are NOT deleted — schema declares ON DELETE SET NULL, so unlink them explicitly
-    // to preserve that semantics regardless of whether cascade/SET NULL actually fires.
-    DB.run('UPDATE meetings SET project_id=NULL WHERE project_id=?', [pid]);
+    const p = DB.row('SELECT title, is_archived FROM projects WHERE id=?', [pid]);
+    if (!p) return;
+    const refs = DB.countProjectRefs(pid);
 
-    DB.run('DELETE FROM projects WHERE id=?', [pid]);
-    UI.toast('Project deleted');
+    if (!refs.total) {
+      const ok = await UI.confirmModal(
+        'Delete Project',
+        `"${esc(p.title)}" has no team, instruments, milestones, bookings, files or custom fields recorded against it, so there's no history to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      DB.run('DELETE FROM projects WHERE id=?', [pid]);
+      UI.toast('Project deleted');
+      route('projects');
+      return;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const holds = [];
+    if (refs.team) holds.push(plural(refs.team, 'team member'));
+    if (refs.instruments) holds.push(plural(refs.instruments, 'assigned instrument'));
+    if (refs.milestones) holds.push(plural(refs.milestones, 'milestone'));
+    if (refs.bookings) holds.push(plural(refs.bookings, 'booking'));
+    if (refs.files) holds.push(plural(refs.files, 'file'));
+    if (refs.fields) holds.push(plural(refs.fields, 'custom field'));
+    const billed = refs.billed > 0 ? ` Its bookings account for ${fmtMoney(refs.billed)} of billing, which stays on the record.` : '';
+
+    const ok = await UI.confirmModal(
+      'Archive Project',
+      `"${esc(p.title)}" holds ${holds.join(', ')}.${billed} Archiving keeps all of it exactly as it is and only takes the project out of the active registry — nothing is deleted, and you can restore it at any time.`,
+      { confirmText: 'Archive' }
+    );
+    if (!ok) return;
+    DB.setProjectArchived(pid, true);
+    UI.toast('Project archived');
     route('projects');
+  }
+
+  function restoreProject(id) {
+    const pid = id || ctx.project;
+    const p = DB.row('SELECT title FROM projects WHERE id=?', [pid]);
+    if (!p) return;
+    DB.setProjectArchived(pid, false);
+    UI.toast(`${p.title} restored`);
+    refresh();
   }
 
   // Clone a project as a starting template: copies the project fields, team, instruments,
@@ -1250,8 +1293,8 @@
 
   /* ---------------- Milestone Modals & Status Toggle ---------------- */
   function addMilestone() {
-    const ppl = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name');
-    const inst = DB.rows('SELECT id, name FROM instruments ORDER BY name');
+    const ppl = DB.rows('SELECT id, name, type, organization FROM people WHERE is_retired=0 ORDER BY name');
+    const inst = DB.rows('SELECT id, name FROM instruments WHERE is_retired=0 ORDER BY name');
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('target')} Add Deliverable / Milestone</span></div>
@@ -1301,10 +1344,16 @@
   function editMilestone(id) {
     const m = DB.row('SELECT * FROM milestones WHERE id=?', [id]);
     if (!m) return;
-    const ppl = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name');
-    const inst = DB.rows('SELECT id, name FROM instruments ORDER BY name');
     const currentOwners = DB.rows('SELECT person_id FROM milestone_owners WHERE milestone_id=?', [id]).map((r) => r.person_id);
     const currentInsts = DB.rows('SELECT instrument_id FROM milestone_instruments WHERE milestone_id=?', [id]).map((r) => r.instrument_id);
+    // msEditSave rebuilds the owner/instrument rows from whichever chips are rendered, so a
+    // retired assignee still needs its chip here — otherwise re-saving this milestone would
+    // silently drop whoever has retired since it was set up. Retired records that are NOT
+    // already assigned stay out, so they can't be added to anything new.
+    const ppl = DB.rows('SELECT id, name, type, organization, is_retired FROM people ORDER BY name')
+      .filter((r) => !r.is_retired || currentOwners.includes(r.id));
+    const inst = DB.rows('SELECT id, name, is_retired FROM instruments ORDER BY name')
+      .filter((r) => !r.is_retired || currentInsts.includes(r.id));
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Milestone</span></div>
@@ -1315,8 +1364,8 @@
           <div class="field"><label>Status</label><select class="input" id="mse-status">${C.MS_STATUS.map((s) => `<option value="${s}" ${s === m.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label>Notes / Deliverables</label><input class="input" id="mse-note" value="${esc(m.note || '')}" /></div>
-        <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip ${currentOwners.includes(r.id) ? 'on' : ''}" data-owner="${r.id}">${esc(r.name)} (${r.type}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
-        <div class="field"><label>Assign Core Instruments</label><div class="chips">${inst.map((r) => `<span class="chip ${currentInsts.includes(r.id) ? 'on' : ''}" data-inst="${r.id}">${esc(r.name)}</span>`).join('')}</div></div>
+        <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip ${currentOwners.includes(r.id) ? 'on' : ''}" data-owner="${r.id}">${esc(UI.retiredName(r.name, r.is_retired))} (${r.type}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
+        <div class="field"><label>Assign Core Instruments</label><div class="chips">${inst.map((r) => `<span class="chip ${currentInsts.includes(r.id) ? 'on' : ''}" data-inst="${r.id}">${esc(UI.retiredName(r.name, r.is_retired))}</span>`).join('')}</div></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1481,38 +1530,56 @@
     refresh();
   }
 
-  async function deletePerson(id) {
+  /* Retiring, not deleting. Who attended a booking, who owned a milestone and who was PI on a
+     project are historical facts; a booking's saved cost snapshot is only auditable while the
+     staff line behind it still exists. So a person who leaves is marked retired: every link
+     they ever had stays exactly as it is, they are shown as "(Retired)" everywhere they appear,
+     and they simply stop being offered when assigning new work. It is reversible.
+
+     The one case where a real delete is offered is a record nothing references at all — a
+     typo or a duplicate — where there is no history to protect and no way to tidy up otherwise. */
+  async function retirePerson(id) {
     const p = DB.row('SELECT name, is_staff FROM people WHERE id=?', [id]);
     if (!p) return;
-    const ok = await UI.confirmModal('Delete Person', `Are you sure you want to remove "${esc(p.name)}"? This unlinks them from projects and milestones, and removes them from meeting attendee/staff records.` +
-      (p.is_staff ? ' Saved bookings they were billable staff on keep their historical snapshot amounts — only the link to this person is removed.' : ''), { danger: true });
+    const refs = DB.countPersonRefs(id);
+
+    if (!refs.total) {
+      const ok = await UI.confirmModal(
+        'Delete Person',
+        `"${esc(p.name)}" isn't referenced by any project, milestone or booking, so there's no history to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      DB.run('DELETE FROM people WHERE id=?', [id]);
+      UI.toast('Person deleted');
+      refresh();
+      return;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const where = [];
+    if (refs.pi) where.push('PI on ' + plural(refs.pi, 'project'));
+    if (refs.projects) where.push('on ' + plural(refs.projects, 'project team'));
+    if (refs.milestones) where.push('owner of ' + plural(refs.milestones, 'milestone'));
+    if (refs.bookings) where.push('an attendee on ' + plural(refs.bookings, 'booking'));
+    if (refs.staffed) where.push('billable staff on ' + plural(refs.staffed, 'booking'));
+
+    const ok = await UI.confirmModal(
+      'Retire Person',
+      `"${esc(p.name)}" is ${where.join(', ')}. Those records are history and are kept exactly as they are — retiring only labels them "(Retired)" and stops them being offered for new work. Nothing is deleted, and you can restore them at any time.`,
+      { confirmText: 'Retire' }
+    );
     if (!ok) return;
+    DB.setRetired('people', id, true);
+    UI.toast(`${p.name} retired`);
+    refresh();
+  }
 
-    // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is
-    // verified working (see CLAUDE.md's cascading-deletes section).
-    DB.run('DELETE FROM project_people WHERE person_id=?', [id]);
-    DB.run('DELETE FROM milestone_owners WHERE person_id=?', [id]);
-    // meeting_people drives meetings.attendees (a denormalized display string; meeting_staff
-    // doesn't feed it). Capture the affected meeting ids first, delete this person's join rows,
-    // THEN recompute attendees from what remains — recomputing before the delete would write the
-    // deleted name right back (see CLAUDE.md on keeping the pair in sync).
-    const affectedMeetingIds = DB.rows(
-      'SELECT DISTINCT meeting_id FROM meeting_people WHERE person_id=?', [id]
-    ).map((r) => r.meeting_id);
-    DB.run('DELETE FROM meeting_people WHERE person_id=?', [id]);
-    DB.run('DELETE FROM meeting_staff WHERE person_id=?', [id]);
-    affectedMeetingIds.forEach((mid) => {
-      const names = DB.rows(
-        'SELECT p.name FROM meeting_people mp JOIN people p ON p.id = mp.person_id WHERE mp.meeting_id=?', [mid]
-      ).map((r) => r.name).join(', ');
-      DB.run('UPDATE meetings SET attendees=? WHERE id=?', [names, mid]);
-    });
-    // projects.pi_id has no REFERENCES/foreign key clause in the schema, so a dangling reference
-    // would otherwise silently survive the person's deletion.
-    DB.run('UPDATE projects SET pi_id=NULL WHERE pi_id=?', [id]);
-
-    DB.run('DELETE FROM people WHERE id=?', [id]);
-    UI.toast('Person deleted');
+  function restorePerson(id) {
+    const p = DB.row('SELECT name FROM people WHERE id=?', [id]);
+    if (!p) return;
+    DB.setRetired('people', id, false);
+    UI.toast(`${p.name} restored`);
     refresh();
   }
 
@@ -1588,26 +1655,55 @@
     refresh();
   }
 
-  async function deleteInstrument(id) {
+  /* Same reasoning as retirePerson above: a decommissioned instrument stays on every booking and
+     milestone that actually used it, so past sessions and their cost snapshots remain auditable. */
+  async function retireInstrument(id) {
     const i = DB.row('SELECT name FROM instruments WHERE id=?', [id]);
     if (!i) return;
-    const ok = await UI.confirmModal('Delete Instrument', `Are you sure you want to delete "${esc(i.name)}"? This unlinks it from projects and milestones. Bookings that included this instrument lose its line item — their saved totals keep the historical snapshot amounts.`, { danger: true });
-    if (!ok) return;
+    const refs = DB.countInstrumentRefs(id);
 
-    // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is
-    // verified working (see CLAUDE.md's cascading-deletes section).
-    DB.run('DELETE FROM project_instruments WHERE instrument_id=?', [id]);
-    DB.run('DELETE FROM milestone_instruments WHERE instrument_id=?', [id]);
-    DB.run('DELETE FROM meeting_instruments WHERE instrument_id=?', [id]);
-    DB.run('DELETE FROM instruments WHERE id=?', [id]);
-    UI.toast('Instrument deleted');
+    if (!refs.total) {
+      const ok = await UI.confirmModal(
+        'Delete Instrument',
+        `"${esc(i.name)}" isn't assigned to any project, milestone or booking, so there's no history to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      DB.run('DELETE FROM instruments WHERE id=?', [id]);
+      UI.toast('Instrument deleted');
+      refresh();
+      return;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const where = [];
+    if (refs.projects) where.push('assigned to ' + plural(refs.projects, 'project'));
+    if (refs.milestones) where.push('used by ' + plural(refs.milestones, 'milestone'));
+    if (refs.bookings) where.push('booked on ' + plural(refs.bookings, 'booking'));
+
+    const ok = await UI.confirmModal(
+      'Retire Instrument',
+      `"${esc(i.name)}" is ${where.join(', ')}. Those records are history and are kept exactly as they are, billing line items included — retiring only labels it "(Retired)" and stops it being offered for new bookings. Nothing is deleted, and you can restore it at any time.`,
+      { confirmText: 'Retire' }
+    );
+    if (!ok) return;
+    DB.setRetired('instruments', id, true);
+    UI.toast(`${i.name} retired`);
+    refresh();
+  }
+
+  function restoreInstrument(id) {
+    const i = DB.row('SELECT name FROM instruments WHERE id=?', [id]);
+    if (!i) return;
+    DB.setRetired('instruments', id, false);
+    UI.toast(`${i.name} restored`);
     refresh();
   }
 
   /* ---------------- Collaborators Linking ---------------- */
   function addProjectPerson() {
     const assigned = DB.rows('SELECT person_id FROM project_people WHERE project_id=?', [ctx.project]).map((r) => r.person_id);
-    const available = DB.rows('SELECT id, name, type, organization FROM people ORDER BY name').filter((p) => !assigned.includes(p.id));
+    const available = DB.rows('SELECT id, name, type, organization FROM people WHERE is_retired=0 ORDER BY name').filter((p) => !assigned.includes(p.id));
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('users')} Add Team Member</span></div>
@@ -1651,7 +1747,7 @@
 
   function addProjectInstrument() {
     const assigned = DB.rows('SELECT instrument_id FROM project_instruments WHERE project_id=?', [ctx.project]).map((r) => r.instrument_id);
-    const available = DB.rows('SELECT id, name, kind, status FROM instruments ORDER BY name').filter((i) => !assigned.includes(i.id));
+    const available = DB.rows('SELECT id, name, kind, status FROM instruments WHERE is_retired=0 ORDER BY name').filter((i) => !assigned.includes(i.id));
 
     if (!available.length) {
       UI.toast('All facility instruments are already assigned.', 'warning');
@@ -1708,25 +1804,32 @@
      `meta` shows next to the dropdown option; `tip` is the hover tooltip
      (person → role, instrument → modality). */
   function bkPeopleItems() {
-    return DB.rows('SELECT id, name, type, organization, department FROM people ORDER BY name')
+    return DB.rows('SELECT id, name, type, organization, department, is_retired FROM people ORDER BY name')
       .map((r) => ({
         id: r.id,
-        name: r.name,
+        // Retired people stay in the item list so an existing booking still renders their badge
+        // (dropping it would silently rewrite who attended on the next save); `retired` keeps
+        // them out of the dropdown, so they can't be added to anything new.
+        retired: !!r.is_retired,
+        name: UI.retiredName(r.name, r.is_retired),
         org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
         meta: [r.organization, r.department].filter(Boolean).join(' · ') || r.type || '',
         tip: r.type || 'Person'
       }));
   }
   function bkInstItems() {
-    return DB.rows('SELECT id, name, kind FROM instruments ORDER BY name')
-      .map((r) => ({ id: r.id, name: r.name, meta: r.kind || '', tip: r.kind || 'Instrument' }));
+    return DB.rows('SELECT id, name, kind, is_retired FROM instruments ORDER BY name')
+      .map((r) => ({
+        id: r.id, retired: !!r.is_retired, name: UI.retiredName(r.name, r.is_retired),
+        meta: r.kind || '', tip: r.kind || 'Instrument'
+      }));
   }
   // Core Staff are the billable-by-the-hour assignees (people.is_staff=1) — a separate picker
   // from the plain "Assign People" attendee list above, which is never billed.
   function bkStaffItems() {
-    return DB.rows('SELECT id, name, rate, organization, department FROM people WHERE is_staff=1 ORDER BY name')
+    return DB.rows('SELECT id, name, rate, organization, department, is_retired FROM people WHERE is_staff=1 ORDER BY name')
       .map((r) => ({
-        id: r.id, name: r.name, rate: r.rate || 0,
+        id: r.id, retired: !!r.is_retired, name: UI.retiredName(r.name, r.is_retired), rate: r.rate || 0,
         org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
         meta: [r.organization, r.department].filter(Boolean).join(' · '), tip: 'Core Staff — ' + fmtMoney(r.rate || 0) + '/hr'
       }));
@@ -1881,7 +1984,9 @@
         return `<span class="token" data-id="${id}" data-tooltip="${esc(it.tip)}">` +
           `<button type="button" class="token-x" aria-label="Remove ${esc(it.name)}">&times;</button>${esc(it.name)}</span>`;
       }).join('');
-      let avail = items.filter((it) => !selected.has(String(it.id)));
+      // Retired people/instruments stay in `items` (so an existing badge still renders and
+      // survives the next save) but are never offered for a new assignment.
+      let avail = items.filter((it) => !selected.has(String(it.id)) && !it.retired);
       if (filterFn) avail = avail.filter(filterFn);
       sel.innerHTML = `<option value="">${esc(singleInstrumentLock ? 'Remove the instrument above to add another' : addLabel)}</option>` +
         avail.map((it) => `<option value="${it.id}">${esc(it.name)}${it.meta ? ' — ' + esc(it.meta) : ''}</option>`).join('');
@@ -2321,7 +2426,8 @@
   // other starts.
   function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds }) {
     if (!start || !end) return [];
-    const overlapSql = `m.date = ? AND m.id != ? AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
+    // is_cancelled=0: a cancelled booking has given its slot back, so it never blocks a new one.
+    const overlapSql = `m.date = ? AND m.id != ? AND m.is_cancelled = 0 AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
     const conflicts = [];
     if (instrumentIds && instrumentIds.length) {
       DB.rows(`
@@ -2471,7 +2577,9 @@
         <div class="field"><label>Next Steps / Action Items</label><input class="input" id="bke-act" value="${esc(mt.actions || '')}" /></div>
       </div></div>
       <div class="foot">
-        <button class="btn btn-danger" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('trash')} Delete</button>
+        ${mt.is_cancelled
+          ? `<button class="btn btn-secondary" data-act="booking-reinstate" data-id="${mt.id}" style="margin-right:auto">${ic('rocket')} Reinstate</button>`
+          : `<button class="btn btn-secondary" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('archive')} Cancel Booking</button>`}
         <button class="btn btn-secondary" data-act="email-attendees" data-id="${mt.id}">${ic('mail')} Email Attendees</button>
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-edit-save" data-id="${mt.id}">Save Changes</button>
@@ -2533,10 +2641,9 @@
     refresh();
   }
 
-  // Raw deletion, no confirmation — deleteBookingFromModal shows its own confirmation before
-  // calling this, and meeting-del (the dispatcher case for a booking's list-row delete icon)
-  // confirms via deleteMeeting() below. Keeping the unconfirmed version separate avoids either
-  // caller double-confirming.
+  // Raw deletion, no confirmation. Only reached from cancelBooking's empty-booking branch — a
+  // booking with no attendees, line items or cost, where there is no record worth keeping.
+  // Anything else is cancelled instead of deleted.
   function deleteMeetingRaw(id) {
     // Child rows are deleted explicitly as a defensive measure. Cascade DOES fire in the current
     // codebase (verified empirically — see CLAUDE.md's cascading-deletes section): currentBytes()
@@ -2548,14 +2655,113 @@
     DB.run('DELETE FROM meetings WHERE id=?', [id]);
   }
 
-  async function deleteMeeting(id) {
-    const mt = DB.row('SELECT title FROM meetings WHERE id=?', [id]);
-    if (!mt) return;
-    const ok = await UI.confirmModal('Delete Booking', `Delete booking "${esc(mt.title)}"? Its billing line items (instruments, core staff) are deleted too. This cannot be undone.`, { danger: true });
-    if (!ok) return;
+  // Has the session's intended start time passed? Cancelling before it means nothing was held;
+  // cancelling after it means the facility kept the slot open and the charge may still stand.
+  function bookingHasStarted(mt) {
+    if (!mt.date) return false;
+    const t = /^\d{1,2}:\d{2}$/.test(mt.start_time || '') ? mt.start_time : '00:00';
+    const dt = new Date(mt.date + 'T' + (t.length === 4 ? '0' + t : t) + ':00');
+    return !isNaN(dt.getTime()) && dt.getTime() <= Date.now();
+  }
 
-    deleteMeetingRaw(id);
-    UI.toast('Booking removed');
+  /* Three-way choice for an admin cancelling a session that has already started: keep the charge
+     (a late cancellation the facility still held time for) or waive it. Mirrors chooseDiscountScope's
+     promise-resolves-null-on-dismiss shape. */
+  function chooseCancelBilling(title, total) {
+    return new Promise((resolve) => {
+      const m = UI.openModal(`
+        <div class="head"><span class="t" style="font-weight:600">Cancel Booking</span></div>
+        <div class="body"><p class="mt-0 mb-8">"${esc(title)}" has already passed its start time, so the facility held that slot. The booking stays on the record either way — does its ${esc(fmtMoney(total))} charge still count toward Project Costs?</p></div>
+        <div class="foot">
+          <button class="btn btn-danger" data-act="cancel">Keep Booking</button>
+          <button class="btn btn-secondary" data-act="waive">Cancel &amp; Waive Charge</button>
+          <button class="btn btn-secondary" data-act="keep">Cancel &amp; Keep Charge</button>
+        </div>`, null, () => resolve(null));
+      const dim = m.closest('.modal-dim');
+      m.querySelector('[data-act="cancel"]').onclick = () => { UI.closeDim(dim); resolve(null); };
+      m.querySelector('[data-act="waive"]').onclick = () => { UI.closeDim(dim); resolve('waive'); };
+      m.querySelector('[data-act="keep"]').onclick = () => { UI.closeDim(dim); resolve('keep'); };
+    });
+  }
+
+  /* Cancelling, not deleting. A booking is an accounting record as much as a diary entry: it says
+     the facility held instrument time and staff time on a date, and what that was worth. So a
+     cancelled booking stays logged with its line items intact — it just stops blocking the
+     instrument's slot, and may or may not keep counting toward Project Costs:
+
+       - cancelled BEFORE its start time  → nothing was held, so the charge is dropped;
+       - cancelled AFTER its start time   → the slot was held, so the charge stands. Admin Mode
+         (which already gates every other billing decision in this app) offers the choice to
+         waive it instead.
+
+     A booking with no line items, no attendees and no cost is an empty note, and can be deleted. */
+  async function cancelBooking(id) {
+    const mt = DB.row('SELECT id, title, date, start_time, total_cost, is_cancelled FROM meetings WHERE id=?', [id]);
+    if (!mt) return;
+    if (mt.is_cancelled) { reinstateBooking(id); return; }
+
+    const refs = DB.countBookingRefs(id);
+    if (!refs.any) {
+      const ok = await UI.confirmModal(
+        'Delete Booking',
+        `"${esc(mt.title)}" has no attendees, instruments, staff or cost recorded against it, so there's no record to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      deleteMeetingRaw(id);
+      UI.toast('Booking deleted');
+      refresh();
+      return;
+    }
+
+    const started = bookingHasStarted(mt);
+    const total = mt.total_cost || 0;
+    const adminOn = UI.storage.getItem('admin-mode') === '1';
+    let retained;
+
+    if (started && adminOn && total > 0) {
+      const choice = await chooseCancelBilling(mt.title, total);
+      if (!choice) return;
+      retained = choice === 'keep';
+    } else {
+      const line = started
+        ? (total > 0
+          ? `Its start time has passed, so the slot was held and its ${esc(fmtMoney(total))} charge still counts toward Project Costs.${adminOn ? '' : ' Only Admin Mode can waive it.'}`
+          : 'Its start time has passed, so it stays on the record as a late cancellation.')
+        : (total > 0
+          ? `It hasn't started yet, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`
+          : "It hasn't started yet, so nothing is charged.");
+      const ok = await UI.confirmModal(
+        'Cancel Booking',
+        `Cancel "${esc(mt.title)}"? ${line} The booking stays logged with its line items, and its instrument and staff time is freed up for other bookings.`,
+        { confirmText: 'Cancel Booking', cancelText: 'Keep Booking' }
+      );
+      if (!ok) return;
+      retained = started && total > 0;
+    }
+
+    DB.setBookingCancelled(id, true, retained);
+    UI.toast(retained ? 'Booking cancelled — charge kept' : 'Booking cancelled');
+    refresh();
+  }
+
+  /* Reinstating puts the booking back in the schedule, so it starts blocking its instrument and
+     staff slots again — which means it has to clear the same conflict check a new booking does. */
+  async function reinstateBooking(id) {
+    const mt = DB.row('SELECT * FROM meetings WHERE id=?', [id]);
+    if (!mt) return;
+    const instIds = DB.rows('SELECT instrument_id FROM meeting_instruments WHERE meeting_id=?', [id]).map((r) => r.instrument_id);
+    const staffIds = DB.rows('SELECT person_id FROM meeting_staff WHERE meeting_id=?', [id]).map((r) => r.person_id);
+    const conflicts = findBookingConflicts({
+      date: mt.date, start: mt.start_time, end: mt.end_time, excludeId: id,
+      instrumentIds: instIds, staffIds
+    });
+    if (conflicts.length) {
+      UI.toast('Cannot reinstate — ' + conflicts.join('; '), 'error');
+      return;
+    }
+    DB.setBookingCancelled(id, false, false);
+    UI.toast('Booking reinstated');
     refresh();
   }
 
@@ -2639,13 +2845,13 @@
   // edit modal — unlike a project-attached one, it has no list row with its own delete icon —
   // so the edit modal needs its own delete entry point, confirmed and closing itself on delete.
   async function deleteBookingFromModal(id) {
-    const ok = await UI.confirmModal('Delete Booking', 'Are you sure you want to delete this booking? Its billing line items (instruments, core staff) are deleted too. This cannot be undone.', { danger: true });
-    if (!ok) return;
-    deleteMeetingRaw(id);
-    UI.toast('Booking removed');
-    refresh();
-    const dim = document.querySelector('.modal-dim');
-    if (dim) UI.closeDim(dim);
+    await cancelBooking(id);
+    // cancelBooking refreshes the page underneath; close the edit modal if it acted.
+    const mt = DB.row('SELECT is_cancelled FROM meetings WHERE id=?', [id]);
+    if (!mt || mt.is_cancelled) {
+      const dim = document.querySelector('.modal-dim');
+      if (dim) UI.closeDim(dim);
+    }
   }
 
   /* ---------------- Custom Key-Value Fields ---------------- */
