@@ -891,6 +891,7 @@
       case 'toggle-admin-mode': return toggleAdminMode();
       case 'save-billing-rates': return saveBillingRates();
       case 'save-group-discounts': return saveGroupDiscounts();
+      case 'rename-org': return renameOrgFromSettings();
       case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
       case 'disable-auto-backup-folder': return disableAutoBackupFolder();
       case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
@@ -2176,6 +2177,9 @@
   // Group/Lab is mandatory, not optional — every booking either gets it typed in directly or
   // auto-filled from its project's PI (applyProjectDrivenGroup) — so with no group picked yet the
   // researcher dropdown is locked (not-allowed cursor + "Choose Group/Lab First" hint).
+  // `ids.allLabs`, when given, is the "Show all labs" checkbox that escapes the Assign People
+  // filter/lock for THIS booking only; the Group select itself is untouched either way — it
+  // still drives the discount exactly as today.
   //
   // The Assign Facility Staff picker is deliberately NOT filtered or locked by the group. The
   // group on a booking says which lab is being billed, and facility staff serve every lab from
@@ -2185,11 +2189,13 @@
   // forth to assign a user and then a staff member. Book under the group the *user* belongs to
   // and add facility staff independently; membership of that picker is decided only by the
   // Facility Staff flag on the person's own record (see bkStaffItems).
-  function filterOwnerPickerByGroup(m, org) {
+  function filterOwnerPickerByGroup(m, org, ids) {
+    const allLabsEl = ids && ids.allLabs ? m.querySelector('#' + ids.allLabs) : null;
+    const allLabs = !!(allLabsEl && allLabsEl.checked);
     const wrap = m.querySelector('.token-picker[data-kind="owner"]');
     if (!wrap) return;
-    if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
-    if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
+    if (wrap._setFilter) wrap._setFilter((org && !allLabs) ? (it) => it.org === org : null);
+    if (wrap._setLocked) wrap._setLocked(!org && !allLabs, 'Choose Group/Lab First — or tick Show all labs');
   }
 
   // The "offer" path: a lab is chosen (by hand, or auto-filled from a project's PI) and its
@@ -2199,7 +2205,7 @@
   function offerGroupDiscount(m, ids, org) {
     const groupEl = m.querySelector('#' + ids.group);
     if (groupEl && groupEl.value !== (org || '')) groupEl.value = org || '';
-    filterOwnerPickerByGroup(m, org);
+    filterOwnerPickerByGroup(m, org, ids);
     m._bom.groupOrg = org || '';
     m._bom.groupPct = DB.getGroupDiscount(org);
     recomputeBomTotals(m, ids);
@@ -2212,7 +2218,7 @@
   function restoreGroupState(m, ids, org, pct) {
     const groupEl = m.querySelector('#' + ids.group);
     if (groupEl) groupEl.value = org || '';
-    filterOwnerPickerByGroup(m, org);
+    filterOwnerPickerByGroup(m, org, ids);
     m._bom.groupOrg = org || '';
     m._bom.groupPct = pct || 0;
     recomputeBomTotals(m, ids);
@@ -2404,6 +2410,8 @@
     if (projectEl) projectEl.addEventListener('change', () => applyProjectDrivenGroup(m, ids));
     const groupEl = m.querySelector('#' + ids.group);
     if (groupEl) groupEl.addEventListener('change', () => offerGroupDiscount(m, ids, groupEl.value));
+    const allLabsEl = ids.allLabs ? m.querySelector('#' + ids.allLabs) : null;
+    if (allLabsEl) allLabsEl.addEventListener('change', () => filterOwnerPickerByGroup(m, m._bom.groupOrg, ids));
     const discEl = m.querySelector('#' + ids.prefix + '-discount');
     if (discEl) discEl.addEventListener('input', () => { m._bom.manualPct = Number(discEl.value) || 0; recalc(); });
 
@@ -2504,6 +2512,9 @@
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
+        <label class="row small mb-8" style="gap:6px;align-items:center;cursor:pointer" data-tooltip="Lists people from every lab, not just the one chosen above. Doesn't change this booking's billing group — Group/Lab still decides the discount.">
+          <input type="checkbox" id="bk-all-labs" /> Show all labs
+        </label>
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
         ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
@@ -2516,7 +2527,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group' } }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
   }
 
   function bookingSave() {
@@ -2598,6 +2609,9 @@
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
+        <label class="row small mb-8" style="gap:6px;align-items:center;cursor:pointer" data-tooltip="Lists people from every lab, not just the one chosen above. Doesn't change this booking's billing group — Group/Lab still decides the discount.">
+          <input type="checkbox" id="bke-all-labs" /> Show all labs
+        </label>
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
         ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
@@ -2620,7 +2634,7 @@
         instrumentDetails: currentInstDetails, staffDetails: currentStaffDetails,
         discountPct: mt.discount_pct || 0, note: mt.note,
         groupOrg: mt.group_org || '', groupPct: mt.group_discount_pct || 0,
-        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group' }
+        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group', allLabs: 'bke-all-labs' }
       }));
   }
 
@@ -3079,6 +3093,62 @@
       DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0);
     });
     UI.toast('Group discounts saved');
+    refresh();
+  }
+
+  // Rename/merge a lab name everywhere it appears (people.organization, meetings.group_org, and
+  // its group_discounts row) — a red-Cancel confirm names exactly what will change before it
+  // touches anything, since the target name is free-text and could collide with an existing lab
+  // (a merge, not a plain rename).
+  function confirmRenameOrg(oldName, newName, refs, targetExists) {
+    return new Promise((resolve) => {
+      const parts = [];
+      parts.push(`<strong>${refs.peopleCount}</strong> ${refs.peopleCount === 1 ? 'person' : 'people'}`);
+      parts.push(`<strong>${refs.bookingsCount}</strong> booking${refs.bookingsCount === 1 ? '' : 's'}' saved group label`);
+      if (refs.hasDiscount) {
+        parts.push(targetExists
+          ? `its discount row will be dropped — <strong>${esc(newName)}</strong> already has its own standing discount, which is kept`
+          : `its standing discount row moves to <strong>${esc(newName)}</strong>`);
+      }
+      const m = UI.openModal(`
+        <div class="head"><span class="t" style="font-weight:600">${targetExists ? 'Merge' : 'Rename'} Lab / Group?</span></div>
+        <div class="body">
+          <p class="mt-0 mb-8">${targetExists
+            ? `<strong>${esc(newName)}</strong> already exists — every reference to <strong>${esc(oldName)}</strong> will be merged into it. This changes:`
+            : `Rename <strong>${esc(oldName)}</strong> to <strong>${esc(newName)}</strong> everywhere. This changes:`}</p>
+          <ul class="mt-0 mb-8">${parts.map((p) => `<li>${p}</li>`).join('')}</ul>
+          <p class="faint small mt-0 mb-0">Group discount percentages already saved on past bookings are historical billing records and are not recalculated.</p>
+        </div>
+        <div class="foot">
+          <button class="btn btn-danger" data-act="cancel">Cancel</button>
+          <button class="btn btn-secondary" data-act="rename">${targetExists ? 'Merge' : 'Rename'}</button>
+        </div>`, null, () => resolve(false));
+      const dim = m.closest('.modal-dim');
+      m.querySelector('[data-act="cancel"]').onclick = () => { UI.closeDim(dim); resolve(false); };
+      m.querySelector('[data-act="rename"]').onclick = () => { UI.closeDim(dim); resolve(true); };
+    });
+  }
+
+  async function renameOrgFromSettings() {
+    const fromEl = document.getElementById('rename-org-from');
+    const toEl = document.getElementById('rename-org-to');
+    if (!fromEl || !toEl) return;
+    const oldName = fromEl.value;
+    const newName = toEl.value.trim();
+    if (!newName) { UI.toast('Enter a new name', 'error'); return; }
+    if (newName === oldName) { UI.toast('That’s already the current name', 'error'); return; }
+
+    const refs = DB.countOrgRefs(oldName);
+    const targetExists = DB.listAllOrgNames().some((o) => o === newName);
+    const ok = await confirmRenameOrg(oldName, newName, refs, targetExists);
+    if (!ok) return;
+
+    const result = DB.renameOrganization(oldName, newName);
+    if (!result) { UI.toast('Rename failed', 'error'); return; }
+    const bits = [`${result.peopleCount} ${result.peopleCount === 1 ? 'person' : 'people'}`, `${result.bookingsCount} booking${result.bookingsCount === 1 ? '' : 's'}`];
+    if (result.merged) bits.push('discount merged');
+    else if (result.discountMoved) bits.push('discount moved');
+    UI.toast(`Renamed ${oldName} → ${newName}: ${bits.join(', ')}`);
     refresh();
   }
 

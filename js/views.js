@@ -800,6 +800,7 @@
     const folderStatus = global.App.autoBackupFolderStatus;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
     const orgs = global.DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization").map((r) => r.organization);
+    const renameOrgs = global.DB.listAllOrgNames(); // includes orgs that only show up in group_discounts/meetings.group_org
 
     return `
     <div class="card mb-16">
@@ -926,6 +927,23 @@
             <span class="faint small">%</span>
           </div>`).join('') : '<div class="faint small">No labs/organizations on record yet — add people with a Lab / Group / Company to set discounts for them.</div>'}
         ${orgs.length ? `<button class="btn btn-primary btn-sm mt-8" data-act="save-group-discounts">${ic('check')} Save Group Discounts</button>` : ''}
+        <div class="divider"></div>
+        <div style="font-weight:600" class="mb-8">Rename / Merge Lab</div>
+        <div class="faint small mb-8">Labs are free-text names, so a typo forks a duplicate with its own discount row and Reports line. Rename one everywhere at once — or merge it into an existing name if that name is already in use.</div>
+        ${renameOrgs.length ? `
+        <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="margin:0">
+            <label>Existing name</label>
+            <select class="input" id="rename-org-from" style="min-width:200px">
+              ${renameOrgs.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <label>New name</label>
+            <input class="input" id="rename-org-to" placeholder="e.g. Bio-Photonics Lab" style="min-width:200px" />
+          </div>
+          <button class="btn btn-primary btn-sm" data-act="rename-org">${ic('edit')} Rename</button>
+        </div>` : '<div class="faint small">No labs/organizations on record yet.</div>'}
         ` : ''}
       </div>
     </div>
