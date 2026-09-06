@@ -11,8 +11,11 @@
   --shadow:0 1px 3px rgba(17,24,39,.06), 0 8px 24px rgba(17,24,39,.06);
   --radius:14px;
 }
+/* Dark tokens apply under the OS preference (unless overridden to light), AND under an
+   explicit data-theme="dark" (unless overridden to light) — so the toggle in the sidebar can
+   force either theme regardless of what the OS is set to. */
 @media (prefers-color-scheme: dark){
-  :root{
+  :root:not([data-theme="light"]){
     --bg:#0b0f17; --surface:#121826; --surface-2:#0f1420; --border:#222b3b;
     --text:#e9edf5; --muted:#a3adbf; --faint:#71809a;
     --primary:#818cf8; --primary-soft:#1e1b4b;
@@ -21,6 +24,15 @@
     --violet:#a78bfa; --violet-soft:#2a2150;
     --shadow:0 1px 3px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
   }
+}
+:root[data-theme="dark"]{
+  --bg:#0b0f17; --surface:#121826; --surface-2:#0f1420; --border:#222b3b;
+  --text:#e9edf5; --muted:#a3adbf; --faint:#71809a;
+  --primary:#818cf8; --primary-soft:#1e1b4b;
+  --mint:#34d399; --mint-soft:#04302c;
+  --amber:#fbbf24; --amber-soft:#3a2a08;
+  --violet:#a78bfa; --violet-soft:#2a2150;
+  --shadow:0 1px 3px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
 }
 
 *{box-sizing:border-box}
@@ -62,6 +74,15 @@ kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:
 .sidebar .manual-sub{
   display:block; font-size:11.5px; color:var(--faint); margin:0 0 16px; padding:0 6px;
 }
+.theme-btn{
+  display:flex; align-items:center; justify-content:center; gap:7px; width:100%;
+  font:inherit; font-size:12.5px; font-weight:600; color:var(--text);
+  background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+  padding:7px 10px; cursor:pointer; margin:0 0 16px;
+}
+.theme-btn:hover{border-color:var(--primary); color:var(--primary)}
+.theme-btn .ic{font-size:14px; line-height:1}
+
 .search-box{position:relative; margin-bottom:18px}
 .search-box input[type="search"]{
   width:100%; font:inherit; font-size:13.5px; padding:9px 12px; border-radius:10px;

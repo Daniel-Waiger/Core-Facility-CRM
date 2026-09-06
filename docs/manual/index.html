@@ -7,6 +7,15 @@
 <meta name="description" content="The complete user manual for Core Facility Tracker — plain-English guides for every screen, written for first-time users.">
 <link rel="icon" type="image/svg+xml" href="../../favicon.svg">
 <link rel="stylesheet" href="manual.css">
+<script id="theme-fouc-guard">
+  (function () {
+    try {
+      var t = localStorage.getItem('theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body data-chapter="index.html">
 <div class="layout">
