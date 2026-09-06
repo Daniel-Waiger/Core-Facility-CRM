@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings, Admin Mode &amp; Discounts — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="settings-admin.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><!-- rendered by manual.js --></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Settings, Admin Mode &amp; Discounts</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 14</p>
+      <h1>Settings, Admin Mode &amp; Discounts</h1>
+      <p class="lede">Set your preferences and billing rates, unlock the billing controls with Admin Mode, and give labs their standing discounts.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Find and change the general preferences</li>
+        <li>Set your facility's overhead, tax, and currency — and know when a change takes effect</li>
+        <li>Turn Admin Mode on and off, and understand exactly what it does and doesn't protect</li>
+        <li>Set a standing discount percentage for a lab or group</li>
+        <li>Read how a booking remembers its own discount, and revoke or apply one</li>
+        <li>Find the About panel when you need your version number</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="preferences">Preferences</h2>
+      <p>Settings opens to a small set of general preferences that control how the app greets you.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> from the sidebar.</li>
+        <li>Find the option to show the welcome screen at startup, and turn it on or off.</li>
+      </ol>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Turning the welcome screen off doesn't remove your access to sample data or the guided tour — both are still one click away in Settings, under "Sample Data &amp; Walkthrough." See <a href="getting-started.html#sample-data">Loading sample data</a> and <a href="getting-started.html#guided-tour">The guided tour</a>.</p></div>
+
+      <figure class="shot">
+        <img src="../screenshots/14-settings.png" alt="Settings screen with its sections for preferences, backups, billing rates and admin mode" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/14-settings.png</div>
+        <figcaption>The Settings screen: everything in this chapter lives on this one page, in its labelled sections.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="billing-rates">Billing rates</h2>
+      <p>These four numbers control how every booking's cost is calculated across the whole facility.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find <strong>Billing Rates</strong>.</li>
+        <li>Set <strong>Internal Overhead %</strong> — the overhead percentage applied to bookings from your own facility's projects.</li>
+        <li>Set <strong>External Overhead %</strong> — the overhead percentage for outside users.</li>
+        <li>Set <strong>Tax %</strong> — applied on top of the discounted amount plus overhead.</li>
+        <li>Set your <strong>Currency symbol</strong> so totals display the way your facility expects.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/28-settings-billing-rates.png" alt="Settings billing rates fields for internal overhead, external overhead, tax, and currency" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/28-settings-billing-rates.png</div>
+        <figcaption>The Billing Rates section: Internal Overhead %, External Overhead %, Tax %, and Currency symbol.</figcaption>
+      </figure>
+
+      <div class="callout math"><p><strong>🧮 The math.</strong> The two overhead percentages aren't combined in a fancy way — they're simply added together. If Internal Overhead is 10% and External Overhead is 5%, a booking that counts as both (which shouldn't normally happen, but if your facility only uses one at a time, only that one applies) would use 15% overhead. In practice you're really choosing one of the two rates per booking's situation, and the app adds whichever applies. See the full worked example in <a href="costs-math.html#overhead">How Costs Are Calculated</a>.</p></div>
+
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Changing a rate here only affects <em>new</em> bookings from that moment on. Every booking that's already been saved keeps the totals it was calculated with when it was created — changing today's tax rate will never quietly rewrite last month's invoices. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> for why, and <a href="costs-math.html#worked-example">the worked example</a> for how the numbers actually combine.</p></div>
+
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, note the total cost on one existing booking. Then go change the Tax % in Settings and reopen that same booking. Its total hasn't moved — only a brand-new booking would use the new tax rate.</p></div>
+    </section>
+
+    <section>
+      <h2 id="admin-mode">Admin Mode</h2>
+      <p>Admin Mode is a single toggle that unlocks the billing-sensitive controls in the app: group discounts, per-booking manual discounts, revoking or applying a discount after the fact, and the option to waive a charge when cancelling a booking that already started.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find the <strong>Admin Mode</strong> toggle.</li>
+        <li>Turn it on to reveal the Group Discounts editor and the extra billing controls elsewhere in the app.</li>
+        <li>Turn it off again once you're done — the controls disappear, but nothing you set with it on is undone.</li>
+      </ol>
+
+      <div class="callout warn"><p><strong>⚠️ Careful. This is not a lock.</strong> Admin Mode has no password, no login, and no per-person accounts behind it — there's no such thing as accounts in this app at all. Anyone using this browser on this device can flip the toggle on themselves in a few seconds. Treat it as a "billing controls, show/hide" switch that keeps day-to-day screens simple, not as security that keeps anyone out.</p></div>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> The whole app is <a href="big-ideas.html#your-data-lives-here">a single database sitting in one browser</a> with no server checking who's allowed to do what. Building a real permission system on top of that would be misleading — it would look like security without providing any. A plain toggle is honest about what it actually is: convenience, not protection. See <a href="big-ideas.html#admin-mode">Admin Mode isn't security</a> for more.</p></div>
+    </section>
+
+    <section>
+      <h2 id="group-discounts">Group discounts</h2>
+      <p>A group discount is a standing percentage off time-billed instrument costs for every booking made under a particular Lab/Group — set once here, instead of typing a discount into every booking by hand.</p>
+      <ol class="steps">
+        <li>Turn on <strong>Admin Mode</strong> (above) if it isn't already on.</li>
+        <li>Open <strong>Settings</strong> and find the <strong>Group Discounts</strong> editor.</li>
+        <li>You'll see one row per Lab/Group that has at least one person on record — labs with nobody in them yet don't get a row, since there's nothing to attach a discount to.</li>
+        <li>Type a percentage into a lab's row to set its standing discount.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/29-settings-admin-group-discounts.png" alt="Group Discounts editor listing labs with an editable percentage field for each" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/29-settings-admin-group-discounts.png</div>
+        <figcaption>The Group Discounts editor: one percentage field per lab that already has people on record.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A discount is meaningless attached to a lab nobody belongs to — there'd be no booking that could ever use it. Building the list from labs that actually have people keeps the editor short and relevant instead of an endless list of hypothetical group names. It also means a lab name typo creates its own separate row here too — see <a href="rough-edges.html#lab-typos">Lab name typos create duplicate labs</a>.</p></div>
+
+      <p>Once a lab has a discount set, every new booking made under that Lab/Group picks it up automatically — you don't set it per booking.</p>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way — the booking remembers its own percentage.</strong> When a booking is saved, whatever discount percentage applied at that moment is frozen into it, the same way its total cost is (see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a>). If you later change a lab's standing discount from 5% to 10%, every booking already saved keeps showing the 5% it actually got — only new bookings see the new 10%. This is exactly why a booking's discount can be individually revoked or re-applied without touching the lab's overall setting.</p></div>
+
+      <p>An admin can override a single booking's discount directly on that booking, using <strong>Revoke</strong> or <strong>Apply</strong>:</p>
+      <ol class="steps">
+        <li>Open the booking (from the Calendar or a project's page).</li>
+        <li>With Admin Mode on, find the discount control and choose <strong>Revoke</strong> (to remove a discount this booking currently has) or <strong>Apply</strong> (to add one it doesn't).</li>
+        <li>You'll be asked to choose a scope: <strong>Just this booking</strong>, which changes only the one record you're looking at, or <strong>Future too</strong>, which also updates the lab's standing percentage so every booking made under that lab from now on uses the new rate.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/34-booking-group-discount-revoke.png" alt="Booking editor showing the applied group discount with Revoke and Apply controls" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/34-booking-group-discount-revoke.png</div>
+        <figcaption>A booking's discount control: Revoke or Apply, with a scope choice between just this booking and future bookings too.</figcaption>
+      </figure>
+
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Remember the discount only ever affects the time-billed <em>instrument</em> money on a booking — never staff time, and never per-unit or per-weight charges. See the full breakdown in <a href="costs-math.html#discounts">How Costs Are Calculated</a>.</p></div>
+    </section>
+
+    <section>
+      <h2 id="about">About</h2>
+      <p>The About panel tells you exactly which version of the tracker you're running, which is useful when reporting a problem or checking whether you're on the newest release.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and scroll to <strong>About</strong>.</li>
+        <li>Note the version number and the underlying engines listed there if you ever need to describe your setup to someone helping you troubleshoot.</li>
+      </ol>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>A colleague asks if turning on Admin Mode is like logging in as an administrator. Is that accurate?</summary><p>No. Admin Mode is a plain on/off toggle with no password or account behind it — anyone at that browser can turn it on themselves. It only shows or hides billing controls; it isn't security.</p></details>
+      <details class="quiz-q"><summary>You set the Bio-Photonics Lab's discount to 10% today. Does a booking from that lab saved last month, when the discount was 5%, change to 10%?</summary><p>No. A booking freezes the discount percentage it was saved with. Only new bookings made after the change pick up the new 10% — unless an admin explicitly revokes or re-applies a discount on that specific old booking.</p></details>
+      <details class="quiz-q"><summary>Where would you look to find out which version of the app you're running?</summary><p>Settings → About.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

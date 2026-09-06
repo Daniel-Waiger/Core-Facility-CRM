@@ -6,6 +6,10 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 ---
 
+📖 **New to the app?** Read the [User Manual](https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/) — a searchable, illustrated guide to every feature.
+
+---
+
 ## Key Features
 
 - **Zero-Install & Zero-Server:** Runs on PC, Mac, Linux, Android, and iPad in modern web browsers (Chrome, Edge, Firefox, Safari). No Node.js, Python, or account required. On desktop you can open `index.html` directly; **on tablets you need to open it from a web address for saving to work** — see [Running on Tablets](#running-on-tablets-android--ipad).
@@ -215,6 +219,7 @@ Core-Facility-CRM/
 ├── docs/
 │   ├── index.html        # Hosted release-notes page (renders CHANGELOG.md live)
 │   ├── gallery.html      # Screenshot carousel (lists docs/screenshots/ live from GitHub)
+│   ├── manual/           # Hosted user manual (searchable, illustrated)
 │   └── screenshots/      # README screenshots (not required to run the app)
 ├── LICENSE               # MIT License
 └── README.md             # Documentation

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Costs Are Calculated — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="costs-math.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>How Costs Are Calculated</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 9</p>
+      <h1>How Costs Are Calculated</h1>
+      <p class="lede">One booking, seven numbers, and the exact order the app adds them up in — so you can check any invoice by hand.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Turn a booking's start and end time into billable hours.</li>
+        <li>Work out an instrument's charge, whether it bills by the hour or by a typed-in amount.</li>
+        <li>Explain why 10 minutes of facility staff time can cost a full hour.</li>
+        <li>Apply a discount to the right part of the bill, and only the right part.</li>
+        <li>Follow overhead and tax through to the final total, in the order the app applies them.</li>
+        <li>Read every line of the app's own Cost &amp; Time Breakdown panel and know where each number came from.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="worked-example">The running example</h2>
+      <p>Every number on this page comes from one imagined booking. Keep it in mind as you read — each section adds one more piece to it.</p>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> A researcher books the confocal microscope from <strong>9:00 to 11:00</strong> (2 hours), and asks a facility staff member to help set it up for the first <strong>40 minutes</strong> of that window. The confocal costs <strong>100/hour</strong>. The helper's rate is <strong>95/hour</strong>. The researcher's lab has a standing <strong>5% group discount</strong>. The facility's overhead is <strong>10% internal + 5% external</strong>, and tax is <strong>17%</strong>.</p>
+      </div>
+      <p>By the end of this chapter you'll see this booking come to a total of <strong>383.47</strong> — and know exactly why.</p>
+    </section>
+
+    <section>
+      <h2 id="booking-hours">Step 1 — Booking hours</h2>
+      <p>The app starts every calculation with one plain fact: how long was the instrument reserved for? That's simply the end time minus the start time, turned into hours.</p>
+      <ol class="steps">
+        <li>9:00 to 11:00 is 2 hours exactly (11:00 − 9:00 = 2:00 → 2.0 hours).</li>
+        <li>9:00 to 11:30 would be 2.5 hours (2 hours 30 minutes → 2.5).</li>
+        <li>If either time is left blank, or the end time is not after the start time, booking hours count as <strong>0</strong> — nothing is billed for time.</li>
+      </ol>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Booking hours = (end time − start time), expressed as a decimal number of hours. Our example: 11:00 − 9:00 = <strong>2.0 hours</strong>.</p></div>
+      <p>These are plain clock times on a single calendar day — see <a href="big-ideas.html#local-dates">Local dates</a> for why the app never has to worry about time zones here.</p>
+    </section>
+
+    <section>
+      <h2 id="instrument-lines">Step 2 — Instrument lines</h2>
+      <p>Every instrument attached to a booking (see <a href="instruments.html#cost-billed-per">Cost &amp; billed per</a>) is set up to bill one of two ways:</p>
+      <ol class="steps">
+        <li><strong>Billed per Time</strong> — the instrument's cost-per-hour is multiplied by the booking hours from Step 1.</li>
+        <li><strong>Billed per Unit / Weight / Other</strong> — the instrument's cost is multiplied by a separate amount you type in on the booking itself (samples run, grams of material, and so on) — booking hours don't come into it at all.</li>
+      </ol>
+      <p>Our confocal is billed per Time, at 100/hour, for a 2-hour booking:</p>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Instrument line = cost-per-hour × booking hours = 100 × 2.0 = <strong>200</strong>.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Not every instrument's real cost tracks time — a mass spectrometer run might be billed per sample, a 3D printer per gram of filament. Letting each instrument choose "billed per" means the booking form asks for exactly the number that instrument actually needs, instead of forcing everything through an hourly rate that wouldn't make sense for it.</p></div>
+      <p>A booking can carry several instruments; each gets its own line the same way, and a multi-instrument booking occupies <em>each</em> instrument for the full booking window (this matters again in <a href="reports.html#instrument-card">Reports</a>).</p>
+    </section>
+
+    <section>
+      <h2 id="staff-hours">Step 3 — Staff lines: the one-hour minimum</h2>
+      <p>Facility staff (see <a href="big-ideas.html#facility-staff-vs-attendees">Facility Staff vs. attendees</a>) bill differently from instruments. Each staff member assigned to a booking can have their own start and end time inside the booking — helpful when someone only needs to be there for part of it. Leave their times blank and they're billed for the whole booking window instead.</p>
+      <p>Our helper worked the first 40 minutes of the 2-hour booking (9:00–9:40), at 95/hour:</p>
+      <ol class="steps">
+        <li><strong>Raw hours</strong>: 9:40 − 9:00 = 40 minutes = 0.667 hours.</li>
+        <li><strong>Round up to a whole hour</strong>: anything above zero is rounded UP to the next whole hour — 0.667 rounds up to 1.</li>
+        <li><strong>Apply the one-hour floor</strong>: even a booking of a few minutes bills at least 1 hour. (For our 0.667, the round-up already lands on 1, so the floor doesn't change anything further — but see the box below for a case where it does.)</li>
+        <li><strong>Multiply by rate</strong>: 1 hour × 95/hour = <strong>95</strong>.</li>
+      </ol>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Billed hours = the larger of (1 hour) and (raw hours rounded up to the next whole hour). Staff line = rate × billed hours. Our example: 0.667 raw hours → 1 billed hour → 95/hour × 1 = <strong>95</strong>.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip — the classic example.</strong> A staff member helps for just <strong>10 minutes</strong>. Raw hours = 0.167. Rounded up, that's still 1 hour — so 10 minutes of help bills as a full hour. Now say someone helps for <strong>1 hour and 5 minutes</strong> (1.083 raw hours): rounding up takes that to <strong>2 billed hours</strong>, not 1 — crossing any part of the hour boundary rounds up to the next one.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> When a staff member is booked to help, the facility reserves that person's time in advance — they can't pick up other work in the gaps of an oddly-shaped booking. Billing in whole hours, rounded up, reflects that the time was <em>reserved</em>, not just used down to the minute. It's the same reason a parking garage charges a flat rate for the first hour even if you're there 12 minutes.</p></div>
+      <p>A booking can have several staff members, each billed independently by their own window (or the whole booking, if left blank). Every staff line adds to the total the same way.</p>
+    </section>
+
+    <section>
+      <h2 id="subtotal">Step 4 — The subtotal</h2>
+      <p>Add every instrument line and every staff line together:</p>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Subtotal = instrument line(s) + staff line(s) = 200 + 95 = <strong>295</strong>.</p></div>
+    </section>
+
+    <section>
+      <h2 id="discounts">Step 5 — Discounts (time-billed instrument money only)</h2>
+      <p>A booking's discount percentage is two things added together, then capped:</p>
+      <ol class="steps">
+        <li>A standing <strong>group/lab discount</strong> set once in Settings for that lab (see <a href="settings-admin.html#group-discounts">Group Discounts</a>).</li>
+        <li>An optional <strong>manual discount</strong> an admin can add to one specific booking.</li>
+        <li>The two are added together, but the combined percentage is capped at <strong>100%</strong> — a discount can never make a line negative.</li>
+      </ol>
+      <p>Our researcher's lab has a standing 5% discount and no manual override, so the combined rate is 5%.</p>
+      <div class="callout warn"><p><strong>⚠️ Careful — this is the part people get wrong.</strong> The discount is <em>never</em> applied to the whole subtotal. It applies <strong>only to the part of the bill that came from a time-billed instrument line</strong> (the 200 confocal charge in our example) — never to facility staff time, and never to per-unit or per-weight instrument charges. Our staff line of 95 is completely unaffected by the discount.</p></div>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Discount amount = time-billed instrument money × discount% = 200 × 5% = <strong>10</strong>. Amount after discount = subtotal − discount amount = 295 − 10 = <strong>285</strong>.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A lab discount is meant to be a break on facility <em>equipment</em> pricing — a relationship the facility has negotiated for instrument time. Facility staff time reflects a real person's paid hours regardless of whose lab booked them, and per-unit charges (a consumable, a sample fee) are pass-through costs the facility doesn't mark up — neither is the discount's to give away.</p></div>
+      <p>A booking remembers the exact discount percentage it was saved with, so changing or revoking a lab's discount later never rewrites an old booking's total (see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> below, and <a href="settings-admin.html#billing-rates">Billing Rates</a>).</p>
+    </section>
+
+    <section>
+      <h2 id="overhead">Step 6 — Overhead (applied after the discount)</h2>
+      <p>The facility adds overhead on top of whatever is left after the discount. Overhead is two percentages, set once in Settings, simply added together:</p>
+      <ol class="steps">
+        <li><strong>Internal overhead %</strong> — 10% in our example.</li>
+        <li><strong>External overhead %</strong> — 5% in our example.</li>
+        <li>Combined overhead rate = 10% + 5% = 15%, applied to the post-discount amount (285), not the original subtotal.</li>
+      </ol>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Overhead amount = post-discount amount × overhead% = 285 × 15% = <strong>42.75</strong>. Amount before tax = 285 + 42.75 = <strong>327.75</strong>.</p></div>
+      <p>Internal and external overhead rates exist because many facilities charge a different overhead depending on whether the booking's lab is part of the same institution or an outside customer — see <a href="settings-admin.html#billing-rates">Billing Rates</a> for where those two percentages are set.</p>
+    </section>
+
+    <section>
+      <h2 id="tax">Step 7 — Tax (on top of overhead — it compounds)</h2>
+      <p>Tax is applied last, and it's applied to the amount that already includes overhead — not to the original subtotal. That means tax is effectively charged on the overhead too.</p>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Tax amount = amount-before-tax × tax% = 327.75 × 17% = <strong>55.72</strong> (327.75 × 0.17 = 55.7175, shown rounded to the cent). Total = 327.75 + 55.72 = <strong>383.47</strong>.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Overhead isn't a separate side charge — once it's added, it's simply part of what's being billed, the same way a restaurant bill's tax is calculated on top of a service charge rather than only on the food. Applying tax after overhead (rather than before it, or on the original subtotal) means the "amount before tax" figure the app shows is genuinely what the facility would invoice before any tax line — a real, checkable number, not an intermediate one.</p></div>
+    </section>
+
+    <section>
+      <h2 id="reading-the-breakdown">Reading the Cost &amp; Time Breakdown panel</h2>
+      <p>Every new or edited booking shows a live breakdown panel that updates as you change times, instruments, and staff. Here's how each row maps to the steps above:</p>
+      <figure class="shot">
+        <img src="../screenshots/22-booking-cost-breakdown.png" alt="The booking modal's live Cost & Time Breakdown panel showing instrument, staff, discount, overhead, tax and total lines" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/22-booking-cost-breakdown.png</div>
+        <figcaption>The live breakdown panel — every row here is one of the seven steps on this page, in the same order.</figcaption>
+      </figure>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Panel row</th><th>Comes from</th><th>Our example</th></tr></thead>
+          <tbody>
+            <tr><td>Booking hours</td><td><a href="#booking-hours">Step 1</a></td><td>2.0 h</td></tr>
+            <tr><td>Instrument line(s)</td><td><a href="#instrument-lines">Step 2</a></td><td>Confocal: 200</td></tr>
+            <tr><td>Staff line(s)</td><td><a href="#staff-hours">Step 3</a> — shows raw time and billed hours side by side</td><td>Helper: 0.67 h raw → 1 h billed → 95</td></tr>
+            <tr><td>Subtotal</td><td><a href="#subtotal">Step 4</a></td><td>295</td></tr>
+            <tr><td>Discount</td><td><a href="#discounts">Step 5</a> — only shows against the time-billed instrument amount</td><td>−10 (5% of 200)</td></tr>
+            <tr><td>Overhead</td><td><a href="#overhead">Step 6</a></td><td>+42.75 (15% of 285)</td></tr>
+            <tr><td>Tax</td><td><a href="#tax">Step 7</a></td><td>+55.72 (17% of 327.75)</td></tr>
+            <tr><td>Total</td><td>Sum of all of the above</td><td><strong>383.47</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout try">
+        <p><strong>🧪 Try it.</strong> Load the sample data (Settings → Load Sample Data). Open any existing booking on a project whose lab is <strong>Bio-Photonics Lab</strong> — it carries the demo's standing 5% discount. Note the instrument's hourly rate and the booking length, work out the instrument line and the 5% discount by hand, then open the booking's breakdown panel and check your numbers against it.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="cost-snapshots">Why an old booking never changes</h2>
+      <p>The total you see on a saved booking is a <strong>snapshot</strong>: every number above — hours, rates, discount %, overhead %, tax % — is frozen into that booking the moment it's saved.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> If the facility later raises its instrument rate, changes its overhead percentage, or a lab's discount is revoked, none of that should silently rewrite what was already billed and possibly already invoiced months ago. A cost snapshot means a booking from last year always shows exactly what it showed last year — see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> for how this plays out across the rest of the app.</p></div>
+      <p>This is also why <a href="cancelling.html">cancelling a booking</a> doesn't simply zero out its cost, and why <a href="reports.html">Reports</a> can show retired staff and archived projects with their real historical charges intact.</p>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q">
+        <summary>A facility staff member is assigned to a booking for exactly 15 minutes at a rate of 80/hour. What does that staff line cost?</summary>
+        <p>80. Fifteen minutes is above zero raw hours, so it's rounded up to 1 whole hour (the one-hour minimum/round-up rule), and 1 hour × 80/hour = 80 — the same as if they'd worked a full hour.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>A booking has a 200 time-billed instrument charge and a 150 facility-staff charge, with a combined 20% discount. How much discount is actually applied?</summary>
+        <p>40 (20% of 200) — not 20% of the 350 total. The discount only ever applies to the time-billed instrument money, never to staff time.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>True or false: raising the tax rate in Settings next month will update the total on a booking from last month.</summary>
+        <p>False. Every booking's total is a cost snapshot frozen at save time — changing rates, overhead, or tax afterward never rewrites an existing booking.</p>
+      </details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>
