@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rough Edges &amp; Workarounds — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="rough-edges.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><!-- rendered by manual.js --></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Appendix A — Rough Edges &amp; Workarounds</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 15 · Appendix A</p>
+      <h1>Rough Edges &amp; Workarounds</h1>
+      <p class="lede">Every quirk in the app that's worth knowing about ahead of time, in one place — what you'll notice, why it happens, and what to do about it.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Recognize the app's known rough edges before they surprise you</li>
+        <li>Understand, in plain terms, why each one happens</li>
+        <li>Apply the simple workaround for each</li>
+        <li>Know where to look if something feels "off" and it isn't listed here</li>
+      </ul>
+    </section>
+
+    <p>None of the items below are bugs waiting to be fixed by clicking around differently — they're deliberate trade-offs, simple app behavior, or small gaps that are easiest to just know about. Nothing here will lose your data as long as you follow the workaround.</p>
+
+    <section>
+      <h2 id="no-back-button">1. The browser's Back button doesn't work the way you expect</h2>
+      <p><strong>What you'll notice:</strong> pressing your browser's Back button doesn't take you to the previous screen inside the tracker — it can leave the app entirely.</p>
+      <p><strong>Why it happens:</strong> the tracker is a single page that changes what it shows without changing your browser's address, so the browser has no "previous page" of the app to go back to.</p>
+      <p><strong>Workaround:</strong> always navigate using the sidebar links, not your browser's Back or Forward buttons.</p>
+    </section>
+
+    <section>
+      <h2 id="cross-lab">2. Adding someone from a different lab to a booking is a two-step dance</h2>
+      <p><strong>What you'll notice:</strong> the Assign People picker on a booking only shows people from the Lab/Group you've selected for that booking — someone from another lab doesn't appear, even though you know they're in the system.</p>
+      <p><strong>Why it happens:</strong> the people picker is deliberately scoped to one lab at a time, to keep long people lists manageable and to match discounts and reporting to the right group. See <a href="bookings.html#group-lab-gate">the Group/Lab gate</a>.</p>
+      <p><strong>Workaround:</strong> temporarily switch the booking's Group/Lab to the person's own lab, add them, then switch the Group/Lab back — their badge stays on the booking either way. The <strong>Assign Facility Staff</strong> picker is never filtered by lab, so this only ever affects regular attendees.</p>
+    </section>
+
+    <section>
+      <h2 id="lab-typos">3. A misspelled lab name quietly becomes its own lab</h2>
+      <p><strong>What you'll notice:</strong> "Bio-Photonics Lab" and "BioPhotonics Lab" show up as two separate labs — with their own separate discount row in <a href="settings-admin.html#group-discounts">Group Discounts</a> and their own separate line in <a href="reports.html#projects-groups">Reports</a> — even though everyone meant the same lab.</p>
+      <p><strong>Why it happens:</strong> Lab/Group is a free-text field on each person, not a fixed list you choose from — so any two different spellings are, as far as the app is concerned, two different labs.</p>
+      <p><strong>Workaround:</strong> agree on one spelling for each lab, and if you spot a typo, edit that person's record and correct the spelling to match everyone else. See <a href="people-labs.html#labs-departments">Labs &amp; departments</a>.</p>
+    </section>
+
+    <section>
+      <h2 id="no-undo">4. There's no undo button, anywhere</h2>
+      <p><strong>What you'll notice:</strong> once you confirm an action — delete, clear, retire — there's no "undo" to bring it back. Confirmation dialogs are the only safety net before the action happens.</p>
+      <p><strong>Why it happens:</strong> the app doesn't keep a history of past states to roll back to; it simply is whatever's currently in the database.</p>
+      <p><strong>Workaround:</strong> make backups a habit, not an afterthought. Export a backup before any big change, and turn on <a href="backups-exports.html#auto-backup">Automatic Daily Backup</a> (and, if you're on Chrome or Edge, the <a href="backups-exports.html#silent-folder">silent backup folder</a>) so you're always a few clicks from a recent copy.</p>
+    </section>
+
+    <section>
+      <h2 id="restore-replaces">5. Restoring a backup replaces everything, with no merge</h2>
+      <p><strong>What you'll notice:</strong> restoring an older backup file wipes out anything you've entered since — there's no option to keep both sets of data.</p>
+      <p><strong>Why it happens:</strong> a restore fully swaps the database out from under the app; there's no reliable, automatic way to merge two independent sets of projects and bookings.</p>
+      <p><strong>Workaround:</strong> export a fresh backup of your current data before restoring anything else — see <a href="backups-exports.html#restore">Restoring a backup</a>.</p>
+    </section>
+
+    <section>
+      <h2 id="silent-backup-regrant">6. The silent backup folder can lose permission after a restart</h2>
+      <p><strong>What you'll notice:</strong> silent backups stop showing up in the folder you chose, with no error to explain why.</p>
+      <p><strong>Why it happens:</strong> Chrome and Edge can forget the permission you granted to write into that folder once the browser itself restarts — this is a browser-level privacy protection, not something the tracker controls.</p>
+      <p><strong>Workaround:</strong> open <strong>Settings</strong> and click <strong>Re-enable</strong> under the Silent Backup Folder option to grant access again. See <a href="backups-exports.html#silent-folder">The silent backup folder</a>.</p>
+    </section>
+
+    <section>
+      <h2 id="single-instrument-nag">7. The "Single Instrument Booking?" question asks every single time</h2>
+      <p><strong>What you'll notice:</strong> the first time you pick an instrument on a new booking, a prompt asks whether this is a single-instrument booking — and it asks again on the very next new booking, with no "don't ask again" option.</p>
+      <p><strong>Why it happens:</strong> the app treats this as a per-booking question rather than a remembered preference, so it always starts fresh.</p>
+      <p><strong>Workaround:</strong> just answer it each time — if you're not sure, choose <strong>No</strong>; you can always remove an instrument badge afterward if you change your mind.</p>
+    </section>
+
+    <section>
+      <h2 id="email-copy-paste">8. "Emailing" attendees is really copy, paste, and send yourself</h2>
+      <p><strong>What you'll notice:</strong> the Email Attendees feature opens a blank email in your own mail app instead of sending anything itself, and you have to paste the recipients, subject, and body in yourself.</p>
+      <p><strong>Why it happens:</strong> this is deliberate, not a bug — the tracker has no server of its own that could send mail on your behalf, and mail-app links have a length limit too short to reliably carry a pre-filled message. See <a href="email-attendees.html#why-no-send">Why it can't just send the email</a>.</p>
+      <p><strong>Workaround:</strong> use the three copy buttons in the dialog, then paste each one — recipients, subject, body — into the blank email the app opened for you.</p>
+    </section>
+
+    <section>
+      <h2 id="new-lab-lost">9. A brand-new lab or department name only sticks if you actually save</h2>
+      <p><strong>What you'll notice:</strong> you type a new Lab/Group or Department name using "+ Add New" while editing a person, then close the form without saving — and the new name is nowhere to be found next time.</p>
+      <p><strong>Why it happens:</strong> a new lab or department name isn't stored anywhere on its own; it only becomes real once it's attached to a person record that's actually been saved.</p>
+      <p><strong>Workaround:</strong> if you're adding a new lab or department name, make sure you finish saving that person's record in the same sitting — don't cancel partway through.</p>
+    </section>
+
+    <section>
+      <h2 id="forced-retire">10. You can't force-delete a person or instrument that has history</h2>
+      <p><strong>What you'll notice:</strong> the same button that deletes a person or instrument with no history instead retires one that has any — you never get a choice to override that and delete anyway.</p>
+      <p><strong>Why it happens:</strong> this is deliberate — deleting a record with history would silently break every past booking, project, or milestone that refers to it. See <a href="big-ideas.html#retire-vs-delete">Retire vs. delete</a>.</p>
+      <p><strong>Workaround:</strong> if you're trying to merge two duplicate records (say, the same person entered twice), retire the duplicate rather than trying to delete it — the retired one stays visible on its old records but drops out of pickers for new work.</p>
+    </section>
+
+    <section>
+      <h2 id="other-small-things">Other small things worth knowing</h2>
+      <ul>
+        <li><strong>Milestone status only cycles, it doesn't let you pick directly:</strong> clicking a milestone's status moves it to the next one in order (pending → in-progress → done → back to pending) — there's no dropdown to jump straight to a status. See <a href="milestones.html#status-cycle">Milestones</a>.</li>
+        <li><strong>Reports has no charts, and its export is spreadsheet-only:</strong> every card on the Reports screen is a table with numbers, and the export button always produces an XLSX spreadsheet — there's no chart view and no DOCX/PDF option there. See <a href="reports.html">Reports &amp; Utilization</a>.</li>
+        <li><strong>The calendar only shows one month at a time, and "Today" opens a dialog rather than scrolling:</strong> there's no week view, and clicking the Today button opens the Today's Agenda summary instead of jumping the grid to today's date. See <a href="dashboard.html#todays-agenda">Today's Agenda</a>.</li>
+        <li><strong>Booking conflicts are only caught when you save:</strong> the app doesn't warn you about a double-booked instrument or staff member while you're still filling out the form — only when you click save does it check and, if there's a clash, refuse with an error. See <a href="bookings.html#conflicts">Conflicts</a>.</li>
+      </ul>
+    </section>
+
+    <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>
