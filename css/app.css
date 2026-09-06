@@ -118,8 +118,7 @@ body {
    container query, not a viewport media query: the sidebar eats a fixed chunk of the viewport
    regardless of window width, so the space actually available to the table can be small even
    when the window itself is well above any reasonable "mobile" breakpoint. */
-.card:has(> .tbl-wrap) { container-type: inline-size; }
-.tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; container-type: inline-size; }
 .tbl:has(> colgroup) { table-layout: fixed; }
 .tbl th, .tbl td { overflow-wrap: anywhere; word-break: break-word; }
 .tbl td:last-child, .tbl th:last-child { white-space: nowrap; }
