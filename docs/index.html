@@ -6,6 +6,18 @@
 <title>Core Facility Tracker — Release Notes</title>
 <meta name="description" content="Release notes and visual feature guide for Core Facility Tracker.">
 <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<script>
+  // Applied before first paint so a saved/OS-dark preference never flashes light first.
+  // Shares the same 'theme' key as the app itself (same origin, different path) so the
+  // choice you make here or in the app carries over to the other.
+  (function () {
+    try {
+      var t = localStorage.getItem('theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
 <style>
   :root{
     --bg:#f6f7fb; --surface:#ffffff; --surface-2:#f1f3f9; --border:#e4e7ef;
@@ -15,14 +27,24 @@
     --shadow:0 1px 3px rgba(17,24,39,.06), 0 8px 24px rgba(17,24,39,.06);
     --radius:14px;
   }
+  /* Dark tokens apply under the OS preference (unless overridden to light), AND under an
+     explicit data-theme="dark" (unless overridden to light) — so the toggle below can force
+     either theme regardless of what the OS is set to. */
   @media (prefers-color-scheme: dark){
-    :root{
+    :root:not([data-theme="light"]){
       --bg:#0b0f17; --surface:#121826; --surface-2:#0f1420; --border:#222b3b;
       --text:#e9edf5; --muted:#a3adbf; --faint:#71809a;
       --primary:#818cf8; --primary-soft:#1e1b4b;
       --mint:#34d399; --mint-soft:#04302c; --mint-ink:#04241a;
       --shadow:0 1px 3px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
     }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b0f17; --surface:#121826; --surface-2:#0f1420; --border:#222b3b;
+    --text:#e9edf5; --muted:#a3adbf; --faint:#71809a;
+    --primary:#818cf8; --primary-soft:#1e1b4b;
+    --mint:#34d399; --mint-soft:#04302c; --mint-ink:#04241a;
+    --shadow:0 1px 3px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
@@ -108,6 +130,18 @@
   .callout h3{margin:0 0 6px}
   .callout p{margin:0; color:var(--muted)}
 
+  /* Theme toggle: fixed so it's reachable from anywhere on this long page, not just the hero */
+  .theme-fab{
+    position:fixed; top:16px; right:16px; z-index:50;
+    display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:13px; font-weight:600;
+    color:var(--text); background:var(--surface); border:1px solid var(--border);
+    border-radius:999px; padding:8px 14px; cursor:pointer; box-shadow:var(--shadow);
+  }
+  .theme-fab:hover{border-color:var(--primary); color:var(--primary)}
+  .theme-fab .ic{font-size:14px; line-height:1}
+  @media (max-width:560px){ .theme-fab .lbl{display:none} .theme-fab{padding:8px 10px} }
+  @media print{ .theme-fab{display:none} }
+
   footer{border-top:1px solid var(--border); padding:34px 0 60px; color:var(--faint); font-size:13.5px}
   footer .row{display:flex; flex-wrap:wrap; gap:14px 22px; align-items:center; justify-content:space-between}
   hr.soft{border:0; border-top:1px solid var(--border); margin:0}
@@ -127,6 +161,30 @@
 </style>
 </head>
 <body>
+
+<button type="button" class="theme-fab" id="theme-fab" aria-label="Switch color theme">
+  <span class="ic" id="theme-fab-ic">🌙</span><span class="lbl" id="theme-fab-lbl">Dark</span>
+</button>
+<script>
+  (function () {
+    var STORE_KEY = 'theme';
+    function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+    function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+    function apply(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var next = theme === 'dark' ? 'light' : 'dark';
+      document.getElementById('theme-fab-ic').textContent = next === 'dark' ? '🌙' : '☀️';
+      document.getElementById('theme-fab-lbl').textContent = next === 'dark' ? 'Dark' : 'Light';
+    }
+    apply(document.documentElement.getAttribute('data-theme') || 'light');
+    document.getElementById('theme-fab').addEventListener('click', function () {
+      var cur = document.documentElement.getAttribute('data-theme') || 'light';
+      var next = cur === 'dark' ? 'light' : 'dark';
+      set(STORE_KEY, next);
+      apply(next);
+    });
+  })();
+</script>
 
 <!--
   The PROSE of this hero (through the "In detail" section below) is hand-written, not derived from

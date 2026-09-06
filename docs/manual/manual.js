@@ -45,6 +45,38 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // ----------------------------------------------------------------- theme
+  // The very first inline <script> in every page's <head> already set data-theme before
+  // paint (reading the same 'theme' localStorage key the app itself uses, since the app and
+  // the docs site share an origin) — this just renders/wires the button to match and change it.
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+  function updateThemeButtons(theme) {
+    var next = theme === 'dark' ? 'light' : 'dark';
+    var btns = document.querySelectorAll('.theme-btn');
+    for (var i = 0; i < btns.length; i++) {
+      var ic = btns[i].querySelector('.ic');
+      var lbl = btns[i].querySelector('.lbl');
+      if (ic) ic.textContent = next === 'dark' ? '🌙' : '☀️';
+      if (lbl) lbl.textContent = next === 'dark' ? 'Dark Mode' : 'Light Mode';
+    }
+  }
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('theme', theme); } catch (e) {}
+    updateThemeButtons(theme);
+  }
+  function wireThemeButtons() {
+    var btns = document.querySelectorAll('.theme-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+      });
+    }
+    updateThemeButtons(currentTheme());
+  }
+
   // ---------------------------------------------------------------- sidebar
   function renderSidebar() {
     var el = document.getElementById('sidebar');
@@ -60,6 +92,8 @@
     el.innerHTML =
       '<a class="manual-title" href="' + HUB + '">Core Facility Tracker</a>' +
       '<span class="manual-sub">User Manual</span>' +
+      '<button type="button" class="theme-btn" aria-label="Switch color theme">' +
+      '<span class="ic"></span><span class="lbl"></span></button>' +
       '<div class="search-box">' +
       '<input type="search" id="manual-search" placeholder="Search the manual…" autocomplete="off" aria-label="Search the manual">' +
       '<div id="search-results" hidden></div>' +
@@ -311,6 +345,7 @@
     renderPager();
     renderChapterGrid();
     wireAllSearchBoxes();
+    wireThemeButtons();
   }
 
   if (document.readyState === 'loading') {
