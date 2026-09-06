@@ -3,6 +3,20 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-09-06
+
+### Changed
+- **The demo dataset now actually exercises the Reports screen.** 1.5.0 shipped Reports & Utilization against a demo dataset with three bookings, only one of which carried any billing data at all — so a new user loading the sample data saw one instrument of five, one staff member, no cancellations, and nothing on the third project. The feature looked broken on the very dataset meant to demonstrate it. The seed now has ten bookings covering all five instruments and three facility staff, deliberately including the cases that make each part of the report meaningful:
+  - a **multi-instrument** session (parallel sample runs), the only thing that exercises the even-split staff attribution — and it reconciles: 4 staff hours across two instruments shows as 2h against each, and the row still sums to the person's true total;
+  - a **per-unit** instrument line (Glacios Cryo-TEM, billed per sample rather than per hour), whose cost is correctly excluded from the discount base;
+  - a **facility-wide** booking with no project, so the "Facility-wide" row is demonstrated rather than theoretical;
+  - **both kinds of cancellation** — one cancelled before its start (hours and charge both drop out) and one cancelled after, with the charge retained (hours drop out, revenue stands). On the Leica SP8 these two rules visibly disagree, which is the point;
+  - a **partial staff window** (40 minutes inside a four-hour booking), so worked hours and billed hours differ and the 1-hour floor is visible;
+  - two consultations with **no line items**, because plenty of real sessions aren't billable.
+- **Demo dates are now relative to the day the sample data is loaded** rather than hardcoded to 2025–2026. Eighteen fixed dates across projects, milestones and bookings became offsets from today, so the demo never reads as stale history and always falls inside the Reports screen's default range. Milestone statuses keep their narrative shape — completed ones in the past, upcoming ones ahead, and one deliberately overdue so the dashboard's overdue feed isn't empty.
+- **Seeded cost snapshots are computed, not typed in.** `computeBookingBOM` moved from `app.js` into `ui.js` (it was already pure — times, rates and line items in, numbers out), so the seed prices its bookings with the exact calculator the booking modal uses. Every stored `subtotal` / `total_before_tax` / `total_cost` and every `line_cost` is therefore what the app itself would have written had a user entered the booking by hand, and none of it can drift if the seeded overhead or tax rates are ever changed. Verified in a browser by recomputing all ten bookings from their own line items and comparing against what was stored — and the original demo booking still prices at exactly $490 / $546.25 / $589.95, unchanged.
+- A `seedBooking()` helper replaces the per-booking blocks of raw INSERTs. It builds the denormalized `meetings.attendees` display string and the `meeting_people` rows from one shared id list, so the pair cannot drift — the exact failure this project hit once before.
+
 ## [1.5.0] — 2026-09-06
 
 ### Added
