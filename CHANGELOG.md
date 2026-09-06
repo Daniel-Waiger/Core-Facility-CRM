@@ -3,6 +3,16 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] — 2026-09-06
+
+### Fixed
+- **Installed clients were stuck on an old release even though the server was serving the new one.** A user reported that the booking form still forced them to pick the core facility as the Group/Lab before any facility staff appeared — the exact thing 1.5.1 fixed. Their Settings screen read **Version: 1.4.0** while the hosted app, every version string on it, and its service worker all said 1.5.1. The cause was in `sw.js`, not in the booking form:
+  - `index.html` and `./` are the only precached URLs with **no `?v=` on them** — they are what *names* which versioned assets to load. GitHub Pages serves them with `Cache-Control: max-age=600`, and `cache.addAll()` is free to satisfy a request from the browser's own HTTP cache. So a newly-installing service worker could fill its brand-new `…-1.5.1` cache with the **previous release's** `index.html` — a shell still asking for `?v=1.4.0` files. Those weren't in the precache list, so the cache-first fetch handler fetched and cached them too. The result was a client pinned to 1.4.0 inside a correctly-named 1.5.1 cache, with no reload count able to break out of it.
+  - Precaching now requests every entry with `cache: 'reload'`, so the new cache can only ever be filled from the network.
+  - The HTML shell is now served **network-first** (falling back to cache when offline) instead of cache-first. Versioned assets stay cache-first — their URLs are immutable per release, so a cache hit is always correct — but the shell must be allowed to change, or a stale one keeps pointing at a stale release forever.
+  - Cache lookups are now scoped to the current release's cache, so a leftover cache can never answer for it.
+  Reproduced end-to-end against a server sending the same `max-age=600` GitHub Pages sends: a client on 1.4.0 stayed on 1.4.0 across three reloads with the old worker, and moved to the new release with the fixed one. Anyone currently stuck will pick this up on their next couple of reloads; from here on an update arrives on the first reload after a deploy.
+
 ## [1.5.1] — 2026-09-06
 
 ### Changed
