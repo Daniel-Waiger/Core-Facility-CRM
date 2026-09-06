@@ -1,6 +1,12 @@
 // Core Facility Tracker — User Manual scaffolding.
 // Renders the sidebar (title, search, chapter nav) and the prev/next pager on every chapter
 // page, and drives the search box (here and on the hub). Vanilla JS, no libraries, no build step.
+//
+// GitHub Pages serves this file (and manual.css) with `cache-control: max-age=600` and no other
+// invalidation — every <script src="manual.js?v=N"> and <link href="manual.css?v=N"> tag across
+// all 17 manual pages must have its `?v=N` bumped whenever either file changes, or visitors keep
+// getting the stale cached copy for up to 10 minutes after a change ships (this is the same class
+// of bug CLAUDE.md documents for the app shell's own `?v=`/service-worker cache-busting).
 (function () {
   'use strict';
 
