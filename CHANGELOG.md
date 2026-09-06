@@ -3,6 +3,23 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.4] — 2026-09-06
+
+### Fixed
+- **A page could show stale content for up to 10 minutes after a deploy, on any plain navigation
+  — reopening a tab, clicking back into an already-visited page — not just after a hard refresh.**
+  This first surfaced as the manual's new theme-toggle button appearing once and then vanishing
+  on every page, including the manual's own home page. The cause was in `sw.js`'s "network-first"
+  handling of the app shell and (since this worker's scope covers the whole site) every
+  `docs/manual/*.html` page: its `fetch(event.request)` still consulted the browser's own HTTP
+  cache first, and GitHub Pages serves these pages with `Cache-Control: max-age=600` — so an
+  ordinary navigation, as opposed to an explicit reload (which forces revalidation), could return
+  a response cached before the last deploy with no network request at all. Reproduced locally
+  against a server that mimics GitHub Pages' actual cache headers (the plain dev server used
+  elsewhere sends none, which is why this didn't show up in testing until now), confirming both
+  the bug and the fix: the shell fetch now uses `cache: 'reload'`, the same technique the
+  install-time precache step already used for exactly this reason.
+
 ## [1.5.3] — 2026-09-06
 
 ### Added
