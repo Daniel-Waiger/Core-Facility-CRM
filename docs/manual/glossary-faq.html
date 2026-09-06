@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary &amp; FAQ — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="glossary-faq.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><!-- rendered by manual.js --></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Appendix B — Glossary &amp; FAQ</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 16 · Appendix B</p>
+      <h1>Glossary &amp; FAQ</h1>
+      <p class="lede">Every term used in this manual in one short list, and quick answers to the questions people ask most — each one links to where it's explained in full.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Look up any term used elsewhere in this manual and jump straight to where it's taught</li>
+        <li>Find a quick answer to a common question, with a link to the full explanation</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="glossary">Glossary</h2>
+      <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr id="t-project"><td><strong>Project</strong></td><td>The main record for a piece of work being tracked — has a title, a code, a Principal Investigator, milestones, a team, and bookings. See <a href="projects.html#create-a-project">Projects</a>.</td></tr>
+          <tr id="t-pi"><td><strong>PI (Principal Investigator)</strong></td><td>The person in charge of a project. Choosing or registering a PI when you create a project automatically adds them to the project's team. See <a href="projects.html#create-a-project">Creating a project</a>.</td></tr>
+          <tr id="t-milestone"><td><strong>Milestone</strong></td><td>A dated goal inside a project, with a status you cycle through as work progresses, and optional owners and instruments attached to it. See <a href="milestones.html#add-a-milestone">Milestones</a>.</td></tr>
+          <tr id="t-booking"><td><strong>Booking</strong></td><td>A scheduled session — an instrument use, a consultation, or a meeting — with a date, time, people, and (usually) a cost. Bookings are the record billing is built from. See <a href="bookings.html#book-a-session">Booking a Session</a>.</td></tr>
+          <tr id="t-facility-staff"><td><strong>Facility staff</strong></td><td>People flagged as facility staff can be assigned to a booking as billable operators, paid at their own hourly rate. Regular attendees are never billed. See <a href="people-labs.html#facility-staff-flag">The Facility Staff flag</a>.</td></tr>
+          <tr id="t-attendee"><td><strong>Attendee</strong></td><td>Anyone assigned to a booking to record who was present — distinct from facility staff, who are the ones actually billed for their time. See <a href="big-ideas.html#facility-staff-vs-attendees">Facility staff vs. attendees</a>.</td></tr>
+          <tr id="t-retire"><td><strong>Retire</strong></td><td>What happens to a person or instrument instead of deleting them, once they have any history attached (a past booking, a project team, a milestone). Retiring hides them from pickers for new work but keeps every past record intact. See <a href="big-ideas.html#retire-vs-delete">Retire vs. delete</a>.</td></tr>
+          <tr id="t-archive"><td><strong>Archive</strong></td><td>The project equivalent of retiring — an archived project is hidden from the active registry and the dashboard, but every milestone, booking, and cost it holds stays exactly as it was. See <a href="big-ideas.html#archive">Archive</a>.</td></tr>
+          <tr id="t-cancelled"><td><strong>Cancelled</strong></td><td>What happens to a booking instead of deleting it, once it holds any real information. A cancelled booking frees its time slot but keeps its record — and sometimes its charge. See <a href="big-ideas.html#cancelled-vs-deleted">Cancelled vs. deleted</a>.</td></tr>
+          <tr id="t-billing-retained"><td><strong>Billing retained</strong></td><td>Whether a cancelled booking's charge still stands. Cancelling before the start time drops the charge; cancelling after it started keeps the charge unless an admin waives it. See <a href="cancelling.html#decision-table">The decision table</a>.</td></tr>
+          <tr id="t-cost-snapshot"><td><strong>Cost snapshot</strong></td><td>The totals calculated for a booking are frozen in place the moment it's saved. Later changes to rates, overhead, or tax never rewrite a booking that already exists. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a>.</td></tr>
+          <tr id="t-group-lab"><td><strong>Group/Lab</strong></td><td>The lab or research group a person belongs to — a free-text field that also groups bookings for discounts and reports. See <a href="people-labs.html#labs-departments">Labs &amp; departments</a>.</td></tr>
+          <tr id="t-group-discount"><td><strong>Group discount</strong></td><td>A standing discount percentage set per Lab/Group, applied automatically to that lab's new bookings. See <a href="settings-admin.html#group-discounts">Group discounts</a>.</td></tr>
+          <tr id="t-overhead"><td><strong>Overhead</strong></td><td>A facility-wide percentage (internal or external) added on top of a booking's discounted subtotal. See <a href="costs-math.html#overhead">Overhead</a>.</td></tr>
+          <tr id="t-tax"><td><strong>Tax</strong></td><td>A percentage applied on top of the discounted subtotal <em>plus</em> overhead — the last step in a booking's cost. See <a href="costs-math.html#tax">Tax</a>.</td></tr>
+          <tr id="t-billed-per"><td><strong>Billed per</strong></td><td>How an instrument charges: <strong>time</strong> multiplies its price by the booking's length in hours; any other option multiplies price by an amount you type in on the booking itself. See <a href="instruments.html#cost-billed-per">Cost &amp; billed per</a>.</td></tr>
+          <tr id="t-admin-mode"><td><strong>Admin Mode</strong></td><td>A toggle that reveals billing-sensitive controls (discounts, waiving charges). It is not a login and has no password — anyone at this browser can turn it on. See <a href="settings-admin.html#admin-mode">Admin Mode</a>.</td></tr>
+          <tr id="t-backup"><td><strong>Backup</strong></td><td>A single file holding your entire tracker — every project, person, booking, and uploaded file — that you export to protect or move your data. See <a href="backups-exports.html#json-backup">Exporting a backup</a>.</td></tr>
+          <tr id="t-restore"><td><strong>Restore</strong></td><td>Loading a backup file back into the tracker. Restoring replaces everything currently in the tracker — there is no merge. See <a href="backups-exports.html#restore">Restoring a backup</a>.</td></tr>
+          <tr id="t-pwa"><td><strong>PWA (installable app)</strong></td><td>The tracker can be installed from your browser's own menu so it opens in its own window and keeps working offline once loaded. See <a href="getting-started.html#install-pwa">Installing the app</a>.</td></tr>
+          <tr id="t-vocab"><td><strong>Vocabulary / "+ Add New"</strong></td><td>Dropdown lists (status, role, modality, and similar fields) that grow as you use the app — picking "+ Add New" and typing a value adds it to the shared list, it never literally saves the word "Other." See <a href="big-ideas.html#add-new">"+ Add New" is really "Other"</a>.</td></tr>
+          <tr id="t-demo-data"><td><strong>Sample (demo) data</strong></td><td>A small, realistic set of example people, instruments, projects, and bookings you can load to practice safely, without risking real records. See <a href="getting-started.html#sample-data">Loading sample data</a>.</td></tr>
+          <tr id="t-conflict"><td><strong>Conflict</strong></td><td>An overlap between two bookings for the same instrument or the same facility staff member on the same day. Conflicts are blocked at save time. See <a href="bookings.html#conflicts">Conflicts</a>.</td></tr>
+          <tr id="t-utilization"><td><strong>Utilization</strong></td><td>How much an instrument or staff member was actually used over a date range — booked hours, billed hours, and revenue, tracked on the Reports screen. See <a href="reports.html#two-rules">Reports &amp; Utilization</a>.</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="faq">Frequently asked questions</h2>
+
+      <details class="quiz-q"><summary>I opened the app on another computer and my data is gone. What happened?</summary><p>Your data lives only in the browser on the device where you entered it — there's no account or server copy in between. Nothing is lost, but nothing followed you either. Move it across with a backup file: see <a href="backups-exports.html#move-computers">Move your data to a new computer</a> and <a href="big-ideas.html#your-data-lives-here">Your data lives here</a>.</p></details>
+
+      <details class="quiz-q"><summary>Why did 10 minutes of staff help cost a full hour?</summary><p>Facility staff time bills with a one-hour minimum, always rounded up — so anything from a few minutes up to one hour bills as exactly one hour, and one hour five minutes bills as two. See the worked numbers in <a href="costs-math.html#staff-hours">Staff hours</a>.</p></details>
+
+      <details class="quiz-q"><summary>Why does a cancelled booking still show a charge?</summary><p>Cancelling before the booking's start time drops the charge, because the slot was never actually held. Cancelling after it started keeps the charge standing, because the time was held whether or not it ran — unless an admin explicitly waives it. See <a href="cancelling.html#decision-table">The decision table</a>.</p></details>
+
+      <details class="quiz-q"><summary>Why is the red button always the Cancel option on a delete confirmation?</summary><p>On a dialog meant to prevent an accident, the eye-catching color is put on the safe way out, not the destructive one — so a reflexive click lands on Cancel, not Delete. See it in action in <a href="milestones.html#delete">Deleting a milestone</a>.</p></details>
+
+      <details class="quiz-q"><summary>Why can't the app just send the email itself?</summary><p>There's no server behind the tracker that could send mail on your behalf, and pre-filling a full message into a mail-app link isn't reliable — those links get cut off after a couple thousand characters. See <a href="email-attendees.html#why-no-send">Why it can't just send the email</a>.</p></details>
+
+      <details class="quiz-q"><summary>I changed the tax rate — why didn't my old bookings change?</summary><p>A booking's cost is frozen ("snapshotted") the moment it's saved. Changing a rate in Settings only affects bookings created after the change. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> and <a href="settings-admin.html#billing-rates">Billing rates</a>.</p></details>
+
+      <details class="quiz-q"><summary>Why can't I delete this person?</summary><p>Because they have history — a past booking, a project team, a milestone they own. Deleting them would silently break those records, so the app retires them instead, which hides them from new work while keeping old records intact. See <a href="big-ideas.html#retire-vs-delete">Retire vs. delete</a>.</p></details>
+
+      <details class="quiz-q"><summary>Someone's name now shows "(Retired)" — did their old records change?</summary><p>No. "(Retired)" is only added when the name is displayed; the stored record is untouched, so historical bookings and milestones read exactly as they did before. See <a href="big-ideas.html#retire-vs-delete">Retire vs. delete</a>.</p></details>
+
+      <details class="quiz-q"><summary>Does picking "Other" in a dropdown save the word "Other"?</summary><p>No — "+ Add New" is really what "Other" means here. Picking it opens a box to type your own value, which is then added to that field's shared list for next time. See <a href="big-ideas.html#add-new">"+ Add New" is really "Other"</a>.</p></details>
+
+      <details class="quiz-q"><summary>Is Admin Mode a login, and does it keep other people out?</summary><p>No. It's a convenience toggle that shows or hides billing controls, with no password behind it — anyone using this browser can switch it on. See <a href="settings-admin.html#admin-mode">Admin Mode</a>.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>
