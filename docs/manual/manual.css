@@ -1,5 +1,9 @@
 /* Core Facility Tracker — User Manual stylesheet
-   Design language matches ../index.html (release notes): same tokens, radius, shadow, font stack. */
+   Design language matches ../index.html (release notes): same tokens, radius, shadow, font stack.
+
+   Cache-busting: GitHub Pages caches this file for up to 10 minutes with no other invalidation,
+   so bump the `?v=N` on every page's <link href="manual.css?v=N"> (and manual.js's) whenever
+   this file changes — see the matching note at the top of manual.js. */
 
 :root{
   --bg:#f6f7fb; --surface:#ffffff; --surface-2:#f1f3f9; --border:#e4e7ef;
