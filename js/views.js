@@ -17,8 +17,7 @@
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     const active = counts['Active'] || 0;
 
-    const win = new Date(); win.setDate(win.getDate() + 30);
-    const winStr = win.toISOString().slice(0, 10);
+    const winStr = global.UI.todayPlusDays(30);
     const upcoming = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
@@ -487,7 +486,7 @@
   }
 
   /* ---------------- People ---------------- */
-  let peopleFilter = { query: '', type: '', showRetired: false };
+  let peopleFilter = { query: '', type: '', showRetired: false, staffOnly: false };
   function setPeopleFilter(f) {
     peopleFilter = Object.assign(peopleFilter, f);
     global.App.refresh();
@@ -500,12 +499,14 @@
       FROM people pe
       ORDER BY pe.is_retired, pe.type, pe.name`);
     const retiredCount = allRows.filter((r) => r.is_retired).length;
+    const staffCount = allRows.filter((r) => r.is_staff).length;
 
     const qLower = (peopleFilter.query || '').trim().toLowerCase();
     const rows = allRows.filter((r) => {
       // Retired people are kept out of the everyday view but never deleted — the toggle in the
       // filter bar brings them back into sight (it only appears once there are any).
       if (r.is_retired && !peopleFilter.showRetired) return false;
+      if (peopleFilter.staffOnly && !r.is_staff) return false;
       if (peopleFilter.type && r.type !== peopleFilter.type) return false;
       if (qLower) {
         const textToSearch = `${r.name} ${r.type} ${r.organization || ''} ${r.department || ''} ${r.email || ''} ${r.note || ''}`.toLowerCase();
@@ -526,6 +527,7 @@
           ${C.PERSON_TYPES.map((t) => `<option value="${t}" ${peopleFilter.type === t ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
         ${retiredCount ? `<label class="retired-toggle" data-tooltip="Retired people stay on every record they were ever part of"><input type="checkbox" id="people-retired-filter" ${peopleFilter.showRetired ? 'checked' : ''} /> Show retired (${retiredCount})</label>` : ''}
+        ${staffCount ? `<label class="retired-toggle" data-tooltip="Billable by the hour on bookings; set on the person's own record"><input type="checkbox" id="people-staff-filter" ${peopleFilter.staffOnly ? 'checked' : ''} /> Facility staff only (${staffCount})</label>` : ''}
         <button class="btn btn-primary" data-act="add-person" data-tooltip="Register a new researcher or staff">${ic('plus')} Add Person</button>
       </div>
     </div>
@@ -539,7 +541,7 @@
         <table class="tbl">
           <colgroup>
             <col style="width:15%"><col style="width:10%"><col style="width:15%"><col style="width:12%">
-            <col style="width:14%"><col style="width:10%"><col style="width:56px"><col style="width:60px">
+            <col style="width:14%"><col style="width:10%"><col style="width:56px"><col style="width:120px">
             <col style="width:78px"><col style="width:78px">
           </colgroup>
           <thead>
@@ -551,7 +553,7 @@
               <th>Email</th>
               <th>Notes</th>
               <th title="Active projects">Proj.</th>
-              <th title="Billable on instrument bookings">Staff</th>
+              <th title="Billable by the hour on bookings; set on the person's own record">Facility Staff</th>
               <th>Rate/hr</th>
               <th style="text-align:right">Actions</th>
             </tr>
@@ -566,7 +568,7 @@
                 <td class="muted small">${esc(r.email || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td><span class="badge primary" title="${r.proj_count} active project${r.proj_count === 1 ? '' : 's'}">${r.proj_count}</span></td>
-                <td>${r.is_staff ? `<span class="badge success" data-tooltip="Billable core staff">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
+                <td>${r.is_staff ? `<span class="badge success" data-tooltip="Facility Staff — billable by the hour on bookings">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="mono small">${r.is_staff ? esc(r.rate || 0) : '—'}</td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
@@ -687,8 +689,8 @@
     const endDayOfWeek = (end.getDay() + 6) % 7;
     end.setDate(end.getDate() + (6 - endDayOfWeek));
 
-    const startStr = start.toISOString().slice(0, 10);
-    const endStr = end.toISOString().slice(0, 10);
+    const startStr = global.UI.ymd(start);
+    const endStr = global.UI.ymd(end);
 
     const ms = global.DB.rows(`
       SELECT m.id, m.due_date, m.name, m.status, p.id as project_id, p.title as project_title
@@ -745,7 +747,12 @@
     const todayStr = today();
 
     while (cur <= end) {
-      const ds = cur.toISOString().slice(0, 10);
+      // Use local ymd(), not toISOString().slice(0,10): `cur` is a local-midnight Date, and at a
+      // UTC+ offset (e.g. Israel) toISOString() re-describes that instant in UTC, which falls on
+      // the PREVIOUS day — so the event lookup key, the "new booking" prefill date, and the
+      // tooltip would all be one day behind the visible day-of-month label. See UI.ymd's own
+      // comment in js/ui.js and GitHub issue #14.
+      const ds = global.UI.ymd(cur);
       const isToday = ds === todayStr;
       const inMonth = cur.getMonth() === sm;
       const evs = byDay[ds] || [];

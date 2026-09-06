@@ -1,7 +1,7 @@
 /* app.js — router, modals with inline person creation, organization reuse, collapsible sidebar & action dispatcher */
 (function (global) {
   'use strict';
-  const Views = global.Views, UI = global.UI, DB = global.DB, Exports = global.Exports;
+  const Views = global.Views, UI = global.UI, DB = global.DB, Exports = global.Exports, Reports = global.Reports;
   const C = global.CONST, esc = UI.esc, ic = UI.icon;
   const ctx = { route: 'dashboard', project: null };
 
@@ -25,6 +25,7 @@
     people: 'People, Labs &amp; Researchers',
     instruments: 'Core Instruments',
     calendar: 'Schedule &amp; Milestones',
+    reports: 'Reports &amp; Utilization',
     settings: 'Settings &amp; Portable Data'
   };
 
@@ -194,6 +195,7 @@
             <div class="nav-item" data-nav="people" data-tooltip="Researchers &amp; Labs">${ic('users')}<span class="lbl">People &amp; Labs</span></div>
             <div class="nav-item" data-nav="instruments" data-tooltip="Facility Equipment">${ic('cpu')}<span class="lbl">Instruments</span></div>
             <div class="nav-item" data-nav="calendar" data-tooltip="Monthly Schedule">${ic('calendar')}<span class="lbl">Calendar</span></div>
+            <div class="nav-item" data-nav="reports" data-tooltip="Usage &amp; Billing Reports">${ic('clock')}<span class="lbl">Reports</span></div>
           </nav>
           <div class="nav-spacer"></div>
           <div class="sidebar-foot">
@@ -257,6 +259,7 @@
       name === 'people' ? Views.people() :
       name === 'instruments' ? Views.instruments() :
       name === 'calendar' ? Views.calendar() :
+      name === 'reports' ? Reports.render() :
       name === 'settings' ? Views.settings() : '';
 
     if (name === 'projects') {
@@ -279,6 +282,8 @@
       if (typeFilter) typeFilter.onchange = (e) => Views.setPeopleFilter({ type: e.target.value });
       const retiredToggle = document.getElementById('people-retired-filter');
       if (retiredToggle) retiredToggle.onchange = (e) => Views.setPeopleFilter({ showRetired: e.target.checked });
+      const staffToggle = document.getElementById('people-staff-filter');
+      if (staffToggle) staffToggle.onchange = (e) => Views.setPeopleFilter({ staffOnly: e.target.checked });
     }
 
     if (name === 'instruments') {
@@ -290,6 +295,13 @@
       if (kindFilter) kindFilter.onchange = (e) => Views.setInstrumentFilter({ kind: e.target.value });
       const instRetiredToggle = document.getElementById('inst-retired-filter');
       if (instRetiredToggle) instRetiredToggle.onchange = (e) => Views.setInstrumentFilter({ showRetired: e.target.checked });
+    }
+
+    if (name === 'reports') {
+      const fromInput = document.getElementById('rep-from');
+      if (fromInput) fromInput.onchange = (e) => Reports.setRange({ from: e.target.value });
+      const toInput = document.getElementById('rep-to');
+      if (toInput) toInput.onchange = (e) => Reports.setRange({ to: e.target.value });
     }
 
     if (focusRestore) {
@@ -866,6 +878,8 @@
       case 'export-docx': return Exports.exportDocx(ctx.project);
       case 'export-pdf': return Exports.exportPdf(ctx.project);
       case 'export-all-xlsx': return Exports.exportAllXlsx();
+      case 'rep-preset': return Reports.setPreset(el.dataset.range);
+      case 'export-reports-xlsx': { const r = Reports.getRange(); return Exports.exportReportsXlsx(r.from, r.to); }
 
       // Milestones CRUD & Toggle
       case 'add-milestone': return addMilestone();
@@ -1443,9 +1457,10 @@
         </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
         <div class="field">
-          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="p-is-staff" /> Core Staff (billable on instrument bookings)</label>
+          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="p-is-staff" /> Facility Staff (billable by the hour on bookings)</label>
+          <div class="faint small mt-8">Ticking this puts them in the "Assign Facility Staff" picker on every booking and bills their hourly rate. Leave researchers and lab members unticked — they go in "Assign People" instead.</div>
         </div>
-        <div class="field"><label>Rate ($ per hour, core staff only)</label><input type="number" min="0" step="any" class="input" id="p-rate" placeholder="0" /></div>
+        <div class="field"><label>Rate ($ per hour, Facility Staff only)</label><input type="number" min="0" step="any" class="input" id="p-rate" placeholder="0" /></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1502,9 +1517,10 @@
         </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
         <div class="field">
-          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="pe-is-staff" ${p.is_staff ? 'checked' : ''} /> Core Staff (billable on instrument bookings)</label>
+          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="pe-is-staff" ${p.is_staff ? 'checked' : ''} /> Facility Staff (billable by the hour on bookings)</label>
+          <div class="faint small mt-8">Ticking this puts them in the "Assign Facility Staff" picker on every booking and bills their hourly rate. Leave researchers and lab members unticked — they go in "Assign People" instead.</div>
         </div>
-        <div class="field"><label>Rate ($ per hour, core staff only)</label><input type="number" min="0" step="any" class="input" id="pe-rate" value="${p.rate || 0}" /></div>
+        <div class="field"><label>Rate ($ per hour, Facility Staff only)</label><input type="number" min="0" step="any" class="input" id="pe-rate" value="${p.rate || 0}" /></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1824,93 +1840,42 @@
         meta: r.kind || '', tip: r.kind || 'Instrument'
       }));
   }
-  // Core Staff are the billable-by-the-hour assignees (people.is_staff=1) — a separate picker
-  // from the plain "Assign People" attendee list above, which is never billed.
-  function bkStaffItems() {
-    return DB.rows('SELECT id, name, rate, organization, department, is_retired FROM people WHERE is_staff=1 ORDER BY name')
-      .map((r) => ({
-        id: r.id, retired: !!r.is_retired, name: UI.retiredName(r.name, r.is_retired), rate: r.rate || 0,
-        org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
-        meta: [r.organization, r.department].filter(Boolean).join(' · '), tip: 'Core Staff — ' + fmtMoney(r.rate || 0) + '/hr'
-      }));
+  // Facility Staff are the billable-by-the-hour assignees (people.is_staff=1) — a separate
+  // picker from the plain "Assign People" attendee list above, which is never billed.
+  //
+  // `assignedIds` (the ids already in `meeting_staff` for the booking being edited, omitted for
+  // a new booking) are unioned into the query so someone who has since had Facility Staff
+  // UNTICKED still shows up here with their existing badge intact. Without this, the next save
+  // of that booking would rebuild `meeting_staff` from whatever the picker currently renders (see
+  // bookingSave/bookingEditSave) and silently delete them — losing the record of who actually
+  // ran the session. This mirrors CLAUDE.md's "selectable = not retired OR already selected"
+  // rule, and reuses the exact mechanism mountTokenPicker already has for retired people: setting
+  // `retired: true` hides an item from the "add new" dropdown (see the `!it.retired` filter in
+  // mountTokenPicker's render()) without touching an already-selected badge.
+  function bkStaffItems(assignedIds) {
+    const extraIds = [...new Set((assignedIds || []).map(Number).filter((n) => Number.isFinite(n)))];
+    const extraClause = extraIds.length ? ` OR id IN (${extraIds.map(() => '?').join(',')})` : '';
+    const rows = DB.rows(
+      `SELECT id, name, rate, organization, department, is_retired, is_staff FROM people WHERE is_staff=1${extraClause} ORDER BY name`,
+      extraIds
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      // Hidden from the dropdown (but not the badge list) if actually retired OR no longer
+      // ticked as Facility Staff — either way, not offered for a NEW assignment.
+      retired: !!r.is_retired || !r.is_staff,
+      name: UI.retiredName(r.name, r.is_retired), rate: r.rate || 0,
+      org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
+      meta: [r.organization, r.department].filter(Boolean).join(' · '),
+      tip: (r.is_staff ? 'Facility Staff — ' : 'No longer Facility Staff — ') + fmtMoney(r.rate || 0) + '/hr'
+    }));
   }
 
-  /* ---------------- Booking cost math (bill of materials) ----------------
-     Plain-language walkthrough of every number below, since this is money math that has to be
-     auditable, not just "works":
-       1. Booking hours = how long the instrument is reserved for, as a decimal number of hours
-          (9:00 to 11:30 is 2.5 hours). No start+end time on the booking → 0 hours.
-       2. Each instrument bills either by that duration (unit "time", e.g. $/hour) or by a
-          manually-typed amount (any other unit — $/sample, $/gram, etc).
-       3. Each core-staff assignee bills by their OWN window inside the booking (left blank =
-          the full booking window), but never less than 1 hour, and always rounded UP to a whole
-          hour beyond that — so 10 minutes bills as 1 hour, and 65 minutes bills as 2 hours.
-       4. Discounts — a standing per-lab percent plus a manual admin override, added together —
-          apply ONLY to the time-billed instrument cost, never to staff time or to per-unit/
-          per-weight instrument costs.
-       5. What's left after the discount then has BOTH overhead percentages (internal + external)
-          added on top of it — that "before tax" figure is what a facility would actually invoice
-          before any tax line — and finally the tax percentage is added on top of THAT to get the
-          final total. */
   function fmtMoney(n) {
     const cur = DB.getConfig('currency', '$');
     return cur + (Number(n) || 0).toFixed(2);
   }
-  // "HH:MM" -> minutes since midnight, or null if not a valid time.
-  function timeToMinutes(hhmm) {
-    const mm = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
-    return mm ? Number(mm[1]) * 60 + Number(mm[2]) : null;
-  }
-  // Hours between two "HH:MM" times; missing or non-positive spans count as 0 hours.
-  function hoursBetween(start, end) {
-    const a = timeToMinutes(start), b = timeToMinutes(end);
-    if (a == null || b == null || b <= a) return 0;
-    return (b - a) / 60;
-  }
-  // The 1-hour floor: any staff time above zero bills at least 1 hour, and anything past that
-  // rounds UP to the next whole hour.
-  function billableStaffHours(rawHours) {
-    return rawHours > 0 ? Math.max(1, Math.ceil(rawHours)) : 0;
-  }
-  function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates }) {
-    const bookingHours = hoursBetween(start, end);
-    const ohInternal = (rates && rates.ohInternal) || 0;
-    const ohExternal = (rates && rates.ohExternal) || 0;
-    const taxPct = (rates && rates.taxPct) || 0;
 
-    let instrTime = 0, instrAmount = 0;
-    const instrumentLines = (instruments || []).map((it) => {
-      const isTime = (it.cost_unit || 'time') === 'time';
-      const line = isTime ? (it.cost || 0) * bookingHours : (it.cost || 0) * (Number(it.amount) || 0);
-      if (isTime) instrTime += line; else instrAmount += line;
-      return Object.assign({}, it, { isTime, line });
-    });
-
-    let staffTotal = 0;
-    const staffLines = (staff || []).map((p) => {
-      const rawHours = (p.start && p.end) ? hoursBetween(p.start, p.end) : bookingHours;
-      const billHours = billableStaffHours(rawHours);
-      const line = (p.rate || 0) * billHours;
-      staffTotal += line;
-      return Object.assign({}, p, { rawHours, billHours, line });
-    });
-
-    const subtotal = instrTime + instrAmount + staffTotal;
-    const discPct = Math.min(100, (groupPct || 0) + (manualPct || 0));
-    const discountAmt = instrTime * (discPct / 100);
-    const afterDiscount = subtotal - discountAmt;
-    const overheadPct = ohInternal + ohExternal;
-    const overheadAmt = afterDiscount * (overheadPct / 100);
-    const beforeTax = afterDiscount + overheadAmt;
-    const taxAmt = beforeTax * (taxPct / 100);
-    const total = beforeTax + taxAmt;
-
-    return {
-      bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
-      groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
-      ohInternal, ohExternal, overheadAmt, beforeTax, taxPct, taxAmt, total
-    };
-  }
 
   function tokenPickerField(kind, label, addLabel) {
     return `<div class="field"><label>${label}</label>
@@ -2133,7 +2098,7 @@
       <div class="card-title" style="font-size:13px">${ic('tag')} Cost & Time Breakdown</div>
       <div class="faint small mb-8">Instruments</div>
       <div id="${prefix}-bom-instruments"></div>
-      <div class="faint small mt-8 mb-8">Core Staff</div>
+      <div class="faint small mt-8 mb-8">Facility Staff</div>
       <div id="${prefix}-bom-staff"></div>
       ${adminOn ? `
       <div class="field mt-8" style="max-width:240px">
@@ -2144,23 +2109,28 @@
     </div>`;
   }
 
-  // Narrows the Assign People / Assign Core Staff dropdowns to one lab — an institute-scale
-  // relief valve so neither picker lists every person in the building. Already-selected badges
-  // are unaffected (mountTokenPicker's _setFilter only ever narrows the *dropdown*, never hides
-  // a badge), so switching labs mid-booking never drops a cross-lab collaborator or staff member
-  // you'd already picked.
+  // Narrows the Assign People dropdown to one lab — an institute-scale relief valve so the
+  // researcher picker doesn't list every person in the building. Already-selected badges are
+  // unaffected (mountTokenPicker's _setFilter only ever narrows the *dropdown*, never hides a
+  // badge), so switching labs mid-booking never drops a cross-lab collaborator you'd picked.
   //
-  // Group/Lab itself is mandatory, not optional — every booking either gets it typed in directly
-  // or auto-filled from its project's PI (applyProjectDrivenGroup), and both people and core
-  // staff belong to a facility group, so neither picker can be used before one is set: no group
-  // picked yet locks both dropdowns (not-allowed cursor + "Choose Group/Lab First" hint).
+  // Group/Lab is mandatory, not optional — every booking either gets it typed in directly or
+  // auto-filled from its project's PI (applyProjectDrivenGroup) — so with no group picked yet the
+  // researcher dropdown is locked (not-allowed cursor + "Choose Group/Lab First" hint).
+  //
+  // The Assign Facility Staff picker is deliberately NOT filtered or locked by the group. The
+  // group on a booking says which lab is being billed, and facility staff serve every lab from
+  // their own organization ("Bioimaging Core Facility" in the demo data), so filtering them by
+  // `it.org === org` hid every staff member on every booking. That is precisely the complaint in
+  // issue #14 — a user had to invent a fake "STAFF" group and swap the booking's group back and
+  // forth to assign a user and then a staff member. Book under the group the *user* belongs to
+  // and add facility staff independently; membership of that picker is decided only by the
+  // Facility Staff flag on the person's own record (see bkStaffItems).
   function filterOwnerPickerByGroup(m, org) {
-    ['owner', 'staff'].forEach((kind) => {
-      const wrap = m.querySelector(`.token-picker[data-kind="${kind}"]`);
-      if (!wrap) return;
-      if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
-      if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
-    });
+    const wrap = m.querySelector('.token-picker[data-kind="owner"]');
+    if (!wrap) return;
+    if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
+    if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
   }
 
   // The "offer" path: a lab is chosen (by hand, or auto-filled from a project's PI) and its
@@ -2268,7 +2238,7 @@
 
     const staffHost = m.querySelector('#' + ids.prefix + '-bom-staff');
     if (staffHost) {
-      staffHost.innerHTML = !staffItems.length ? '<div class="faint small">No core staff assigned yet.</div>' : staffItems.map((p) => {
+      staffHost.innerHTML = !staffItems.length ? '<div class="faint small">No Facility Staff assigned yet.</div>' : staffItems.map((p) => {
         const win = m._bom.staffWindows[p.id] || {};
         return `<div class="row mb-8" style="gap:8px;align-items:center">
           <span class="grow small">${esc(p.name)}</span>
@@ -2302,7 +2272,7 @@
       ohExternal: DB.getConfigNum('overhead_external', 0),
       taxPct: DB.getConfigNum('tax_pct', 0)
     };
-    const bom = computeBookingBOM({
+    const bom = UI.computeBookingBOM({
       start, end, instruments: instrumentsForCalc, staff: staffForCalc,
       groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates
     });
@@ -2401,7 +2371,7 @@
 
     mountTokenPicker(m, 'owner', bkPeopleItems());
     mountTokenPicker(m, 'inst', bkInstItems(), refreshBom);
-    mountTokenPicker(m, 'staff', bkStaffItems(), refreshBom);
+    mountTokenPicker(m, 'staff', bkStaffItems(opts.staffIds), refreshBom);
     mountRichText(m, opts.noteId);
     if (opts.owners) m.querySelector('.token-picker[data-kind="owner"]')._setSelected(opts.owners);
     if (opts.insts) m.querySelector('.token-picker[data-kind="inst"]')._setSelected(opts.insts);
@@ -2416,7 +2386,7 @@
     else applyProjectDrivenGroup(m, ids);
   }
 
-  // Hard-block conflict check: the same instrument OR the same core-staff member cannot be on
+  // Hard-block conflict check: the same instrument OR the same Facility Staff member cannot be on
   // two bookings whose time windows overlap on the same day. Deliberately checks the whole
   // booking's start/end (not a staff member's partial billing window) — a booking's time window
   // is when the session is actually happening, and a person invited to it is presumed present
@@ -2473,10 +2443,11 @@
           ${groupSelectField('bk-group', '')}
         </div>
 
+        <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
-        ${tokenPickerField('staff', 'Assign Core Staff', '+ Add core staff…')}
+        ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
 
         ${bomSectionHtml('bk', adminOn)}
 
@@ -2566,10 +2537,11 @@
           ${groupSelectField('bke-group', mt.group_org || '')}
         </div>
 
+        <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
-        ${tokenPickerField('staff', 'Assign Core Staff', '+ Add core staff…')}
+        ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
 
         ${bomSectionHtml('bke', adminOn)}
 
