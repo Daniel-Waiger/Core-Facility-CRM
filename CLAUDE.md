@@ -225,11 +225,23 @@ per version, with `### Added`/`Changed`/`Fixed` subsections) matching whichever 
 `APP_VERSION` ends up at.
 
 `docs/index.html` (the hosted release-notes page) is **half live, half hand-written** — don't
-assume it updates itself. Its `## Full changelog` section and the `#footer-version` string are
-rendered from `CHANGELOG.md` via `fetch` at the bottom of the file, so those do look after
-themselves. But everything from the `<header class="hero">` through the `In detail` section —
-the `Release X.Y.Z · date` eyebrow, the hero lede, the `Highlights` cards and the `In detail`
-feature blocks — is hand-written per release and must be edited manually (there's a comment in
-the file saying so, just before the hero). `In detail` blocks reference `docs/screenshots/*.png`
+assume it updates itself.
+
+Derived from `CHANGELOG.md` at load time, so these look after themselves: the `## Full changelog`
+section, the `#footer-version` string, and the `#hero-release` version+date inside the
+`Release X.Y.Z · DD Mon YYYY` eyebrow. All three come from the newest `## [x.y.z] — YYYY-MM-DD`
+heading, parsed by the script at the bottom of the file. The static text inside those spans is
+only a no-JS fallback; leave it be.
+
+Hand-written per release, and genuinely easy to forget: the hero **lede**, the `Highlights`
+**cards**, and the `In detail` **feature blocks**. Update them whenever a release changes behaviour
+enough to warrant a card or a screenshot. `In detail` blocks reference `docs/screenshots/*.png`
 with an `onerror` handler that adds a `.pending` class, so a block may be written before its
-screenshot exists and will degrade gracefully until one is added.
+screenshot exists and degrades gracefully until one is added — and screenshot **numbering is
+sequential across the whole directory**, so check the highest existing number before picking one
+rather than assuming a free filename means a free slot. That section's own sub-head says it is for
+"the changes worth a screenshot": a fix with nothing to show (a caching bug, say) belongs in a
+Highlights card, not a feature block, which would otherwise leave an empty image column.
+
+A docs-only change needs no version bump and no `CHANGELOG.md` entry — the versioning rules above
+are about cache-busting the app shell, and this page isn't part of it.
