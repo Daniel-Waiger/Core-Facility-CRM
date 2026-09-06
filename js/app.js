@@ -33,8 +33,17 @@
   function distinctPeopleCol(col) {
     return DB.rows(`SELECT DISTINCT ${col} AS v FROM people WHERE ${col} IS NOT NULL AND TRIM(${col}) != '' ORDER BY ${col}`).map((r) => r.v);
   }
-  function orgNames() { return distinctPeopleCol('organization'); }
-  function deptNames() { return distinctPeopleCol('department'); }
+  // Case-preserving union of two name lists (people-table values plus facility-registered vocab
+  // terms that no person has been assigned to yet) — a value entered via "+ Add New" now shows up
+  // everywhere immediately instead of only after a person is actually saved with it.
+  function unionNames(a, b) {
+    const seen = new Set(a.map((v) => v.toLowerCase()));
+    const out = a.slice();
+    for (const v of b) { if (!seen.has(v.toLowerCase())) { seen.add(v.toLowerCase()); out.push(v); } }
+    return out.sort((x, y) => x.localeCompare(y));
+  }
+  function orgNames() { return unionNames(distinctPeopleCol('organization'), DB.vocabList('ORG')); }
+  function deptNames() { return unionNames(distinctPeopleCol('department'), DB.vocabList('DEPT')); }
 
   /* ---------------- Helper: Editable Vocabulary Dropdowns ----------------
      A <select> backed by DB.vocabList(category) (built-in CONST terms plus any
@@ -65,18 +74,21 @@
   }
 
   /* ---------------- Helper: free-list <select> + "Add New" ----------------
-     For fields whose values are just distinct strings already in the data (Lab / Group,
-     Department) — no vocab table. Mirrors the vocab dropdown UX: a <select> of known values
+     For fields whose values are distinct strings already in the data (Lab / Group, Department)
+     PLUS any facility-registered vocab term (category 'ORG' / 'DEPT') nobody's been assigned to
+     yet — see orgNames/deptNames above. Mirrors the vocab dropdown UX: a <select> of known values
      plus a "+ Add New" button that opens a tiny nested modal, then injects+selects the new
-     value in the still-open parent form. `data-list` names the modal title. */
-  function listPickerField({ id, label, values, selected = '', modalTitle }) {
+     value in the still-open parent form. `data-list` names the modal title; `category`, when
+     given, is also persisted to the vocab table immediately (see listAddSave) so it shows up in
+     every other Lab/Group or Department picker right away, not only once a person is saved with it. */
+  function listPickerField({ id, label, values, selected = '', modalTitle, category }) {
     const opts = values.slice();
     if (selected && !opts.includes(selected)) opts.push(selected);
     return `
     <div class="field">
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;row-gap:4px">
         <label style="margin-bottom:0">${esc(label)}</label>
-        <button type="button" class="btn btn-secondary btn-sm" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-tooltip="Register a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
       </div>
       <select class="input" id="${id}">
         <option value="">— None —</option>
@@ -85,7 +97,7 @@
     </div>`;
   }
 
-  function openAddListValue(targetId, title) {
+  function openAddListValue(targetId, title, category) {
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('plus')} Add New ${esc(title || 'Value')}</span></div>
       <div class="body"><div class="stack">
@@ -93,17 +105,22 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="list-save" data-target="${targetId}">Add</button>
+        <button class="btn btn-primary" data-act="list-save" data-target="${targetId}" data-cat="${esc(category || '')}">Add</button>
       </div>`, (m) => { const i = m.querySelector('#list-new-value'); if (i) i.focus(); });
   }
 
-  function listAddSave(targetId) {
+  function listAddSave(targetId, category) {
     const dims = document.querySelectorAll('.modal-dim');
     const topDim = dims[dims.length - 1];
     if (!topDim) return;
     const value = topDim.querySelector('#list-new-value').value.trim();
     if (!value) { UI.toast('A value is required', 'error'); return; }
     UI.closeDim(topDim);
+
+    // Persist immediately so it survives even if this form is abandoned without saving — unlike
+    // the vocab dropdowns' categories, ORG/DEPT have no CONST built-ins, so vocabList('ORG'/'DEPT')
+    // simply returns whatever's been registered here plus whatever's already on a person record.
+    if (category) DB.addVocab(category, value);
 
     const parentDims = document.querySelectorAll('.modal-dim');
     const parentDim = parentDims[parentDims.length - 1];
@@ -568,12 +585,17 @@
     refresh();
   }
 
-  async function performBackupDownload(auto) {
+  // `kind` selects the filename/toast wording and whether the silent-folder path applies:
+  //   'manual'      — user-initiated "Export Backup" in Settings
+  //   'auto'        — the periodic background backup (silent-folder-eligible)
+  //   'pre-restore' — the safety copy taken automatically just before a restore overwrites the DB
+  async function performBackupDownload(kind) {
     const data = await DB.buildBackup();
     const json = JSON.stringify(data);
-    const filename = `core-facility-${auto ? 'autobackup' : 'backup'}-${new Date().toISOString().slice(0, 10)}.json`;
+    const namePart = kind === 'auto' ? 'autobackup' : kind === 'pre-restore' ? 'pre-restore-backup' : 'backup';
+    const filename = `core-facility-${namePart}-${new Date().toISOString().slice(0, 10)}.json`;
 
-    if (auto) {
+    if (kind === 'auto') {
       const wroteSilently = await tryWriteSilentBackup(filename, json);
       UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
       if (wroteSilently) {
@@ -589,7 +611,9 @@
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-    UI.toast(auto ? 'Automatic backup downloaded (set a silent backup folder in Settings to skip the download prompt)' : 'Complete backup exported');
+    UI.toast(kind === 'auto' ? 'Automatic backup downloaded (set a silent backup folder in Settings to skip the download prompt)'
+      : kind === 'pre-restore' ? 'Safety copy of current data downloaded before restoring'
+      : 'Complete backup exported');
   }
 
   function maybeAutoBackup() {
@@ -598,7 +622,7 @@
     const last = UI.storage.getItem('last-auto-backup-at');
     const lastTime = last ? new Date(last).getTime() : 0;
     if (Date.now() - lastTime < AUTO_BACKUP_INTERVAL_MS) return;
-    performBackupDownload(true).catch((e) => console.error('auto-backup failed', e));
+    performBackupDownload('auto').catch((e) => console.error('auto-backup failed', e));
   }
 
   async function requestPersistentStorage() {
@@ -913,8 +937,8 @@
       case 'vocab-save': return vocabSave(el.dataset.cat, el.dataset.target);
 
       // Free-list dropdowns (Lab / Group, Department) — "+ Add New"
-      case 'list-add': return openAddListValue(el.dataset.target, el.dataset.title);
-      case 'list-save': return listAddSave(el.dataset.target);
+      case 'list-add': return openAddListValue(el.dataset.target, el.dataset.title, el.dataset.cat);
+      case 'list-save': return listAddSave(el.dataset.target, el.dataset.cat);
 
       // Booking: register a new person without leaving the booking form
       case 'bk-add-person': return bookingAddPerson();
@@ -946,7 +970,7 @@
       case 'ms-save': return msSave();
       case 'edit-milestone': return editMilestone(el.dataset.id);
       case 'ms-edit-save': return msEditSave(el.dataset.id);
-      case 'toggle-ms-status': return toggleMilestoneStatus(el.dataset.id);
+      case 'toggle-ms-status': return openMilestoneStatusPicker(el.dataset.id);
       case 'ms-del': return msDel(el.dataset.id);
 
       // People CRUD
@@ -1053,7 +1077,7 @@
           </div>
           <div class="grid cols-2 mt-8">
             ${vocabField({ category: 'PERSON_TYPES', id: 'np-p-type', label: 'Position / Role', selected: 'PI' })}
-            ${listPickerField({ id: 'np-p-org', label: 'Lab / Group / Company', values: orgNames(), modalTitle: 'Lab / Group / Company' })}
+            ${listPickerField({ id: 'np-p-org', label: 'Lab / Group / Company', values: orgNames(), modalTitle: 'Lab / Group / Company', category: 'ORG' })}
           </div>
           <div class="field mt-8"><label>Email Address</label><input type="email" class="input" id="np-p-email" placeholder="elena.rostova@institute.org" /></div>
         </div>
@@ -1475,13 +1499,35 @@
     refresh();
   }
 
-  function toggleMilestoneStatus(id) {
-    const m = DB.row('SELECT status FROM milestones WHERE id=?', [id]);
+  // Direct status chooser — replaces the old pending→in-progress→done click-to-cycle behavior.
+  // Same data-act entry point ("toggle-ms-status") from every call site (milestone rows, the
+  // dashboard's upcoming/overdue lists, Today's Agenda), so all of them get this for free.
+  function openMilestoneStatusPicker(id) {
+    const m = DB.row('SELECT id, name, status FROM milestones WHERE id=?', [id]);
     if (!m) return;
-    const nextStatus = m.status === 'pending' ? 'in-progress' : m.status === 'in-progress' ? 'done' : 'pending';
-    DB.run("UPDATE milestones SET status=?, updated_at=datetime('now') WHERE id=?", [nextStatus, id]);
-    UI.toast(`Milestone marked ${nextStatus}`);
-    refresh();
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('target')} ${esc(m.name)}</span></div>
+      <div class="body"><div class="stack">
+        <div class="faint small mb-8">Set milestone status</div>
+        <div class="stack" style="gap:6px">
+          ${C.MS_STATUS.map((s) => `
+            <button type="button" class="btn ${s === m.status ? 'btn-primary' : 'btn-secondary'} ms-status-choice" data-status="${esc(s)}" style="justify-content:flex-start;gap:8px">
+              ${s === m.status ? ic('check') : ''}<span>${esc(s)}</span>
+            </button>`).join('')}
+        </div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+      </div>`, (modalEl, dim) => {
+      modalEl.querySelectorAll('.ms-status-choice').forEach((btn) => {
+        btn.onclick = () => {
+          DB.run("UPDATE milestones SET status=?, updated_at=datetime('now') WHERE id=?", [btn.dataset.status, id]);
+          UI.closeDim(dim);
+          UI.toast(`Milestone marked ${btn.dataset.status}`);
+          refresh();
+        };
+      });
+    });
   }
 
   async function msDel(id) {
@@ -1509,10 +1555,10 @@
         <div class="field"><label>Full Name *</label><input class="input" id="p-name" placeholder="e.g. Dr. Jane Doe" /></div>
         <div class="grid cols-2">
           ${vocabField({ category: 'PERSON_TYPES', id: 'p-type', label: 'Position / Role' })}
-          ${listPickerField({ id: 'p-org', label: 'Lab / Group / Company', values: orgNames(), modalTitle: 'Lab / Group / Company' })}
+          ${listPickerField({ id: 'p-org', label: 'Lab / Group / Company', values: orgNames(), modalTitle: 'Lab / Group / Company', category: 'ORG' })}
         </div>
         <div class="grid cols-2">
-          ${listPickerField({ id: 'p-dept', label: 'Department', values: deptNames(), modalTitle: 'Department' })}
+          ${listPickerField({ id: 'p-dept', label: 'Department', values: deptNames(), modalTitle: 'Department', category: 'DEPT' })}
           <div class="field"><label>Email Address</label><input type="email" class="input" id="p-email" placeholder="jane.doe@university.edu" /></div>
         </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
@@ -1569,10 +1615,10 @@
         <div class="field"><label>Full Name *</label><input class="input" id="pe-name" value="${esc(p.name)}" /></div>
         <div class="grid cols-2">
           ${vocabField({ category: 'PERSON_TYPES', id: 'pe-type', label: 'Position / Role', selected: p.type })}
-          ${listPickerField({ id: 'pe-org', label: 'Lab / Group / Company', values: orgNames(), selected: p.organization || '', modalTitle: 'Lab / Group / Company' })}
+          ${listPickerField({ id: 'pe-org', label: 'Lab / Group / Company', values: orgNames(), selected: p.organization || '', modalTitle: 'Lab / Group / Company', category: 'ORG' })}
         </div>
         <div class="grid cols-2">
-          ${listPickerField({ id: 'pe-dept', label: 'Department', values: deptNames(), selected: p.department || '', modalTitle: 'Department' })}
+          ${listPickerField({ id: 'pe-dept', label: 'Department', values: deptNames(), selected: p.department || '', modalTitle: 'Department', category: 'DEPT' })}
           <div class="field"><label>Email Address</label><input type="email" class="input" id="pe-email" value="${esc(p.email || '')}" /></div>
         </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
@@ -1983,13 +2029,44 @@
     lockHintTimer = setTimeout(() => hint.classList.remove('show'), 1600);
   }
 
+  // Same question as UI.confirmModal, plus a persistent "Don't ask me again" checkbox — built
+  // directly on UI.openModal (rather than through confirmModal) so the checkbox can be read from
+  // the modal DOM synchronously, before the dim is closed and the promise resolves.
+  function confirmSingleInstrumentLock() {
+    return new Promise((resolve) => {
+      const m = UI.openModal(`
+        <div class="head"><span class="t" style="font-weight:600">Single Instrument Booking?</span></div>
+        <div class="body">
+          <p class="mt-0 mb-8">Is only one instrument needed for this booking? If yes, you won’t be able to add another instrument until you remove this one.</p>
+          <label class="row" style="cursor:pointer;gap:8px">
+            <input type="checkbox" id="skip-single-inst-prompt" />
+            <span class="small">Don't ask me again</span>
+          </label>
+        </div>
+        <div class="foot">
+          <button class="btn btn-secondary" data-act="no">No</button>
+          <button class="btn btn-primary" data-act="yes">Yes</button>
+        </div>`, null, () => resolve(false));
+      const dim = m.closest('.modal-dim');
+      const finish = (result) => {
+        if (m.querySelector('#skip-single-inst-prompt').checked) UI.storage.setItem('skip-single-instrument-prompt', '1');
+        UI.closeDim(dim);
+        resolve(result);
+      };
+      m.querySelector('[data-act="no"]').onclick = () => finish(false);
+      m.querySelector('[data-act="yes"]').onclick = () => finish(true);
+    });
+  }
+
   /* Token-picker: <select> of not-yet-picked items + accumulating removable badges.
      Source of truth is the badge DOM; `wrap._setSelected(ids)` seeds it (edit mode).
 
      Instrument precheck: the first time the user (not `_setSelected` seeding an edit modal)
      picks an instrument, we ask whether the booking only needs that one. Answering yes "locks"
      the picker — the dropdown is disabled so no further instrument can be added — until the
-     user removes that instrument badge, which unlocks it again. */
+     user removes that instrument badge, which unlocks it again. Skipped entirely (dropdown stays
+     enabled, as if answered "No") once the user has opted out via the modal's checkbox or the
+     matching Settings → Preferences toggle. */
   function mountTokenPicker(m, kind, items, onChange) {
     const wrap = m.querySelector(`.token-picker[data-kind="${kind}"]`);
     if (!wrap) return;
@@ -2027,11 +2104,9 @@
       render();
       // Ask only the first time an instrument is picked by hand (not when an edit modal seeds
       // existing badges via _setSelected) — and only while it's the sole instrument selected.
-      if (kind === 'inst' && selected.size === 1) {
-        UI.confirmModal(
-          'Single Instrument Booking?',
-          'Is only one instrument needed for this booking? If yes, you won’t be able to add another instrument until you remove this one.'
-        ).then((ok) => { if (ok && selected.size === 1) { singleInstrumentLock = true; render(); } });
+      // Opted-out users (checkbox or Settings toggle) skip straight past, same as answering "No".
+      if (kind === 'inst' && selected.size === 1 && UI.storage.getItem('skip-single-instrument-prompt') !== '1') {
+        confirmSingleInstrumentLock().then((ok) => { if (ok && selected.size === 1) { singleInstrumentLock = true; render(); } });
       }
     });
     // Blocks opening the native dropdown while locked (e.g. no Group/Lab picked yet) —
@@ -3041,7 +3116,7 @@
   }
 
   /* ---------------- Backup & Restore ---------------- */
-  function doBackup() { return performBackupDownload(false); }
+  function doBackup() { return performBackupDownload('manual'); }
 
   async function doRestore() {
     const input = document.createElement('input');
@@ -3051,9 +3126,17 @@
       const f = input.files[0];
       if (!f) return;
       const text = await f.text();
-      const ok = await UI.confirmModal('Restore Facility Backup', 'Restoring a backup will replace your current database with the backup file. Continue?', { danger: true });
+      // Skip the safety copy when there's effectively nothing to lose — same emptiness check
+      // the auto-backup skip uses (hasAnyData), so an empty/fresh DB doesn't produce a pointless
+      // download or hold up the confirm dialog with a promise that has nothing to protect.
+      const willSafetyBackup = hasAnyData();
+      const body = willSafetyBackup
+        ? 'Restoring a backup will replace your current database with the backup file. A safety copy of your current data will be downloaded first. Continue?'
+        : 'Restoring a backup will replace your current database with the backup file. Continue?';
+      const ok = await UI.confirmModal('Restore Facility Backup', body, { danger: true, confirmText: 'Restore' });
       if (!ok) return;
       try {
+        if (willSafetyBackup) await performBackupDownload('pre-restore');
         await DB.restoreBackup(JSON.parse(text));
         UI.toast('Database restored successfully');
         route('projects');

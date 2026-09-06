@@ -45,7 +45,7 @@
             <div class="row milestone-quick-row">
               <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
               <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
-              <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status">${m.status}</span>
+              <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
               <span class="mono small">${fmt(m.due_date)}</span>
             </div>`).join('') : emptyState('calendar', 'Nothing due soon', 'No pending milestones in the next 30 days.')}
         </div>
@@ -57,7 +57,7 @@
             <div class="row milestone-quick-row">
               <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
               <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
-              <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to mark done">overdue</span>
+              <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">overdue</span>
               <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
             </div>`).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
         </div>
@@ -459,7 +459,7 @@
     <div class="ms" data-ms-id="${m.id}">
       <div class="rail">
         <div class="node ${m.status === 'done' ? 'done' : isOverdue ? 'overdue' : m.status === 'in-progress' ? 'next' : ''} clickable"
-             data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status"></div>
+             data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status"></div>
         <div class="line"></div>
       </div>
       <div class="body">
@@ -467,7 +467,7 @@
           <span class="ttl">${esc(m.name)}</span>
           <div class="grow"></div>
           <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable"
-                data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status">${m.status}</span>
+                data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
           ${isOverdue ? '<span class="badge danger">overdue</span>' : ''}
           <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}" title="Edit milestone">${ic('edit')}</button>
           <button class="btn btn-ghost btn-sm" data-act="ms-del" data-id="${m.id}" title="Delete milestone">${ic('trash')}</button>
@@ -799,6 +799,7 @@
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
     const folderStatus = global.App.autoBackupFolderStatus;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
+    const skipSingleInstrumentPrompt = UI.storage.getItem('skip-single-instrument-prompt') === '1';
     const orgs = global.DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization").map((r) => r.organization);
     const renameOrgs = global.DB.listAllOrgNames(); // includes orgs that only show up in group_discounts/meetings.group_org
 
@@ -814,6 +815,16 @@
           <label class="row" style="cursor:pointer;gap:8px">
             <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
             <span class="small font-medium">Show on startup</span>
+          </label>
+        </div>
+        <div class="row mb-8">
+          <div class="grow">
+            <div style="font-weight:600">Single-Instrument Booking Prompt</div>
+            <div class="faint small">Ask whether to lock a booking to one instrument the first time you pick one for it. Turned off automatically if you tick "Don't ask me again" on that prompt.</div>
+          </div>
+          <label class="row" style="cursor:pointer;gap:8px">
+            <input type="checkbox" id="pref-single-instrument-prompt" ${!skipSingleInstrumentPrompt ? 'checked' : ''} onchange="UI.storage.setItem('skip-single-instrument-prompt', this.checked ? '0' : '1'); UI.toast('Preference updated');" />
+            <span class="small font-medium">Ask about single-instrument bookings</span>
           </label>
         </div>
       </div>

@@ -8,6 +8,15 @@ This project uses [Semantic Versioning](https://semver.org/).
 ### Added
 - **A full user manual**, searchable and illustrated, hosted at `docs/manual/`.
 - **A new Manual button in the sidebar**, linking straight to the hosted manual.
+- **Browser Back/forward now works, and every screen has its own address** (`#/projects`, `#/project/12`, `#/reports`, …) so a screen can be bookmarked, reloaded, or shared between devices. Dialogs and the guided tour stay out of the URL.
+- **A safety copy of your current data is downloaded automatically before a Restore** replaces the database (skipped when the database is empty), named `core-facility-pre-restore-backup-<date>.json`.
+- **"Show all labs" on the booking form's Assign People picker** — tick it to invite a collaborator from another lab without switching the booking's Group/Lab. The chosen Group/Lab still decides the group discount.
+- **Rename / Merge Lab tool** in Settings (Admin Mode): renames a lab everywhere at once — people, the lab's standing discount row, and the lab label saved on past bookings. Merging into an existing name keeps that name's own discount; historical booking totals are never recomputed.
+
+### Changed
+- **Milestone status is picked directly** from a small chooser (project page, dashboard lists, Today's Agenda) instead of click-cycling pending → in-progress → done.
+- **"+ Add New" Lab/Group and Department values now persist immediately**, even if the form they were added from is cancelled.
+- **The "Single Instrument Booking?" question has a "Don't ask me again" checkbox**; Settings → Preferences can turn the question back on.
 
 ## [1.5.2] — 2026-09-06
 
