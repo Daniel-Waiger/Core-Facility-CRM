@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emailing Attendees — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="email-attendees.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Emailing Attendees</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 11</p>
+      <h1>Emailing Attendees</h1>
+      <p class="lede">The app can't send email on its own — but it can save you the typing. Here's the two-minute copy-and-paste workflow.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Build a ready-to-send email to a booking's attendees in a few clicks.</li>
+        <li>Notice and understand a "skipped" count for attendees with no email on file.</li>
+        <li>Explain to a colleague why the app opens a blank email instead of just sending one.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="how-it-works">To email a booking's attendees</h2>
+      <ol class="steps">
+        <li>Open the booking (from the Calendar or a project's Meetings list).</li>
+        <li>Choose <strong>Email Attendees</strong>.</li>
+        <li>The app builds three fields for you: a list of recipient email addresses, a subject, and a body — see below for exactly what goes into each.</li>
+        <li>Click the copy button beside <strong>Attendees</strong>, then paste it into your email app's To field.</li>
+        <li>Click the copy button beside <strong>Subject</strong>, then paste it into the subject line.</li>
+        <li>Click the copy button beside <strong>Body</strong>, then paste it into the message.</li>
+        <li>Click <strong>Open Email App</strong> to launch a blank new message in your device's own mail program, ready for those three pastes.</li>
+      </ol>
+      <p>What goes into each field:</p>
+      <ul>
+        <li><strong>Attendees</strong> — the email address of every attendee on the booking who actually has one on file, comma-separated. If any attendees have no email address recorded, the app tells you how many were skipped, so you know to reach them another way.</li>
+        <li><strong>Subject</strong> — the booking's date and title, e.g. <code>[2026-03-14] Confocal Training Session</code>.</li>
+        <li><strong>Body</strong> — the booking's date, its notes (flattened to plain text), and any Next Steps / Action Items you've recorded on it.</li>
+      </ul>
+      <figure class="shot">
+        <img src="../screenshots/10-meetings.png" alt="A meeting/booking card with an Email Attendees action" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/10-meetings.png</div>
+        <figcaption>Email Attendees is available from any booking that has at least one attendee with an email address.</figcaption>
+      </figure>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> If no attendee on the booking has an email address recorded, Email Attendees will tell you so instead of opening an empty message — add emails to the relevant people first (see <a href="people-labs.html#add-a-person">Add a person</a>).</p></div>
+    </section>
+
+    <section>
+      <h2 id="why-no-send">Why it can't just send the email for you</h2>
+      <p>This app has no server, no account of yours, and no connection to any email provider — see <a href="big-ideas.html#your-data-lives-here">Your data lives here</a>. It genuinely has no channel to send mail through on your behalf, the way a full email client does. The best it can do is hand everything off to the mail program already installed on your own device.</p>
+      <p>You might wonder, then, why it doesn't at least pre-fill that blank email for you automatically instead of asking you to copy and paste three times. That part is deliberate, for a more specific reason:</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Handing recipients, subject, and body straight to your mail app has to go through a web link, and those links are capped at a low character limit by your browser and operating system — commonly around 2,000 characters. A booking's notes and action items can easily run longer than that, and if they did, the message would get silently cut off partway through with no warning. Rather than risk quietly losing part of a note, the app shows you the full, complete text on screen with a copy button for each field, and opens a genuinely blank email — nothing to truncate, because nothing is pre-filled.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> Load the sample data, open any booking that has attendees with email addresses on file, and run through Email Attendees end to end — copy each field and paste it into a real draft in your mail app (there's no need to actually send it).</p></div>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q">
+        <summary>A booking has 4 attendees, but only 2 have email addresses on file. What happens when you choose Email Attendees?</summary>
+        <p>The app builds the email using just those 2 addresses, and tells you that 2 attendees were skipped because they have no email on file.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>Why doesn't the app just fill in the recipients, subject, and body automatically when it opens your mail app?</summary>
+        <p>Because the link used to open a mail app is limited to roughly 2,000 characters by the browser/OS, and a longer note or action list could get silently cut off. Showing the full text with copy buttons, and opening a blank message, avoids losing any of it.</p>
+      </details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

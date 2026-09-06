@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instruments — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="instruments.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Instruments</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 7</p>
+      <h1>Instruments</h1>
+      <p class="lede">Every microscope, sequencer, or piece of equipment your facility offers gets an entry here — including how it's billed.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Add an instrument, including its cost and how that cost is billed.</li>
+        <li>Understand the difference between billing "per time" and billing "per unit."</li>
+        <li>Track an instrument's operational status (available, in use, in maintenance, or down).</li>
+        <li>Retire an instrument that's gone out of service without losing its booking history.</li>
+        <li>Assign an instrument to a project.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="add-an-instrument">Adding an instrument</h2>
+      <ol class="steps">
+        <li>Go to <strong>Instruments</strong> in the sidebar.</li>
+        <li>Choose <strong>Add Instrument</strong>.</li>
+        <li>Enter a name.</li>
+        <li>Pick a Modality from the list, or add a new one.</li>
+        <li>Set the <strong>Operational Status</strong> — see <a href="#operational-status">below</a>.</li>
+        <li>Add a location and any configuration notes, if useful.</li>
+        <li>Set the <strong>Cost</strong> and choose what it's <strong>Billed per</strong> — see the next section, this is the part that decides how much a booking costs.</li>
+        <li>Save.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/12-instruments.png" alt="The Instruments inventory list showing name, modality, status, cost, unit, and project count columns" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/12-instruments.png</div>
+        <figcaption>The Instruments inventory — every piece of equipment your facility tracks, at a glance.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="cost-billed-per">Cost & "Billed per" — with worked examples</h2>
+      <p>Every instrument has a <strong>Cost</strong> and a setting for what that cost is <em>per</em>. This single choice controls how the price is calculated every time the instrument is used on a booking. There are two shapes it can take:</p>
+      <ul>
+        <li><strong>Billed per time</strong> — the cost is a price per hour. The final charge is that price multiplied by how long the booking lasted.</li>
+        <li><strong>Billed per unit</strong> (the same idea also covers "weight" and "other") — the cost is a price per single unit of something else entirely — a sample, a run, a gram, a plate. Instead of using the booking's length, whoever creates the booking types in how many units were used, and the charge is that price multiplied by that number.</li>
+      </ul>
+      <div class="callout math">
+        <p><strong>🧮 The math — time example.</strong> Say a confocal microscope costs <strong>$100 per hour</strong> and is billed per time. A researcher books it from 9:00 to 11:30 — that's 2.5 hours. The instrument charge is:</p>
+        <p>$100 × 2.5 hours = <strong>$250</strong></p>
+        <p>No one has to type a duration by hand — the booking's start and end time already give the length, and the app multiplies automatically.</p>
+      </div>
+      <div class="callout math">
+        <p><strong>🧮 The math — per-unit example.</strong> Say a sequencer costs <strong>$40 per sample</strong> and is billed per unit (not per time). A booking on that instrument runs 12 samples through it. The instrument charge is:</p>
+        <p>$40 × 12 samples = <strong>$480</strong></p>
+        <p>Here the booking's length doesn't matter at all for this line — what matters is the number typed in on the booking (12 samples), because the instrument isn't billed by the clock.</p>
+      </div>
+      <figure class="shot">
+        <img src="../screenshots/24-instrument-cost-unit-fields.png" alt="Instrument edit form showing the Cost field and a Billed per selector with time, unit, weight, and other options" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/24-instrument-cost-unit-fields.png</div>
+        <figcaption>The Cost and "Billed per" fields — this choice decides whether a booking's length or a typed-in amount drives the charge.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="../screenshots/31-instruments-list-cost-unit.png" alt="Instruments list showing the cost and unit columns for several instruments" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/31-instruments-list-cost-unit.png</div>
+        <figcaption>The inventory list shows each instrument's cost and billing unit side by side.</figcaption>
+      </figure>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way.</strong> Not every instrument makes sense to charge by the clock — a sequencing run might take the same three hours whether it processes 4 samples or 40, so charging by time alone wouldn't reflect the real cost. Letting each instrument choose its own billing shape means the numbers on your invoice actually match how that piece of equipment is really used.</p>
+      </div>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> This is only one line of a booking's total cost — instruments booked alongside facility staff time, discounts, overhead, and tax all combine into the final number. For the complete walkthrough of how all of that adds up, see <a href="costs-math.html#worked-example">How Costs Are Calculated</a>.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="operational-status">Operational status</h2>
+      <p>Each instrument carries one of four statuses, which you can update any time from its record:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>Available</td><td>Ready to be booked.</td></tr>
+            <tr><td>In-use</td><td>Currently occupied by a session.</td></tr>
+            <tr><td>Maintenance</td><td>Being serviced or calibrated.</td></tr>
+            <tr><td>Down</td><td>Out of service.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>This status is informational — it's a flag you set to communicate the instrument's real-world state to everyone browsing the inventory; it doesn't by itself block a booking from being made against that instrument.</p>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> Use the Status filter on the Instruments screen to quickly see everything that's down or in maintenance.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="retire-restore">Retiring and restoring an instrument</h2>
+      <p>When a piece of equipment is decommissioned or removed from the facility, retire it rather than deleting it.</p>
+      <ol class="steps">
+        <li>Open the instrument's record.</li>
+        <li>Choose <strong>Retire</strong>.</li>
+      </ol>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way — the app decides delete vs. retire, not you.</strong> Just as with people (see <a href="people-labs.html#retire-restore">People & Labs</a>), if this instrument has never appeared on a booking, a milestone, or a project, the app offers a true, permanent <strong>Delete</strong> instead — there's no history at stake. The instant it has any history, only <strong>Retire</strong> is offered, because old bookings and milestones need to keep saying which instrument they used, permanently.</p>
+      </div>
+      <figure class="shot">
+        <img src="../screenshots/43-retire-instrument.png" alt="Retire instrument dialog listing bookings and milestones referencing this instrument" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/43-retire-instrument.png</div>
+        <figcaption>Retiring an instrument lists exactly where its history lives before you confirm.</figcaption>
+      </figure>
+      <p>A retired instrument shows "(Retired)" wherever it's listed, stays visible on every past record it's part of, disappears from pickers for new bookings and milestones, and is hidden from the main inventory list behind a <strong>Show retired (n)</strong> toggle. Open it while that toggle is on to <strong>Restore</strong> it.</p>
+    </section>
+
+    <section>
+      <h2 id="assign-to-project">Assigning an instrument to a project</h2>
+      <p>A project can list the instruments it relies on, separate from any specific booking. Open the project's detail page and use its instruments section to add or remove one. See <a href="projects.html#metadata-tags">Projects</a> for the surrounding project-detail layout.</p>
+      <figure class="shot">
+        <img src="../screenshots/08-assigned-instruments.png" alt="A project detail page's Instruments section listing assigned equipment" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/08-assigned-instruments.png</div>
+        <figcaption>A project's assigned instruments — the equipment this project regularly relies on.</figcaption>
+      </figure>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>A confocal microscope costs $80/hour and is booked from 1:00 to 3:15. What does the instrument line cost?</summary><p>2.25 hours × $80 = $180.</p></details>
+      <details class="quiz-q"><summary>A flow cytometer costs $15 per sample and is billed per unit. A booking runs 20 samples through it, lasting 4 hours. What drives the instrument charge — the 4 hours, or the 20 samples?</summary><p>The 20 samples. Because it's billed per unit rather than per time, the booking's length doesn't factor into this line at all — only the amount typed in on the booking does: 20 × $15 = $300.</p></details>
+      <details class="quiz-q"><summary>Can you delete an instrument that's been used on ten past bookings?</summary><p>No — with that much history attached, the app only offers Retire, to protect the record of what those past bookings used. Only an instrument with zero history can be truly deleted.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

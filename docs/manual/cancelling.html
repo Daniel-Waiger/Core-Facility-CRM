@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cancelling &amp; Billing Rules — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="cancelling.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Cancelling &amp; Billing Rules</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 10</p>
+      <h1>Cancelling &amp; Billing Rules</h1>
+      <p class="lede">Cancelling a booking isn't the same as deleting it — here's exactly what happens to the charge, and how to undo it.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Cancel a booking and predict, before you click, whether its charge will stand or drop.</li>
+        <li>Use Admin Mode's three-way choice to waive a charge on purpose.</li>
+        <li>Reinstate a cancelled booking, and know why it might fail.</li>
+        <li>Recognize when the app offers a true delete instead of a cancel.</li>
+        <li>Read a cancelled booking's badges on the Project Costs list.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="decision-table">What happens when you cancel a booking</h2>
+      <p>A booking is a record of facility time, not just a calendar entry — see <a href="big-ideas.html#cancelled-vs-deleted">Cancelled vs. deleted</a>. So cancelling it asks one question first: <strong>had the booking's start time already passed?</strong></p>
+      <ol class="steps">
+        <li>Open the booking (from the Calendar or a project's Meetings list) and choose <strong>Cancel</strong>.</li>
+        <li>If its start time hasn't arrived yet, the app simply cancels it and drops any charge — nothing was ever held.</li>
+        <li>If its start time has already passed and it carries a charge above zero, what happens next depends on whether <a href="big-ideas.html#admin-mode">Admin Mode</a> is on.</li>
+      </ol>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Start time</th><th>Charge</th><th>Admin Mode</th><th>What happens</th></tr></thead>
+          <tbody>
+            <tr><td>Not started yet</td><td>Any amount</td><td>Off or On</td><td>Cancelled, charge dropped — nothing was held.</td></tr>
+            <tr><td>Already started</td><td>0 (nothing billed)</td><td>Off or On</td><td>Cancelled, no charge either way — there was nothing to keep or drop.</td></tr>
+            <tr><td>Already started</td><td>Above 0</td><td>Off</td><td>Cancelled, but the charge <strong>stands</strong> — the message says only Admin Mode can waive it.</td></tr>
+            <tr><td>Already started</td><td>Above 0</td><td>On</td><td>A three-way choice appears: <strong>Keep Booking</strong> (don't cancel after all), <strong>Cancel &amp; Waive Charge</strong>, or <strong>Cancel &amp; Keep Charge</strong>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="shot">
+        <img src="../screenshots/37-cancel-booking-admin.png" alt="The three-way Cancel Booking dialog with Keep Booking, Cancel & Waive Charge, and Cancel & Keep Charge buttons" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/37-cancel-booking-admin.png</div>
+        <figcaption>The three-way dialog only appears in Admin Mode, on a started booking that still carries a charge.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="waive-or-keep">Why "after start = charge stands"</h2>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Once a booking's start time has passed, the facility already held that instrument (and possibly staff) reserved for it — that slot couldn't be given to anyone else. Cancelling afterward doesn't undo that reservation, so the charge stands by default. Waiving it is a deliberate exception, which is why it's gated behind <a href="big-ideas.html#admin-mode">Admin Mode</a> — the same gate used everywhere else in the app that a billing amount can be overridden (see the group-discount Revoke/Apply control in <a href="bookings.html#book-a-session">Booking a Session</a>).</p></div>
+      <ul>
+        <li><strong>Cancel &amp; Waive Charge</strong> — the booking is cancelled and its charge is dropped from Project Costs, as if it hadn't been held.</li>
+        <li><strong>Cancel &amp; Keep Charge</strong> — the booking is cancelled but its charge still counts, because the slot really was held.</li>
+      </ul>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> Turn on Admin Mode (Settings → Admin Mode). Load the sample data, find a past booking with a cost above zero, and cancel it — you should see the three-way choice. Try Cancel &amp; Waive Charge, then check the project's Costs card: the row should show as cancelled with its amount struck through and counted as 0.</p></div>
+    </section>
+
+    <section>
+      <h2 id="reinstate">Reinstating a cancelled booking</h2>
+      <p>A cancelled booking immediately frees up its instrument and staff slots for other bookings — that's the whole point of cancelling it. So if you change your mind and reinstate it, the app has to check that slot is still free before putting it back.</p>
+      <ol class="steps">
+        <li>Open the cancelled booking (it appears struck-through/grey on the Calendar, or with a <strong>Reinstate</strong> option in its editor).</li>
+        <li>Choose <strong>Reinstate</strong>.</li>
+        <li>The app re-checks for conflicts — the same same-instrument / same-staff-member overlap check a brand-new booking goes through (see <a href="bookings.html#conflicts">Conflicts</a>).</li>
+        <li>If nothing else has taken that slot, the booking is restored and starts blocking it again. If something else was booked into it in the meantime, reinstating is refused with an error explaining the conflict.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/48-booking-cancelled-meetings.png" alt="A cancelled booking in a meeting list, showing its Reinstate action" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/48-booking-cancelled-meetings.png</div>
+        <figcaption>A cancelled booking's row offers Reinstate instead of Cancel.</figcaption>
+      </figure>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Cancelling a booking is exactly what makes its slot bookable again — someone else may well have grabbed it in the meantime. Reinstating without re-checking could silently double-book an instrument or a staff member, so the app runs the same conflict check it would for a brand-new booking.</p></div>
+    </section>
+
+    <section>
+      <h2 id="when-delete">When you get a true delete instead</h2>
+      <p>Occasionally, cancelling offers to delete the booking outright rather than just cancel it. That only happens when the booking is an empty note: no attendees, no instruments, no staff, and no cost recorded against it — there's genuinely no record worth keeping.</p>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> A true delete is permanent — there's no undo (see <a href="rough-edges.html#no-undo">No undo</a>). It's only ever offered when the booking carries nothing to lose.</p></div>
+      <p>Any booking that has attendees, instruments, staff, or a cost above zero is cancelled instead, never deleted — that's the whole reason cancelling exists as a separate action from deleting.</p>
+    </section>
+
+    <section>
+      <h2 id="costs-view">How cancelled bookings look in Project Costs</h2>
+      <p>A project's Costs card lists every booking's charge, and marks cancelled ones clearly rather than just removing them:</p>
+
+      <figure class="shot">
+        <img src="../screenshots/30-project-costs-list.png" alt="A project's Costs card listing every booking's charge" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/30-project-costs-list.png</div>
+        <figcaption>The Costs card on a project's detail page — one row per booking, each with its own charge.</figcaption>
+      </figure>
+
+      <ul>
+        <li>A cancelled booking whose charge was dropped or waived shows a <strong>"Cancelled"</strong> badge, with its amount struck through and counted as 0 toward the running total.</li>
+        <li>A cancelled booking whose charge still stands shows a <strong>"Cancelled · charged"</strong> badge, and its amount still counts toward the running total.</li>
+      </ul>
+      <figure class="shot">
+        <img src="../screenshots/47-booking-cancelled-costs.png" alt="Project Costs list showing a cancelled-but-charged booking with its badge and amount" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/47-booking-cancelled-costs.png</div>
+        <figcaption>A "Cancelled · charged" badge means the slot was held before cancellation, so the amount still counts.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../screenshots/36-project-costs-running-total.png" alt="The Costs card's running total at the bottom of the list" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/36-project-costs-running-total.png</div>
+        <figcaption>The running total at the bottom of the card — cancelled-and-waived rows count as 0 toward it, cancelled-and-charged rows still count.</figcaption>
+      </figure>
+
+      <p>This is the same rule the <a href="reports.html#two-rules">Reports &amp; Utilization</a> screen uses for money, so a project's Costs card and the facility-wide Reports totals never disagree about what's owed.</p>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q">
+        <summary>You cancel a booking that starts tomorrow and already has a cost of 150 on it. Does the 150 still count?</summary>
+        <p>No. Its start time hasn't passed, so nothing was held — the charge is dropped regardless of Admin Mode.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>Without Admin Mode turned on, can you cancel a started booking and drop its charge?</summary>
+        <p>No — without Admin Mode, cancelling a started booking with a charge above zero keeps the charge standing. Only Admin Mode's three-way dialog can waive it.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>Why might reinstating a cancelled booking fail?</summary>
+        <p>Because reinstating re-checks for scheduling conflicts, and something else — another booking using the same instrument or the same facility staff member at an overlapping time — may have taken that slot while the booking was cancelled.</p>
+      </details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Big Ideas — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="big-ideas.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><!-- rendered by manual.js --></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>The Big Ideas</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 2</p>
+      <h1>The Big Ideas</h1>
+      <p class="lede">Ten short ideas that explain almost every "why does it do that?" moment in the rest of the app — read this chapter once, before anything else.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Explain where your data actually lives, and why that matters</li>
+        <li>Tell backups and syncing apart, and avoid the mistake that trips people up most</li>
+        <li>Know why the app "retires" and "archives" things instead of deleting them</li>
+        <li>Understand why a cancelled booking can still show a charge</li>
+        <li>Understand why old bills don't change when you update today's rates</li>
+        <li>Recognize the two roles a person can play in a booking, and why the difference matters for cost</li>
+        <li>Know what Admin Mode actually protects — and what it doesn't</li>
+      </ul>
+    </section>
+
+    <p>Each idea below is short on purpose. Every other chapter links back here instead of re-explaining these — so it's worth reading the whole chapter once, even before you touch a real project.</p>
+
+    <section>
+      <h2 id="your-data-lives-here">Your data lives in this browser, on this device</h2>
+      <p>There is no company server behind this app, no account to log into, and nothing being sent over the internet while you use it. Everything you type — every project, person, booking — is saved directly inside the browser you're using, on the computer or tablet you're using it on.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> That design is what lets the app run entirely offline, install like a normal program, and work even with no internet connection at all. The trade-off is that "your data" really means "the data in this one browser" — nothing more, nothing less.</p></div>
+      <p>The practical result: if you open the tracker in a <em>different</em> browser, or on a <em>different</em> computer or tablet, you'll find it empty — even though it's "the same app." Two browsers on the very same computer (say, Chrome and Firefox) also keep two completely separate sets of data.</p>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> If you have two browsers installed, open the tracker in one, load the sample data, then open the tracker's address in the other browser. You'll see it start empty — proof that each browser keeps its own private copy.</p></div>
+    </section>
+
+    <section>
+      <h2 id="backups-are-not-sync">A backup is a snapshot, not a sync</h2>
+      <p>Settings lets you export a backup file and restore from one (see <a href="backups-exports.html#json-backup">Backups, Restore &amp; Exports</a>). It's tempting to think of that like cloud sync — but it isn't. Exporting makes a snapshot of your data at that exact moment; nothing updates that file afterward.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Because there's no server, the only way to move data between devices is a file you carry yourself — there's no automatic background sync happening anywhere.</p></div>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> If you restore an old backup onto a device that has newer work on it, that newer work is overwritten and lost — restoring replaces the whole database, it doesn't merge. Always export a fresh backup of whatever is currently on a device <em>before</em> restoring a different file onto it. See <a href="rough-edges.html#restore-replaces">Restore replaces everything</a>.</p></div>
+    </section>
+
+    <section>
+      <h2 id="retire-vs-delete">People and instruments retire — they don't get deleted</h2>
+      <p>Say a facility staff member who ran forty past bookings leaves the lab. If you deleted their record, every one of those forty bookings would lose the answer to "who ran this session?" — a real gap in your history. So instead, the app lets you <strong>retire</strong> them: their name gets a "(Retired)" label everywhere it appears, they disappear from pickers for <em>new</em> work, but every past record that already names them is untouched.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Deleting is meant only for a genuine mistake — a duplicate entry, a typo — that has nothing riding on it yet. The moment a record has real history attached, deleting it would falsify that history, so the app protects it by retiring instead.</p></div>
+      <p>Because of this, the app only ever offers a true, permanent delete when a person or instrument has <strong>zero</strong> references anywhere — no projects, no bookings, no milestones. The moment there's any history at all, the same button retires instead of deleting; you can't force a delete on a record with history (if you have true duplicates, retire the extra one). See <a href="people-labs.html#retire-restore">People &amp; Labs</a> and <a href="instruments.html#retire-restore">Instruments</a>.</p>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> In the sample data, open <strong>People &amp; Labs</strong> and try retiring one of the facility staff members who has bookings. Notice the dialog tells you exactly where they appear before you confirm — and that a "Show retired" toggle is the only way to see them again afterward.</p></div>
+    </section>
+
+    <section>
+      <h2 id="archive">Projects archive — the project version of retiring</h2>
+      <p>The same idea applies to whole projects. A finished or cancelled project isn't deleted — it's <strong>archived</strong>. An archived project disappears from the dashboard and the everyday project list, but every milestone, booking, and cost it ever had stays fully intact, and you can restore it any time. See <a href="projects.html#archive-restore">Archive &amp; restore</a>.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A project's cost history is real billing history. Archiving lets your active list stay focused on live work, without ever throwing away the record of what was billed and when.</p></div>
+    </section>
+
+    <section>
+      <h2 id="cancelled-vs-deleted">A booking is cancelled — it's a money record, not a note</h2>
+      <p>A booking isn't just a calendar entry; the moment it has any cost attached to it, it's effectively a small invoice. So instead of deleting a booking you no longer need, you <strong>cancel</strong> it — the same way you'd cancel an order rather than pretend it never existed. The one exception: a booking with nothing on it yet (no attendees, no lines, no cost) can be deleted outright, because there's no history to protect. Full rules in <a href="cancelling.html#decision-table">Cancelling &amp; Billing Rules</a>.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> If a booking already held an instrument's calendar slot past its start time, someone reserved that time and may already have been charged for it. Cancelling keeps a truthful record of "this was booked and started, then called off" instead of silently erasing that it ever happened.</p></div>
+    </section>
+
+    <section>
+      <h2 id="cost-snapshots">A booking's cost is frozen the moment you save it</h2>
+      <p>When you save a booking, the app calculates its cost right then — using that day's rates, overhead, and tax — and locks that total into the booking permanently. If you later raise your hourly rate or change your overhead percentage, every booking already saved keeps its <em>original</em> total. Only new bookings use the new numbers. See <a href="costs-math.html#worked-example">How Costs Are Calculated</a>.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Imagine invoicing a lab for a session from six months ago, and the total silently changes because you updated this year's tax rate. Freezing the cost at save time is what makes a booking's total trustworthy as a real historical bill, not a number that drifts.</p></div>
+    </section>
+
+    <section>
+      <h2 id="local-dates">The date you pick is the date everyone sees</h2>
+      <p>Every date field in the app — a booking's date, a milestone's due date — is a plain calendar date, like a date written on a piece of paper. There's no hidden time zone conversion happening behind the scenes: what you type in is exactly what shows up everywhere else, for everyone using that same tracker.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This sounds obvious, but it isn't automatic in most software — many apps quietly shift dates by a day depending on where in the world you are. This tracker deliberately avoids that, so "the booking is on the 14th" always means the 14th, full stop.</p></div>
+    </section>
+
+    <section>
+      <h2 id="facility-staff-vs-attendees">Facility Staff and attendees are different roles</h2>
+      <p>Every booking can have people attached to it two different ways. <strong>Attendees</strong> are simply who was there — researchers, visitors, anyone relevant to the session — and they are never billed for their time. <strong>Facility Staff</strong> are the operators who actually ran the instrument, and they carry an hourly rate that gets billed for the time they worked on that booking.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A researcher attending their own imaging session shouldn't generate a labor charge just for being present — only the person actually staffing the instrument should. Keeping the two roles separate is what makes that distinction possible. Only people flagged as Facility Staff in their own record can be picked as staff on a booking at all (see <a href="people-labs.html#facility-staff-flag">Facility Staff flag</a>).</p></div>
+    </section>
+
+    <section>
+      <h2 id="admin-mode">Admin Mode is a billing switch, not a lock on the app</h2>
+      <p>Admin Mode is a toggle in Settings that unlocks a handful of billing-sensitive controls: group discount editing, per-booking manual discounts, and the option to waive a charge when cancelling a started booking. See <a href="settings-admin.html#admin-mode">Settings, Admin Mode &amp; Discounts</a>.</p>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Admin Mode is <em>not</em> a login or a security feature — there are no accounts or passwords anywhere in this app. It's a convenience switch that anyone sitting at that browser can turn on or off. Treat it as "am I currently doing billing admin work," not as access control.</p></div>
+    </section>
+
+    <section>
+      <h2 id="add-new">"Other" in a dropdown really means "Add New"</h2>
+      <p>Several dropdowns in the app — a person's role, a project's modality, a lab name — are built from whatever values already exist, plus an option at the bottom. That option isn't a literal choice called "Other"; picking it opens a small prompt for you to type a brand-new value, which then joins the list for next time.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A tracker with a growing pile of records labeled literally "Other" would be useless for filtering and reporting later. Typing the real value in immediately keeps your data specific from the start.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> A newly typed lab or department name is saved to the shared list right away — even if you go on to cancel out of the form you were filling in. See <a href="people-labs.html#labs-departments">Labs &amp; departments</a>, and <a href="settings-admin.html#rename-lab">Rename a lab or group</a> for fixing a typo after the fact.</p></div>
+      <figure class="shot">
+        <img src="../screenshots/18-add-new-value.png" alt="A dropdown open showing existing values plus an Add New option at the bottom" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/18-add-new-value.png</div>
+        <figcaption>Picking "+ Add New" opens a small text prompt instead of saving the word "Other."</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="red-cancel">One more habit worth knowing: the red button is Cancel</h2>
+      <p>On any dialog warning you about something destructive (deleting, retiring, archiving), the eye-catching red button is always the <strong>safe</strong> way out — Cancel — and the button that actually goes ahead is a plain, neutral color.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> On a dialog meant to stop you from an accident, the strong color should draw your eye to the safe exit, not tempt you toward the destructive action out of habit.</p></div>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>You export a backup on Monday, keep working all week, then on Friday you accidentally restore Monday's file. What happens to the week's work?</summary><p>It's gone — restoring replaces the whole database with the backup file's contents, it doesn't merge. That's why you should export a fresh backup of the current data before restoring an older one.</p></details>
+      <details class="quiz-q"><summary>Why can't you just delete a facility staff member who has run 30 past bookings?</summary><p>Because deleting them would erase who ran those 30 bookings from history. The app retires them instead — hidden from pickers for new work, but every past record stays intact and readable.</p></details>
+      <details class="quiz-q"><summary>You raise your facility's tax rate today. Does that change what last month's bookings show as their total cost?</summary><p>No. Each booking's cost is calculated and frozen the moment it's saved. Only bookings created after the rate change use the new rate; old bookings keep their original total.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

@@ -748,6 +748,65 @@
     }
   }
 
+  // Every organization name on record anywhere, not just people.organization — a lab can show
+  // up only in a discount row or on a booking's saved group_org snapshot (e.g. after a person
+  // who belonged to it was reassigned or removed), and the rename tool needs to offer those too.
+  function listAllOrgNames() {
+    const set = new Set();
+    rows("SELECT DISTINCT organization as org FROM people WHERE organization IS NOT NULL AND TRIM(organization) != ''").forEach((r) => set.add(r.org));
+    rows("SELECT DISTINCT org FROM group_discounts WHERE org IS NOT NULL AND TRIM(org) != ''").forEach((r) => set.add(r.org));
+    rows("SELECT DISTINCT group_org as org FROM meetings WHERE group_org IS NOT NULL AND TRIM(group_org) != ''").forEach((r) => set.add(r.org));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }
+
+  // How much of the app a lab name touches, for the rename/merge confirm dialog: people rows
+  // that would be relabeled, bookings whose saved group snapshot would be relabeled, and whether
+  // it carries a standing discount row.
+  function countOrgRefs(org) {
+    const peopleCount = (row('SELECT COUNT(*) as c FROM people WHERE organization=?', [org]) || {}).c || 0;
+    const bookingsCount = (row('SELECT COUNT(*) as c FROM meetings WHERE group_org=?', [org]) || {}).c || 0;
+    const hasDiscount = !!row('SELECT 1 as x FROM group_discounts WHERE org=?', [org]);
+    return { peopleCount, bookingsCount, hasDiscount };
+  }
+
+  // Renames (or merges) a lab/organization name across the app. `people.organization` and every
+  // `meetings.group_org` snapshot are relabeled unconditionally — those are just display strings.
+  // The group_discounts row is trickier: org is its PRIMARY KEY, so if newName already has its
+  // OWN discount row this is a merge, not a plain rename — the existing target row wins (its
+  // percent is left alone) and the old row is dropped, rather than raced through an UPDATE that
+  // would collide on the primary key.
+  // Deliberately does NOT touch meetings.group_discount_pct: that's a historical snapshot of the
+  // percent actually billed on that booking, not a live reference to the lab, so it must not be
+  // recomputed just because the lab's name (or even its current standing rate) changed later.
+  function renameOrganization(oldName, newName) {
+    oldName = String(oldName || '').trim();
+    newName = String(newName || '').trim();
+    if (!oldName || !newName || oldName === newName) return null;
+
+    const peopleCount = (row('SELECT COUNT(*) as c FROM people WHERE organization=?', [oldName]) || {}).c || 0;
+    const bookingsCount = (row('SELECT COUNT(*) as c FROM meetings WHERE group_org=?', [oldName]) || {}).c || 0;
+    const oldDiscount = row('SELECT percent FROM group_discounts WHERE org=?', [oldName]);
+    const targetHadDiscount = !!row('SELECT 1 as x FROM group_discounts WHERE org=?', [newName]);
+    const merged = !!(oldDiscount && targetHadDiscount);
+
+    if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
+    if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
+
+    let discountMoved = false;
+    if (oldDiscount) {
+      if (targetHadDiscount) {
+        // Merge: the destination's own standing rate wins; drop the source row rather than
+        // fight it for the org primary key.
+        run('DELETE FROM group_discounts WHERE org=?', [oldName]);
+      } else {
+        run('UPDATE group_discounts SET org=? WHERE org=?', [newName, oldName]);
+        discountMoved = true;
+      }
+    }
+
+    return { peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount };
+  }
+
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
   function clearAllData() {
     db.exec(`
@@ -1203,6 +1262,9 @@
     countBookingRefs,
     setBookingCancelled,
     setRetired,
+    listAllOrgNames,
+    countOrgRefs,
+    renameOrganization,
     seedSampleData,
     clearAllData
   };
