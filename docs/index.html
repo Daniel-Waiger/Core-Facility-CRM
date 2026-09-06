@@ -129,16 +129,25 @@
 <body>
 
 <!--
-  This hero (through the "In detail" section below) is hand-written, not derived from
-  CHANGELOG.md — see the note right before the changelog-rendering script near the bottom
-  of this file for why, and update it manually on every release that changes booking/billing
-  behavior enough to warrant a highlight card or screenshot.
+  The PROSE of this hero (through the "In detail" section below) is hand-written, not derived from
+  CHANGELOG.md — see the note right before the changelog-rendering script near the bottom of this
+  file for why — so update the lede, the highlight cards and the feature blocks manually on every
+  release that changes behavior enough to warrant a card or a screenshot.
+
+  The release VERSION AND DATE are no longer hand-written: the "Release X.Y.Z · DD Mon YYYY"
+  eyebrow and the footer version are both filled in from CHANGELOG.md's newest heading at load
+  time. They used to be typed in here and went stale twice in one day, which is a bad use of
+  anyone's memory when the changelog already states them.
 -->
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.5.1 · 06 Sep 2026</span>
+    <!-- The version and date here are filled in from CHANGELOG.md's newest heading by the script
+         at the bottom of this file, the same source the footer version uses. The text below is
+         only the no-JS/offline fallback — it was hand-maintained until 1.5.2 and had already gone
+         stale twice, which is exactly the kind of thing not worth remembering by hand. -->
+    <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">A facility manager's two standing questions are how much each instrument actually gets used, and where their own time goes. 1.5.1 answers both with a <strong>Reports</strong> screen — instrument hours, facility-staff time per instrument, and spend per project and lab, over any date range. It also fixes a calendar bug that had been quietly showing bookings on the wrong day for everyone east of Greenwich.</p>
+    <p class="lede">A facility manager's two standing questions are how much each instrument actually gets used, and where their own time goes. 1.5.1 answers both with a <strong>Reports</strong> screen — instrument hours, facility-staff time per instrument, and spend per project and lab, over any date range. It also fixes a calendar bug that had been quietly showing bookings on the wrong day for everyone east of Greenwich &mdash; and, in 1.5.2, the reason some installed copies were still showing you none of this.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="#changelog">Full changelog</a>
@@ -151,13 +160,14 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.5.0 and 1.5.1.</p>
+    <p class="section-sub">What changed in 1.5.0 &ndash; 1.5.2.</p>
     <div class="cards">
       <div class="card"><div class="ic">📊</div><h3>Instrument utilisation</h3><p>Bookings, booked hours and billed revenue per instrument over any date range, with each instrument&rsquo;s share of total facility hours.</p></div>
       <div class="card"><div class="ic">⏱️</div><h3>Where staff time goes</h3><p>Hours per facility-staff member, and a staff&nbsp;&times;&nbsp;instrument breakdown &mdash; so &ldquo;am I mostly helping users on one scope?&rdquo; has an answer.</p></div>
       <div class="card"><div class="ic">🧮</div><h3>Worked hours and billed hours</h3><p>Reported separately, because billing rounds every staff line up to a whole hour. One number is workload, the other is the invoice.</p></div>
       <div class="card"><div class="ic">🏫</div><h3>Per project and per lab</h3><p>Bookings, hours and cost grouped by project and by lab &mdash; including facility-wide sessions that belong to no project.</p></div>
       <div class="card"><div class="ic">🗓️</div><h3>The calendar was a day out</h3><p>East of Greenwich, every cell was captioned with one date and filled with the previous day&rsquo;s bookings. Fixed, along with the click-to-book prefill it fed.</p></div>
+      <div class="card"><div class="ic">🔄</div><h3>Updates actually arrive</h3><p>An installed copy could pin itself to an old release: the cached shell naming which files to load was itself allowed to come from the browser’s cache. Settings said 1.4.0 while every file on the server said 1.5.1. Reloading now gets you the release that is actually deployed.</p></div>
       <div class="card"><div class="ic">🧪</div><h3>A demo that shows the reports</h3><p>The sample dataset carried billing on a single booking, so Reports looked empty on the very data meant to demonstrate it. Ten bookings now cover every instrument, three staff, both cancellation rules and a per-unit charge &mdash; priced by the app&rsquo;s own calculator, and dated relative to the day you load it.</p></div>
       <div class="card"><div class="ic">👥</div><h3>Facility Staff, spelled out</h3><p>One consistent name, and the forms now say what the flag does: tick it and the person becomes bookable, billable staff. Untick it and their past sessions stay intact.</p></div>
     </div>
@@ -386,7 +396,7 @@
 
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · <span id="footer-version">v1.5.1</span> · Bioimaging Facility</div>
+    <div>Core Facility Tracker · <span id="footer-version">v1.5.2</span> · Bioimaging Facility</div>
     <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>
@@ -425,6 +435,14 @@
         body.innerHTML = render(md);
         var m = md.match(/^##\s+\[([^\]]+)\]/m);
         if (m) document.getElementById('footer-version').textContent = 'v' + m[1];
+        // Hero "Release X.Y.Z · DD Mon YYYY", from the same newest changelog heading
+        // ("## [1.5.2] — 2026-09-06"), so it can never disagree with the release it describes.
+        var h = md.match(/^##\s+\[([^\]]+)\]\s*[—–-]\s*(\d{4})-(\d{2})-(\d{2})/m);
+        var hero = document.getElementById('hero-release');
+        if (h && hero) {
+          var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          hero.textContent = h[1] + ' · ' + h[4] + ' ' + months[Number(h[3]) - 1] + ' ' + h[2];
+        }
       })
       .catch(function (){ body.innerHTML = '<p>Couldn’t load the changelog here — <a href="' + CL_GH + '" target="_blank" rel="noopener">read it on GitHub</a>.</p>'; });
   })();
