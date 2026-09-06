@@ -1871,68 +1871,11 @@
     }));
   }
 
-  /* ---------------- Booking cost math (bill of materials) ----------------
-     Plain-language walkthrough of every number below, since this is money math that has to be
-     auditable, not just "works":
-       1. Booking hours = how long the instrument is reserved for, as a decimal number of hours
-          (9:00 to 11:30 is 2.5 hours). No start+end time on the booking → 0 hours.
-       2. Each instrument bills either by that duration (unit "time", e.g. $/hour) or by a
-          manually-typed amount (any other unit — $/sample, $/gram, etc).
-       3. Each Facility Staff assignee bills by their OWN window inside the booking (left blank =
-          the full booking window), but never less than 1 hour, and always rounded UP to a whole
-          hour beyond that — so 10 minutes bills as 1 hour, and 65 minutes bills as 2 hours.
-       4. Discounts — a standing per-lab percent plus a manual admin override, added together —
-          apply ONLY to the time-billed instrument cost, never to staff time or to per-unit/
-          per-weight instrument costs.
-       5. What's left after the discount then has BOTH overhead percentages (internal + external)
-          added on top of it — that "before tax" figure is what a facility would actually invoice
-          before any tax line — and finally the tax percentage is added on top of THAT to get the
-          final total. */
   function fmtMoney(n) {
     const cur = DB.getConfig('currency', '$');
     return cur + (Number(n) || 0).toFixed(2);
   }
-  // timeToMinutes / hoursBetween / billableStaffHours now live in js/ui.js (shared with the
-  // Reports screen, which needs to count hours the same way) — called here as UI.*.
-  function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates }) {
-    const bookingHours = UI.hoursBetween(start, end);
-    const ohInternal = (rates && rates.ohInternal) || 0;
-    const ohExternal = (rates && rates.ohExternal) || 0;
-    const taxPct = (rates && rates.taxPct) || 0;
 
-    let instrTime = 0, instrAmount = 0;
-    const instrumentLines = (instruments || []).map((it) => {
-      const isTime = (it.cost_unit || 'time') === 'time';
-      const line = isTime ? (it.cost || 0) * bookingHours : (it.cost || 0) * (Number(it.amount) || 0);
-      if (isTime) instrTime += line; else instrAmount += line;
-      return Object.assign({}, it, { isTime, line });
-    });
-
-    let staffTotal = 0;
-    const staffLines = (staff || []).map((p) => {
-      const rawHours = (p.start && p.end) ? UI.hoursBetween(p.start, p.end) : bookingHours;
-      const billHours = UI.billableStaffHours(rawHours);
-      const line = (p.rate || 0) * billHours;
-      staffTotal += line;
-      return Object.assign({}, p, { rawHours, billHours, line });
-    });
-
-    const subtotal = instrTime + instrAmount + staffTotal;
-    const discPct = Math.min(100, (groupPct || 0) + (manualPct || 0));
-    const discountAmt = instrTime * (discPct / 100);
-    const afterDiscount = subtotal - discountAmt;
-    const overheadPct = ohInternal + ohExternal;
-    const overheadAmt = afterDiscount * (overheadPct / 100);
-    const beforeTax = afterDiscount + overheadAmt;
-    const taxAmt = beforeTax * (taxPct / 100);
-    const total = beforeTax + taxAmt;
-
-    return {
-      bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
-      groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
-      ohInternal, ohExternal, overheadAmt, beforeTax, taxPct, taxAmt, total
-    };
-  }
 
   function tokenPickerField(kind, label, addLabel) {
     return `<div class="field"><label>${label}</label>
@@ -2324,7 +2267,7 @@
       ohExternal: DB.getConfigNum('overhead_external', 0),
       taxPct: DB.getConfigNum('tax_pct', 0)
     };
-    const bom = computeBookingBOM({
+    const bom = UI.computeBookingBOM({
       start, end, instruments: instrumentsForCalc, staff: staffForCalc,
       groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates
     });
