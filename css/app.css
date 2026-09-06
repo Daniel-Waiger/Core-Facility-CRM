@@ -114,13 +114,16 @@ body {
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; width: 100%; max-width: 100%; overflow-x: hidden; }
 .main-inner { max-width: 1440px; width: 100%; margin: 0 auto; padding: 24px 28px 64px; box-sizing: border-box; }
 /* Tables lay out within the available width (no side-scroll on desktop); the wrapper only
-   scrolls as a last resort on genuinely narrow screens. */
-.tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+   scrolls as a last resort on genuinely narrow screens. The narrow-screen check has to be a
+   container query, not a viewport media query: the sidebar eats a fixed chunk of the viewport
+   regardless of window width, so the space actually available to the table can be small even
+   when the window itself is well above any reasonable "mobile" breakpoint. */
+.tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; container-type: inline-size; }
 .tbl:has(> colgroup) { table-layout: fixed; }
 .tbl th, .tbl td { overflow-wrap: anywhere; word-break: break-word; }
 .tbl td:last-child, .tbl th:last-child { white-space: nowrap; }
 .tbl td .badge, .tbl td .chip-sm { white-space: normal; }
-@media (max-width: 820px) { .tbl:has(> colgroup) { table-layout: auto; min-width: 720px; } }
+@container (max-width: 820px) { .tbl:has(> colgroup) { table-layout: auto; min-width: 720px; } }
 
 /* ---------- Sidebar Items ---------- */
 .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }

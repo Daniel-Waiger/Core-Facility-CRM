@@ -207,12 +207,12 @@
             </button>
           </div>
           <nav class="nav">
-            <div class="nav-item" data-nav="dashboard" data-tooltip="Overview &amp; Metrics">${ic('home')}<span class="lbl">Dashboard</span></div>
-            <div class="nav-item" data-nav="projects" data-tooltip="Project Registry">${ic('folder')}<span class="lbl">Projects</span></div>
-            <div class="nav-item" data-nav="people" data-tooltip="Researchers &amp; Labs">${ic('users')}<span class="lbl">People &amp; Labs</span></div>
-            <div class="nav-item" data-nav="instruments" data-tooltip="Facility Equipment">${ic('cpu')}<span class="lbl">Instruments</span></div>
-            <div class="nav-item" data-nav="calendar" data-tooltip="Monthly Schedule">${ic('calendar')}<span class="lbl">Calendar</span></div>
-            <div class="nav-item" data-nav="reports" data-tooltip="Usage &amp; Billing Reports">${ic('clock')}<span class="lbl">Reports</span></div>
+            <div class="nav-item" data-nav="dashboard" title="Overview &amp; Metrics">${ic('home')}<span class="lbl">Dashboard</span></div>
+            <div class="nav-item" data-nav="projects" title="Project Registry">${ic('folder')}<span class="lbl">Projects</span></div>
+            <div class="nav-item" data-nav="people" title="Researchers &amp; Labs">${ic('users')}<span class="lbl">People &amp; Labs</span></div>
+            <div class="nav-item" data-nav="instruments" title="Facility Equipment">${ic('cpu')}<span class="lbl">Instruments</span></div>
+            <div class="nav-item" data-nav="calendar" title="Monthly Schedule">${ic('calendar')}<span class="lbl">Calendar</span></div>
+            <div class="nav-item" data-nav="reports" title="Usage &amp; Billing Reports">${ic('clock')}<span class="lbl">Reports</span></div>
           </nav>
           <div class="nav-spacer"></div>
           <div class="sidebar-foot">

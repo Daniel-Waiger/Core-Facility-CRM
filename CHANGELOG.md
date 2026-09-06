@@ -3,6 +3,12 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.5] — 2026-09-06
+
+### Fixed
+- **Registry tables (Projects, People, Instruments) no longer shred their column headers into a single vertical character per line** on a narrower browser window or a higher OS/browser zoom level. The "switch to a scrollable table" fallback was gated on the full window width, which doesn't account for the sidebar eating a fixed chunk of it — it's now measured against the space actually left for the table.
+- **Sidebar nav-item tooltips no longer render on top of the item above them.** They showed directly above the hovered row, which in the tightly stacked nav list landed on the previous item's label; tooltips now appear beside the item instead.
+
 ## [1.5.4] — 2026-09-06
 
 ### Fixed
