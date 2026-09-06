@@ -20,6 +20,7 @@
     <section class="learn-box">
       <h2 id="what-youll-learn">What you'll be able to do</h2>
       <ul>
+        <li>Read the Calendar screen itself — its month grid, its two kinds of event, and the Today's Agenda dialog.</li>
         <li>Start a new booking from the calendar and fill in every field with confidence.</li>
         <li>Understand the Group/Lab gate — why the people picker locks, and how to unlock it.</li>
         <li>Use the three pickers (people, instruments, facility staff) and read their badges.</li>
@@ -30,6 +31,32 @@
       </ul>
     </section>
 
+    <section id="calendar">
+      <h2 id="calendar-screen">The Calendar screen</h2>
+      <p>The Calendar is a month grid, weeks running Monday to Sunday, and it's where you'll do most of your booking work.</p>
+      <ul>
+        <li>Each day's cell can hold two kinds of event: <strong>📅 bookings</strong> (sessions on the facility's equipment) and <strong>🎯 milestones</strong> (project deadlines — see <a href="milestones.html#add-a-milestone">Milestones</a>).</li>
+        <li>Within a day, events with a set time sort first, earliest to latest; untimed events (including all milestones, which have no time of their own) follow after.</li>
+        <li><strong>Prev</strong> and <strong>Next</strong> move the grid a month at a time; <strong>Today</strong> jumps back to the current month and opens the <strong>Today's Agenda</strong> dialog — a focused list of just today's bookings and milestones (see <a href="dashboard.html#todays-agenda">Dashboard &amp; Today's Agenda</a>).</li>
+        <li>Click any <strong>empty</strong> space on a day to start a new booking pre-filled with that date.</li>
+        <li>Click an <strong>existing event</strong> to open it — a booking opens for editing (see <a href="#edit-a-booking">below</a>), a milestone opens its own edit form.</li>
+      </ul>
+
+      <figure class="shot">
+        <img src="../screenshots/13-calendar.png" alt="Calendar month grid with bookings and milestones on various days" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/13-calendar.png</div>
+        <figcaption>The Calendar's month grid — Prev/Today/Next above, weeks running Monday to Sunday below.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../screenshots/33-calendar-timed-bookings.png" alt="A calendar day with several timed booking chips sorted earliest to latest" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/33-calendar-timed-bookings.png</div>
+        <figcaption>Timed bookings on a busy day sort earliest to latest, ahead of any untimed events on the same day.</figcaption>
+      </figure>
+    </section>
+
     <section>
       <h2 id="book-a-session">Starting a new booking</h2>
       <p>The most direct way to book a session is from the Calendar:</p>
@@ -38,6 +65,12 @@
         <li>Find the day you want and click anywhere on that day's <em>empty</em> space (not on an existing event — clicking an existing booking opens it for editing instead, see <a href="#edit-a-booking">Editing a booking</a>).</li>
         <li>A New Booking form opens, already pre-filled with the date you clicked.</li>
       </ol>
+      <figure class="shot">
+        <img src="../screenshots/50-calendar-date.png" alt="A calendar day chip on the exact day that was clicked to start the booking" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/50-calendar-date.png</div>
+        <figcaption>The chip sits on the day you picked — the form's pre-filled date always matches the cell you clicked.</figcaption>
+      </figure>
       <figure class="shot">
         <img src="../screenshots/21-new-booking-modal.png" alt="The New Booking form with Title, Date, Start/End time, Project, Group/Lab, and the three assignment pickers" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">

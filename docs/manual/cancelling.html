@@ -93,6 +93,14 @@
     <section>
       <h2 id="costs-view">How cancelled bookings look in Project Costs</h2>
       <p>A project's Costs card lists every booking's charge, and marks cancelled ones clearly rather than just removing them:</p>
+
+      <figure class="shot">
+        <img src="../screenshots/30-project-costs-list.png" alt="A project's Costs card listing every booking's charge" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/30-project-costs-list.png</div>
+        <figcaption>The Costs card on a project's detail page — one row per booking, each with its own charge.</figcaption>
+      </figure>
+
       <ul>
         <li>A cancelled booking whose charge was dropped or waived shows a <strong>"Cancelled"</strong> badge, with its amount struck through and counted as 0 toward the running total.</li>
         <li>A cancelled booking whose charge still stands shows a <strong>"Cancelled · charged"</strong> badge, and its amount still counts toward the running total.</li>
@@ -103,6 +111,14 @@
         <div class="ph">Snapshot pending — ../screenshots/47-booking-cancelled-costs.png</div>
         <figcaption>A "Cancelled · charged" badge means the slot was held before cancellation, so the amount still counts.</figcaption>
       </figure>
+
+      <figure class="shot">
+        <img src="../screenshots/36-project-costs-running-total.png" alt="The Costs card's running total at the bottom of the list" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/36-project-costs-running-total.png</div>
+        <figcaption>The running total at the bottom of the card — cancelled-and-waived rows count as 0 toward it, cancelled-and-charged rows still count.</figcaption>
+      </figure>
+
       <p>This is the same rule the <a href="reports.html#two-rules">Reports &amp; Utilization</a> screen uses for money, so a project's Costs card and the facility-wide Reports totals never disagree about what's owed.</p>
     </section>
 
