@@ -2109,23 +2109,28 @@
     </div>`;
   }
 
-  // Narrows the Assign People / Assign Facility Staff dropdowns to one lab — an institute-scale
-  // relief valve so neither picker lists every person in the building. Already-selected badges
-  // are unaffected (mountTokenPicker's _setFilter only ever narrows the *dropdown*, never hides
-  // a badge), so switching labs mid-booking never drops a cross-lab collaborator or staff member
-  // you'd already picked.
+  // Narrows the Assign People dropdown to one lab — an institute-scale relief valve so the
+  // researcher picker doesn't list every person in the building. Already-selected badges are
+  // unaffected (mountTokenPicker's _setFilter only ever narrows the *dropdown*, never hides a
+  // badge), so switching labs mid-booking never drops a cross-lab collaborator you'd picked.
   //
-  // Group/Lab itself is mandatory, not optional — every booking either gets it typed in directly
-  // or auto-filled from its project's PI (applyProjectDrivenGroup), and both people and core
-  // staff belong to a facility group, so neither picker can be used before one is set: no group
-  // picked yet locks both dropdowns (not-allowed cursor + "Choose Group/Lab First" hint).
+  // Group/Lab is mandatory, not optional — every booking either gets it typed in directly or
+  // auto-filled from its project's PI (applyProjectDrivenGroup) — so with no group picked yet the
+  // researcher dropdown is locked (not-allowed cursor + "Choose Group/Lab First" hint).
+  //
+  // The Assign Facility Staff picker is deliberately NOT filtered or locked by the group. The
+  // group on a booking says which lab is being billed, and facility staff serve every lab from
+  // their own organization ("Bioimaging Core Facility" in the demo data), so filtering them by
+  // `it.org === org` hid every staff member on every booking. That is precisely the complaint in
+  // issue #14 — a user had to invent a fake "STAFF" group and swap the booking's group back and
+  // forth to assign a user and then a staff member. Book under the group the *user* belongs to
+  // and add facility staff independently; membership of that picker is decided only by the
+  // Facility Staff flag on the person's own record (see bkStaffItems).
   function filterOwnerPickerByGroup(m, org) {
-    ['owner', 'staff'].forEach((kind) => {
-      const wrap = m.querySelector(`.token-picker[data-kind="${kind}"]`);
-      if (!wrap) return;
-      if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
-      if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
-    });
+    const wrap = m.querySelector('.token-picker[data-kind="owner"]');
+    if (!wrap) return;
+    if (wrap._setFilter) wrap._setFilter(org ? (it) => it.org === org : null);
+    if (wrap._setLocked) wrap._setLocked(!org, 'Choose Group/Lab First');
   }
 
   // The "offer" path: a lab is chosen (by hand, or auto-filled from a project's PI) and its

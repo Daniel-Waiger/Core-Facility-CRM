@@ -91,14 +91,19 @@
       WHERE ${RANGE_SQL}
       ORDER BY mt.date ASC, mt.id ASC`, rangeParams(from, to));
   }
-  function loadInstrumentLines() {
+  // Bounded by the same date range as the meetings pull. Loading every join row and discarding
+  // the out-of-range ones in JS worked, but made the cost of a one-month report grow with the
+  // facility's whole history rather than with what the report actually shows.
+  function loadInstrumentLines(from, to) {
     return DB.rows(`
       SELECT mi.meeting_id, mi.instrument_id, mi.line_cost,
              i.name AS instrument_name, i.is_retired AS instrument_retired
       FROM meeting_instruments mi
-      JOIN instruments i ON i.id = mi.instrument_id`);
+      JOIN instruments i ON i.id = mi.instrument_id
+      JOIN meetings mt ON mt.id = mi.meeting_id
+      WHERE ${RANGE_SQL}`, rangeParams(from, to));
   }
-  function loadStaffLines() {
+  function loadStaffLines(from, to) {
     // meeting_staff always names a facility-staff assignee, but a person's is_staff flag could in
     // theory have been unset after the fact (retiring doesn't do this, but be defensive) — join
     // on people without filtering is_staff so no historical row silently disappears.
@@ -106,7 +111,9 @@
       SELECT ms.meeting_id, ms.person_id, ms.start_time, ms.end_time, ms.line_cost,
              pe.name AS person_name, pe.is_retired AS person_retired, pe.rate AS person_rate
       FROM meeting_staff ms
-      JOIN people pe ON pe.id = ms.person_id`);
+      JOIN people pe ON pe.id = ms.person_id
+      JOIN meetings mt ON mt.id = ms.meeting_id
+      WHERE ${RANGE_SQL}`, rangeParams(from, to));
   }
 
   // Meeting-level derived facts shared by every aggregator below.
@@ -130,7 +137,7 @@
   function computeInstrumentRows(from, to) {
     if (from === undefined) { from = state.from; to = state.to; }
     const meetings = annotateMeetings(loadMeetingsInRange(from, to));
-    const lines = loadInstrumentLines();
+    const lines = loadInstrumentLines(from, to);
 
     const byInstrument = new Map(); // id -> { name, retired, bookings, hours, revenue }
     lines.forEach((ln) => {
@@ -160,7 +167,7 @@
   function computeStaffRows(from, to) {
     if (from === undefined) { from = state.from; to = state.to; }
     const meetings = annotateMeetings(loadMeetingsInRange(from, to));
-    const lines = loadStaffLines();
+    const lines = loadStaffLines(from, to);
 
     const byPerson = new Map(); // id -> { name, retired, sessions, rawHours, billHours, revenue }
     lines.forEach((ln) => {
@@ -199,8 +206,8 @@
   function computeStaffInstrumentMatrix(from, to) {
     if (from === undefined) { from = state.from; to = state.to; }
     const meetings = annotateMeetings(loadMeetingsInRange(from, to));
-    const instrumentLines = loadInstrumentLines();
-    const staffLines = loadStaffLines();
+    const instrumentLines = loadInstrumentLines(from, to);
+    const staffLines = loadStaffLines(from, to);
 
     // Instrument count per meeting, restricted to meetings in range (needed for the even split).
     const instrumentsByMeeting = new Map(); // meeting_id -> [{id,name,retired}]
@@ -285,7 +292,12 @@
 
   /* ---------------- Small render helpers ---------------- */
   function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
-  function fmtMoney(n) { return '$' + (Math.round((n || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  // Same configured symbol the booking modal and Project Costs use (Settings -> Billing Rates);
+  // hardcoding '$' here would have shown the wrong currency on every non-$ facility's reports.
+  function fmtMoney(n) {
+    const cur = DB.getConfig('currency', '$');
+    return cur + (Math.round((n || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
   function nameCell(name, retired) { return esc(UI.retiredName(name, retired)); }
   function bar(pct) {
     return `<div class="row" style="gap:8px"><div class="progress seg grow" style="height:8px"><i style="width:${Math.max(0, Math.min(100, pct)).toFixed(1)}%"></i></div><span class="mono small" style="width:42px;text-align:right">${pct.toFixed(1)}%</span></div>`;
