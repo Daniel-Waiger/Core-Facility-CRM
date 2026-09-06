@@ -575,7 +575,9 @@
 
   function projectFlags(pid) {
     const flags = [];
-    const now = new Date().toISOString().slice(0, 10);
+    // global.UI is defined by the time this runs (called at render time, after all scripts have
+    // loaded), even though db.js itself loads before ui.js — see CLAUDE.md module load order.
+    const now = global.UI.today();
     const ms = rows('SELECT status, due_date FROM milestones WHERE project_id=? AND status!="done"', [pid]);
     for (const m of ms) {
       if (m.due_date && m.due_date < now) {
