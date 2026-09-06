@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>People & Labs — Core Facility Tracker Manual</title>
+<title>People &amp; Labs — Core Facility Tracker Manual</title>
 <link rel="stylesheet" href="manual.css">
 </head>
 <body data-chapter="people-labs.html">
@@ -22,7 +22,7 @@
       <ul>
         <li>Add a new person to the directory, with the right role, lab, and contact details.</li>
         <li>Understand the <strong>Facility Staff</strong> flag — who it applies to, and why it controls billing.</li>
-        <li>Add a new lab or department on the fly — and know when it actually gets saved.</li>
+        <li>Add a new lab or department on the fly, and fix a typo or merge duplicate labs with the rename tool.</li>
         <li>Retire a person who has left, without losing any history they're part of.</li>
         <li>Filter the People directory to find who you're looking for.</li>
       </ul>
@@ -83,7 +83,7 @@
     </section>
 
     <section>
-      <h2 id="labs-departments">Labs & departments — and the "+ Add New" caveat</h2>
+      <h2 id="labs-departments">Labs & departments — and the "+ Add New" pattern</h2>
       <p>Lab/Group and Department aren't a fixed list you're stuck with — they're built up from whatever the people already in your directory have. When you type or pick one for a new person, you're either choosing an existing value or creating a brand new one on the spot with <strong>+ Add New</strong>.</p>
       <figure class="shot">
         <img src="../screenshots/17-people-department.png" alt="The People directory's Department column showing free-text lab and department values" loading="lazy"
@@ -97,14 +97,15 @@
         <div class="ph">Snapshot pending — ../screenshots/18-add-new-value.png</div>
         <figcaption>Choosing "+ Add New" opens a box to type a brand-new lab, department, or role.</figcaption>
       </figure>
-      <div class="callout warn">
-        <p><strong>⚠️ Careful — a new lab or department only sticks when you actually save the person.</strong> If you type a new Lab/Group name using + Add New and then close the form without saving (or cancel out of it), that new lab name is thrown away — it never gets added to the shared list, and the next person you add won't see it as a choice. If you need a new lab to exist, the fastest safe way is to save at least one person into it.</p>
+      <div class="callout tip">
+        <p><strong>💡 Tip — a new lab or department sticks right away.</strong> The moment you type a name with + Add New, it's saved to the shared list — even if you go on to close or cancel the person's form without saving them. You don't need to finish saving that person's record just to make the new lab or department name available to everyone else.</p>
       </div>
       <div class="callout why">
-        <p><strong>🔍 Why it works this way.</strong> There's no separate screen for "manage labs" — the list of labs is simply read off the people who already belong to one. That keeps things simple, but it means a lab only really exists once someone is actually saved as being in it. See also <a href="rough-edges.html#new-lab-lost">Appendix A</a> for this exact gotcha, and <a href="rough-edges.html#lab-typos">Appendix A</a> for the related trap of typos creating accidental duplicate labs.</p>
+        <p><strong>🔍 Why it works this way.</strong> There's no separate screen for "manage labs" — new values from + Add New are saved immediately precisely so a lab or department name doesn't quietly depend on whether you happened to finish an unrelated form.</p>
       </div>
+      <p>Because Lab/Group is still free text, a typo (say, "Bio-Photonics" vs. "BioPhotonics Lab") creates two separate labs as far as the app is concerned — each with its own row in <a href="settings-admin.html#group-discounts">Group Discounts</a> and its own line in Reports. Pick from the dropdown whenever the lab already exists rather than retyping it, and if a duplicate does slip in, you don't have to fix it person by person.</p>
       <div class="callout tip">
-        <p><strong>💡 Tip.</strong> Because a typo (say, "Bio-Photonics" vs. "BioPhotonics Lab") creates two separate labs as far as the app is concerned, it's worth double-checking existing spellings before typing a new one — pick from the dropdown whenever the lab already exists rather than retyping it.</p>
+        <p><strong>💡 Tip.</strong> Settings → Admin Mode has a <a href="settings-admin.html#rename-lab">Rename Lab/Group</a> tool that fixes a typo (or merges two labs that turned out to be the same one) across every person, that lab's discount row, and past bookings, all in one step — no need to edit each person individually.</p>
       </div>
     </section>
 
@@ -170,7 +171,7 @@
     <section class="quiz">
       <h2 id="check-yourself">Check yourself</h2>
       <details class="quiz-q"><summary>A researcher attends a booking but never operates the microscope. Should you tick Facility Staff for them?</summary><p>No. Facility Staff is only for people who operate equipment and get billed hourly for it. A researcher who is simply present is an attendee — they're never billed regardless of this flag.</p></details>
-      <details class="quiz-q"><summary>You type a brand-new lab name into "+ Add New" while adding a person, then close the form without saving. Does the new lab exist now?</summary><p>No — a new lab or department name only becomes real once you actually save a person with it. Closing or cancelling the form throws it away.</p></details>
+      <details class="quiz-q"><summary>You type a brand-new lab name into "+ Add New" while adding a person, then close the form without saving. Does the new lab exist now?</summary><p>Yes — a new lab or department name is saved to the shared list as soon as you type it with + Add New, even if you go on to cancel or close the person's form without saving them.</p></details>
       <details class="quiz-q"><summary>You try to retire a person and the app offers to delete them instead. Why?</summary><p>Because that person has zero history — no projects, teams, milestones, or bookings reference them. With nothing to protect, the app treats it as a likely typo or duplicate and offers a true delete instead of a retire.</p></details>
     </section>
 

@@ -54,14 +54,16 @@
       <ol class="steps">
         <li>Open <strong>Settings</strong> and find <strong>Restore from Backup</strong>.</li>
         <li>Choose the backup file you want to load.</li>
-        <li>Confirm when asked — this is the moment that matters, read the next warning before you click through it.</li>
+        <li>Confirm when asked — this is the moment that matters, read the next warning before you click through it. The confirmation itself mentions the automatic safety copy described below.</li>
       </ol>
 
-      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Restoring a backup <strong>replaces everything currently in your tracker</strong> — every project, person, booking, and setting is thrown away and swapped for whatever is in the file you're restoring. There is no merge and no undo. Make it a habit: <strong>always export a fresh backup of what you have right now, before you restore anything else</strong> — even if you're sure you don't need the current data, a thirty-second export costs you nothing and a mistaken restore cannot be undone.</p></div>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Restoring a backup <strong>replaces everything currently in your tracker</strong> — every project, person, booking, and setting is thrown away and swapped for whatever is in the file you're restoring. There is no merge and no undo. Make it a habit: <strong>export a fresh backup of what you have right now, before you restore anything else</strong> — even if you're sure you don't need the current data, a thirty-second export costs you nothing and a mistaken restore cannot be undone.</p></div>
 
-      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A restore has to fully swap the database out from under the app, so there's no safe way to keep "a bit of both." Treating restore as all-or-nothing is simpler and far less error-prone than trying to merge two sets of projects and bookings automatically and guessing which one you meant.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip — a safety copy now happens for you automatically.</strong> The moment before a restore actually replaces your database, the app downloads its own backup of whatever is currently in your tracker — a file named something like <code>core-facility-pre-restore-backup-2026-09-06.json</code>. It's skipped only when your tracker is already empty, since there's nothing worth saving in that case. This isn't a reason to skip exporting your own backup first — think of it as a second safety net under the one you already have, in case you restore without remembering to export.</p></div>
 
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, export a backup. Then go add a throwaway project — call it "Test Delete Me" — and restore the backup you just made. Confirm the throwaway project is gone. This is exactly the safety net you'd rely on for real data.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A restore has to fully swap the database out from under the app, so there's no safe way to keep "a bit of both." Treating restore as all-or-nothing is simpler and far less error-prone than trying to merge two sets of projects and bookings automatically and guessing which one you meant. The automatic pre-restore download exists for exactly the moment someone clicks Restore without having exported first — it means even that mistake still leaves a recovery file sitting in Downloads.</p></div>
+
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, export a backup. Then go add a throwaway project — call it "Test Delete Me" — and restore the backup you just made. Confirm the throwaway project is gone, and check your Downloads folder for the automatic pre-restore safety copy the app made along the way. This is exactly the safety net you'd rely on for real data.</p></div>
     </section>
 
     <section>

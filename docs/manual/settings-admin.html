@@ -24,6 +24,7 @@
         <li>Set your facility's overhead, tax, and currency — and know when a change takes effect</li>
         <li>Turn Admin Mode on and off, and understand exactly what it does and doesn't protect</li>
         <li>Set a standing discount percentage for a lab or group</li>
+        <li>Rename or merge a lab/group everywhere it appears, in one step</li>
         <li>Read how a booking remembers its own discount, and revoke or apply one</li>
         <li>Find the About panel when you need your version number</li>
       </ul>
@@ -35,8 +36,11 @@
       <ol class="steps">
         <li>Open <strong>Settings</strong> from the sidebar.</li>
         <li>Find the option to show the welcome screen at startup, and turn it on or off.</li>
+        <li>Find <strong>Ask about single-instrument bookings</strong> and turn it on or off.</li>
       </ol>
       <div class="callout tip"><p><strong>💡 Tip.</strong> Turning the welcome screen off doesn't remove your access to sample data or the guided tour — both are still one click away in Settings, under "Sample Data &amp; Walkthrough." See <a href="getting-started.html#sample-data">Loading sample data</a> and <a href="getting-started.html#guided-tour">The guided tour</a>.</p></div>
+
+      <p><strong>Ask about single-instrument bookings</strong> controls whether the <a href="bookings.html#single-instrument-prompt">"Single Instrument Booking?"</a> prompt appears the first time you add an instrument to a new booking. It's on by default. If you (or someone else on this browser) previously ticked <strong>"Don't ask me again"</strong> on that prompt, this toggle is how you turn it back on — switch it on here, and the prompt starts appearing again on your next new booking.</p>
 
       <figure class="shot">
         <img src="../screenshots/14-settings.png" alt="Settings screen with its sections for preferences, backups, billing rates and admin mode" loading="lazy"
@@ -126,6 +130,27 @@
     </section>
 
     <section>
+      <h2 id="rename-lab">Rename a lab or group</h2>
+      <p>Because Lab/Group is free text (see <a href="people-labs.html#labs-departments">Labs &amp; departments</a>), the same lab can end up spelled two different ways — "Bio-Photonics Lab" and "BioPhotonics Lab," say. The <strong>Rename Lab/Group</strong> tool fixes that everywhere in one step, instead of editing every person by hand.</p>
+      <ol class="steps">
+        <li>Turn on <strong>Admin Mode</strong> if it isn't already on.</li>
+        <li>Open <strong>Settings</strong> and find <strong>Rename Lab/Group</strong> in the Admin Mode area.</li>
+        <li>Pick the existing (old) lab name from the list.</li>
+        <li>Type the new name — either a genuinely new spelling, or the name of another lab that already exists, if you're merging two duplicate labs into one.</li>
+        <li>Confirm.</li>
+      </ol>
+      <p>A single rename updates, in one pass:</p>
+      <ul>
+        <li>Every person currently recorded under the old lab name.</li>
+        <li>The lab's row in <a href="#group-discounts">Group Discounts</a> — if you renamed into a lab that already had its own discount row, that lab keeps <em>its</em> discount percentage; the old lab's row disappears rather than the two being averaged or added together.</li>
+        <li>The Lab/Group label saved on every past booking made under the old name, so old records and reports read consistently under the new name too.</li>
+      </ul>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A lab name is written in three different places at once — on each person, on the discount editor, and stamped onto every past booking — precisely because it's meant to read the same everywhere. A rename that only fixed the people list would leave old bookings and the discount editor still showing the stale spelling, right back where the duplicate-lab problem started.</p></div>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Renaming a lab only changes its <em>label</em> — it never recalculates anything. A past booking's total cost stays exactly the frozen number it was saved with (see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a>), even if that booking's Lab/Group label now reads differently and even if you merged it into a lab with a different discount percentage.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded and Admin Mode on, open Rename Lab/Group, pick any existing lab, and rename it to a brand-new spelling. Check the People directory, Group Discounts, and one of that lab's past bookings — all three now show the new name, and the booking's total is unchanged.</p></div>
+    </section>
+
+    <section>
       <h2 id="about">About</h2>
       <p>The About panel tells you exactly which version of the tracker you're running, which is useful when reporting a problem or checking whether you're on the newest release.</p>
       <ol class="steps">
@@ -139,6 +164,7 @@
       <details class="quiz-q"><summary>A colleague asks if turning on Admin Mode is like logging in as an administrator. Is that accurate?</summary><p>No. Admin Mode is a plain on/off toggle with no password or account behind it — anyone at that browser can turn it on themselves. It only shows or hides billing controls; it isn't security.</p></details>
       <details class="quiz-q"><summary>You set the Bio-Photonics Lab's discount to 10% today. Does a booking from that lab saved last month, when the discount was 5%, change to 10%?</summary><p>No. A booking freezes the discount percentage it was saved with. Only new bookings made after the change pick up the new 10% — unless an admin explicitly revokes or re-applies a discount on that specific old booking.</p></details>
       <details class="quiz-q"><summary>Where would you look to find out which version of the app you're running?</summary><p>Settings → About.</p></details>
+      <details class="quiz-q"><summary>You discover "Confocal Lab" and "Confocal-Lab" are the same group, entered two different ways. What's the fastest fix, and does it touch past booking totals?</summary><p>Use Rename Lab/Group (Admin Mode) to rename one into the other — it updates every person, the discount row, and the label on past bookings in one step. It never recalculates a booking's frozen total.</p></details>
     </section>
 
     <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>

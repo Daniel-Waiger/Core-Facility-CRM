@@ -25,7 +25,7 @@
         <li>Understand the Group/Lab gate — why the people picker locks, and how to unlock it.</li>
         <li>Use the three pickers (people, instruments, facility staff) and read their badges.</li>
         <li>Register a brand-new person without losing your half-finished booking.</li>
-        <li>Answer the "Single Instrument Booking?" prompt sensibly.</li>
+        <li>Answer the "Single Instrument Booking?" prompt sensibly, and turn it off (or back on) if you'd rather not see it each time.</li>
         <li>Read the live cost panel, add rich-text notes, and understand booking conflicts.</li>
         <li>Edit an existing booking, and understand why a retired person can still show up on it.</li>
       </ul>
@@ -110,11 +110,20 @@
       <div class="callout warn">
         <p><strong>⚠️ Careful.</strong> The Assign Facility Staff picker is deliberately <em>not</em> filtered by Group/Lab — any facility staff member can run a session for any lab, so that picker always shows everyone flagged as staff regardless of which Group/Lab is selected. Only the Assign People (attendees) picker is filtered.</p>
       </div>
-      <div class="callout warn">
-        <p><strong>⚠️ Careful — attendees from a different lab.</strong> Because the people picker only shows one lab at a time, adding someone from a lab other than the one currently selected takes an extra step: switch the Group/Lab to theirs, add them, then switch back to the booking's real lab if needed — their badge stays on the booking once added. See <a href="rough-edges.html#cross-lab">Appendix A</a> for this workaround in full.</p>
+
+      <h3 id="show-all-labs">Adding someone from a different lab: "Show all labs"</h3>
+      <p>Right next to the Assign People picker is a <strong>Show all labs</strong> checkbox. Tick it and the dropdown lists people from every lab at once, instead of only the one selected in Group/Lab — and it works even before a Group/Lab has been chosen at all, bypassing the "Choose Group/Lab First" lock.</p>
+      <ol class="steps">
+        <li>Tick <strong>Show all labs</strong> above the Assign People dropdown.</li>
+        <li>Open the dropdown — everyone in the directory now appears, regardless of lab.</li>
+        <li>Add the person you need; their badge appears the same as always.</li>
+        <li>Leave the checkbox ticked or untick it afterward — either way, once someone's badge is on the booking, it stays there.</li>
+      </ol>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way — and why billing doesn't change.</strong> The Group/Lab field still decides which lab's <a href="settings-admin.html#group-discounts">standing discount</a> applies to this booking's cost — adding a cross-lab attendee through "Show all labs" never changes that. Billing is about which lab the <em>session</em> belongs to, not about every individual attendee's own lab, so a visiting collaborator can be listed on the booking without quietly shifting whose discount rate gets used.</p>
       </div>
       <div class="callout try">
-        <p><strong>🧪 Try it.</strong> Load the sample data, open a new booking, and try clicking Assign People before touching anything else — notice it's locked. Then pick a project and watch the Group/Lab field fill itself in and the picker unlock.</p>
+        <p><strong>🧪 Try it.</strong> Load the sample data, open a new booking, and pick a Group/Lab. Try opening Assign People — you'll only see that lab's people. Now tick <strong>Show all labs</strong> and open it again — everyone in the directory appears, but the Group/Lab field (and the discount it drives) hasn't changed.</p>
       </div>
     </section>
 
@@ -168,8 +177,12 @@
         <li>Answer <strong>Yes</strong> if this booking only ever uses that one instrument — the Assign Instruments dropdown then locks itself, so you can't accidentally add a second one. (Remove the instrument's badge to unlock it again.)</li>
         <li>Answer <strong>No</strong> if you might add more instruments to this same booking.</li>
       </ul>
+      <p>The prompt also carries a <strong>"Don't ask me again"</strong> checkbox. Tick it before answering, and the app stops asking on future bookings — it simply leaves the Assign Instruments dropdown unlocked every time, as if you'd answered "No," without interrupting you to ask.</p>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> If you turned the prompt off and want it back — say, a new team member finds the auto-lock behavior helpful — open <strong>Settings → Preferences</strong> and turn <strong>Ask about single-instrument bookings</strong> back on. See <a href="settings-admin.html#preferences">Settings, Admin Mode &amp; Discounts</a>.</p>
+      </div>
       <div class="callout warn">
-        <p><strong>⚠️ Careful.</strong> This prompt appears every time you start a new booking and add your first instrument — there's currently no "don't ask me again" setting. If you're not sure, answering <strong>No</strong> is the safer default: it leaves the dropdown open, and you can simply choose not to add a second instrument. See <a href="rough-edges.html#single-instrument-nag">Appendix A</a>.</p>
+        <p><strong>⚠️ Careful.</strong> If you're not sure whether to tick "Don't ask me again," leaving the prompt on is the safer default — it costs one extra click per booking, and answering <strong>No</strong> each time leaves the dropdown open exactly as if you'd turned the prompt off.</p>
       </div>
     </section>
 
@@ -243,7 +256,7 @@
     <section class="quiz">
       <h2 id="check-yourself">Check yourself</h2>
       <details class="quiz-q"><summary>You open a new booking and the Assign People dropdown won't open. What's the fastest fix?</summary><p>Pick a Project (which auto-fills the Group/Lab from the project's PI) or pick a Group/Lab directly — the people picker unlocks as soon as a Group/Lab is set.</p></details>
-      <details class="quiz-q"><summary>Someone from a different lab needs to be added as an attendee, but the people picker only shows the booking's current lab. What do you do?</summary><p>Temporarily switch the Group/Lab to theirs, add them from the dropdown, then switch the Group/Lab back if needed — their badge stays on the booking.</p></details>
+      <details class="quiz-q"><summary>Someone from a different lab needs to be added as an attendee, but the people picker only shows the booking's current lab. What do you do?</summary><p>Tick <strong>Show all labs</strong> next to Assign People — it lists everyone in the directory regardless of lab. The booking's Group/Lab field, and the discount tied to it, don't change just because you added them.</p></details>
       <details class="quiz-q"><summary>You cancel a booking that was holding the only available slot on an instrument today. Can a new booking now use that same instrument at that time?</summary><p>Yes — a cancelled booking stops blocking its slot immediately, so the conflict check no longer sees it in the way.</p></details>
       <details class="quiz-q"><summary>While editing an old booking, you notice a retired instrument's badge is still there. Should you remove it to "clean up"?</summary><p>No — leave it. That badge is the real record of what instrument was used on that booking. Removing it and saving would erase that history from the record.</p></details>
     </section>

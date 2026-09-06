@@ -22,7 +22,7 @@
       <ul>
         <li>Add a milestone to a project, with a due date and a note.</li>
         <li>Assign one or more owners (people) and instruments to a milestone.</li>
-        <li>Move a milestone through its three statuses: pending, in progress, done.</li>
+        <li>Set a milestone's status directly — pending, in progress, or done — from a single chooser.</li>
         <li>Understand what makes a milestone show up as "overdue."</li>
         <li>Delete a milestone you created by mistake — and know why the confirm dialog looks the way it does.</li>
       </ul>
@@ -61,19 +61,24 @@
     </section>
 
     <section>
-      <h2 id="status-cycle">Moving a milestone through its status</h2>
-      <p>Every milestone is in one of three states: <strong>pending</strong>, <strong>in progress</strong>, or <strong>done</strong>. There's no dropdown to jump straight to a status — instead, you click the status marker itself and it advances one step, wrapping back around to pending after done.</p>
+      <h2 id="status-cycle">Setting a milestone's status</h2>
+      <p>Every milestone is in one of three states: <strong>pending</strong>, <strong>in progress</strong>, or <strong>done</strong>. Clicking a milestone's status marker opens a small chooser listing all three — pick the one you want directly, in a single click.</p>
       <ol class="steps">
-        <li>Find the milestone's status marker (on the project page, or on the Dashboard's upcoming/overdue lists).</li>
-        <li>Click it once: pending → in progress.</li>
-        <li>Click it again: in progress → done.</li>
-        <li>Click a third time: done → pending again (useful if you marked something done by accident).</li>
+        <li>Find the milestone's status marker (on the project page, on the Dashboard's upcoming/overdue lists, or in Today's Agenda).</li>
+        <li>Click it — a small chooser opens, listing pending, in progress, and done.</li>
+        <li>Click the status you want. The chooser closes and the milestone updates immediately.</li>
       </ol>
+      <figure class="shot">
+        <img src="../screenshots/09-milestones.png" alt="A project's milestones list showing titles, due dates, status markers, and owner chips" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/09-milestones.png</div>
+        <figcaption>Click a milestone's status marker to open the chooser and pick a status directly.</figcaption>
+      </figure>
       <div class="callout tip">
-        <p><strong>💡 Tip.</strong> You can cycle a milestone's status right from the Dashboard's overdue or upcoming list — you don't have to open the project first. See <a href="dashboard.html#upcoming-overdue">Dashboard & Today's Agenda</a>.</p>
+        <p><strong>💡 Tip.</strong> This same chooser works wherever a milestone's status shows up — the project page, the Dashboard's upcoming/overdue lists, and Today's Agenda — so you never have to open the project just to correct a status. See <a href="dashboard.html#upcoming-overdue">Dashboard &amp; Today's Agenda</a>.</p>
       </div>
-      <div class="callout warn">
-        <p><strong>⚠️ Careful.</strong> Because there's no direct picker, going from pending straight to done takes two clicks, and undoing a mistaken "done" takes one more click to complete the loop back to pending. Count your clicks.</p>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way.</strong> Jumping straight to the status you mean, rather than clicking through the others to get there, means fixing a mistaken "done" (or setting a milestone straight to "done" when you're catching up on paperwork) is always exactly one click, no matter which status it starts from.</p>
       </div>
     </section>
 
@@ -107,7 +112,7 @@
 
     <section class="quiz">
       <h2 id="check-yourself">Check yourself</h2>
-      <details class="quiz-q"><summary>You accidentally clicked a milestone's status all the way to "done." How do you get it back to pending?</summary><p>Click the status marker one more time — the cycle is pending → in progress → done → pending, so a third click from "done" wraps it back to pending.</p></details>
+      <details class="quiz-q"><summary>You accidentally set a milestone's status to "done." How do you get it back to pending?</summary><p>Click the status marker to open the chooser, then pick "pending" directly — you can jump to any of the three statuses in one click, from whichever status it's currently in.</p></details>
       <details class="quiz-q"><summary>A milestone owner retired last month, but the milestone still shows their name as a chip. Is that a bug?</summary><p>No — that's intentional. Retired people keep any chips they were already assigned before they retired, because the milestone is a record of who was responsible at the time. They just won't appear as a choice for new milestones.</p></details>
       <details class="quiz-q"><summary>A milestone is due today and still pending. Does it show up as overdue?</summary><p>No. "Overdue" means the due date has already passed and the milestone isn't done — a milestone due today isn't overdue yet.</p></details>
     </section>
