@@ -4,7 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reports &amp; Utilization — Core Facility Tracker Manual</title>
-<link rel="stylesheet" href="manual.css">
+<link rel="stylesheet" href="manual.css?v=2">
+<script id="theme-fouc-guard">
+  (function () {
+    try {
+      var t = localStorage.getItem('theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body data-chapter="reports.html">
 <div class="layout">
@@ -146,6 +155,6 @@
     <nav class="pager" id="pager"></nav>
   </main>
 </div>
-<script src="manual.js"></script>
+<script src="manual.js?v=2"></script>
 </body>
 </html>

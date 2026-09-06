@@ -3,11 +3,28 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [1.5.4] — 2026-09-06
+## [1.5.5] — 2026-09-06
 
 ### Fixed
 - **Registry tables (Projects, People, Instruments) no longer shred their column headers into a single vertical character per line** on a narrower browser window or a higher OS/browser zoom level. The "switch to a scrollable table" fallback was gated on the full window width, which doesn't account for the sidebar eating a fixed chunk of it — it's now measured against the space actually left for the table.
 - **Sidebar nav-item tooltips no longer render on top of the item above them.** They showed directly above the hovered row, which in the tightly stacked nav list landed on the previous item's label; tooltips now appear beside the item instead.
+
+## [1.5.4] — 2026-09-06
+
+### Fixed
+- **A page could show stale content for up to 10 minutes after a deploy, on any plain navigation
+  — reopening a tab, clicking back into an already-visited page — not just after a hard refresh.**
+  This first surfaced as the manual's new theme-toggle button appearing once and then vanishing
+  on every page, including the manual's own home page. The cause was in `sw.js`'s "network-first"
+  handling of the app shell and (since this worker's scope covers the whole site) every
+  `docs/manual/*.html` page: its `fetch(event.request)` still consulted the browser's own HTTP
+  cache first, and GitHub Pages serves these pages with `Cache-Control: max-age=600` — so an
+  ordinary navigation, as opposed to an explicit reload (which forces revalidation), could return
+  a response cached before the last deploy with no network request at all. Reproduced locally
+  against a server that mimics GitHub Pages' actual cache headers (the plain dev server used
+  elsewhere sends none, which is why this didn't show up in testing until now), confirming both
+  the bug and the fix: the shell fetch now uses `cache: 'reload'`, the same technique the
+  install-time precache step already used for exactly this reason.
 
 ## [1.5.3] — 2026-09-06
 

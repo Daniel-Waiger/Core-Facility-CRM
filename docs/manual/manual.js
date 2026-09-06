@@ -1,6 +1,12 @@
 // Core Facility Tracker — User Manual scaffolding.
 // Renders the sidebar (title, search, chapter nav) and the prev/next pager on every chapter
 // page, and drives the search box (here and on the hub). Vanilla JS, no libraries, no build step.
+//
+// GitHub Pages serves this file (and manual.css) with `cache-control: max-age=600` and no other
+// invalidation — every <script src="manual.js?v=N"> and <link href="manual.css?v=N"> tag across
+// all 17 manual pages must have its `?v=N` bumped whenever either file changes, or visitors keep
+// getting the stale cached copy for up to 10 minutes after a change ships (this is the same class
+// of bug CLAUDE.md documents for the app shell's own `?v=`/service-worker cache-busting).
 (function () {
   'use strict';
 
@@ -45,6 +51,38 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // ----------------------------------------------------------------- theme
+  // The very first inline <script> in every page's <head> already set data-theme before
+  // paint (reading the same 'theme' localStorage key the app itself uses, since the app and
+  // the docs site share an origin) — this just renders/wires the button to match and change it.
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+  function updateThemeButtons(theme) {
+    var next = theme === 'dark' ? 'light' : 'dark';
+    var btns = document.querySelectorAll('.theme-btn');
+    for (var i = 0; i < btns.length; i++) {
+      var ic = btns[i].querySelector('.ic');
+      var lbl = btns[i].querySelector('.lbl');
+      if (ic) ic.textContent = next === 'dark' ? '🌙' : '☀️';
+      if (lbl) lbl.textContent = next === 'dark' ? 'Dark Mode' : 'Light Mode';
+    }
+  }
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('theme', theme); } catch (e) {}
+    updateThemeButtons(theme);
+  }
+  function wireThemeButtons() {
+    var btns = document.querySelectorAll('.theme-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+      });
+    }
+    updateThemeButtons(currentTheme());
+  }
+
   // ---------------------------------------------------------------- sidebar
   function renderSidebar() {
     var el = document.getElementById('sidebar');
@@ -60,6 +98,8 @@
     el.innerHTML =
       '<a class="manual-title" href="' + HUB + '">Core Facility Tracker</a>' +
       '<span class="manual-sub">User Manual</span>' +
+      '<button type="button" class="theme-btn" aria-label="Switch color theme">' +
+      '<span class="ic"></span><span class="lbl"></span></button>' +
       '<div class="search-box">' +
       '<input type="search" id="manual-search" placeholder="Search the manual…" autocomplete="off" aria-label="Search the manual">' +
       '<div id="search-results" hidden></div>' +
@@ -311,6 +351,7 @@
     renderPager();
     renderChapterGrid();
     wireAllSearchBoxes();
+    wireThemeButtons();
   }
 
   if (document.readyState === 'loading') {
