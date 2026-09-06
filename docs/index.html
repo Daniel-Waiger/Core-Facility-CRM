@@ -177,7 +177,7 @@
         <p>Cancelled bookings are handled the way the rest of the app already handles them: their hours drop out entirely, because a cancellation frees the slot and the instrument was never held &mdash; while their charge counts only if it was retained rather than waived. Both rules are printed under the tables they govern, so a total can always be reconciled against its rows. Retired staff, retired instruments and archived projects still appear; keeping them was the whole point.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/45-reports.png" alt="Reports and Utilization screen showing instrument utilisation, facility staff time, a staff-by-instrument matrix, and per-project and per-lab totals" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <img src="screenshots/49-reports.png" alt="Reports and Utilization screen showing instrument utilisation, facility staff time, a staff-by-instrument matrix, and per-project and per-lab totals" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
         <figcaption>Instrument hours, staff time, and per-project spend over a chosen date range.</figcaption>
       </figure>
     </div>
@@ -189,7 +189,7 @@
         <p>The same wrong date fed click-to-book, so clicking an empty cell opened a booking on the day before. The month&rsquo;s own query bounds were shifted too, quietly leaving the last day of the visible grid out of its results. All of it now goes through one local-date helper, and two further places that shared the bug &mdash; the dashboard&rsquo;s 30-day milestone window and a project&rsquo;s overdue flag &mdash; are fixed with it.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/46-calendar-date.png" alt="Calendar grid with a booking sitting in the cell matching its own date" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <img src="screenshots/50-calendar-date.png" alt="Calendar grid with a booking sitting in the cell matching its own date" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
         <figcaption>A booking now sits in the cell that carries its date.</figcaption>
       </figure>
     </div>
@@ -201,7 +201,7 @@
         <p>Writing that down surfaced a real bug. The staff picker only ever listed people <em>currently</em> flagged as staff, and saving a booking rebuilds its staff rows from whatever the form shows &mdash; so un-ticking the box on someone silently deleted them from every booking they had already worked, along with the billing line behind it, on that booking&rsquo;s next save. Reproduced in a browser: a re-save took the staff table from one row to none and a $190 line with it. The picker now keeps anyone already assigned, exactly as it already did for retired staff, while still not offering them for new work.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/47-facility-staff.png" alt="Person form showing the Facility Staff checkbox with help text explaining that it controls the booking staff picker and hourly billing" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <img src="screenshots/51-facility-staff.png" alt="Person form showing the Facility Staff checkbox with help text explaining that it controls the booking staff picker and hourly billing" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
         <figcaption>The flag now explains itself, on the form where it is set.</figcaption>
       </figure>
     </div>
