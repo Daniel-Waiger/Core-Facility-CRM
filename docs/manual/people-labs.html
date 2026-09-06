@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>People & Labs — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="people-labs.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>People & Labs</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 6</p>
+      <h1>People & Labs</h1>
+      <p class="lede">Everyone who touches your facility — researchers, PIs, and the staff who run the instruments — lives in one directory, along with the labs and departments they belong to.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Add a new person to the directory, with the right role, lab, and contact details.</li>
+        <li>Understand the <strong>Facility Staff</strong> flag — who it applies to, and why it controls billing.</li>
+        <li>Add a new lab or department on the fly — and know when it actually gets saved.</li>
+        <li>Retire a person who has left, without losing any history they're part of.</li>
+        <li>Filter the People directory to find who you're looking for.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="add-a-person">Adding a person</h2>
+      <ol class="steps">
+        <li>Go to <strong>People & Labs</strong> in the sidebar.</li>
+        <li>Choose <strong>Add Person</strong>.</li>
+        <li>Enter their name.</li>
+        <li>Pick a Position/Role from the list, or choose <strong>+ Add New</strong> to create one that doesn't exist yet.</li>
+        <li>Pick (or add) their Lab/Group and Department — see <a href="#labs-departments">Labs & departments</a> below.</li>
+        <li>Add an email address if you have one — it's what lets this person be emailed later from a booking (see <a href="email-attendees.html#how-it-works">Emailing Attendees</a>).</li>
+        <li>If this person operates instruments and should be billed for their time, tick <strong>Facility Staff</strong> and set their hourly rate — see the next section.</li>
+        <li>Save.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/11-people-labs.png" alt="The People directory showing a list of people with role, lab, facility-staff tick, and rate columns" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/11-people-labs.png</div>
+        <figcaption>The People directory — every person's role, lab, and staff status at a glance.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="facility-staff-flag">The Facility Staff flag — who gets billed vs. who just attends</h2>
+      <p>Not everyone in the directory is treated the same way when it comes to money. The app draws one clear line:</p>
+      <ul>
+        <li><strong>Facility Staff</strong> are the people who <em>operate</em> instruments and run sessions on behalf of the facility — think of the technician who sits at the microscope. They have an hourly rate, and their time on a booking is billed.</li>
+        <li>Everyone else — researchers, PIs, students — are <strong>attendees</strong>. They can be listed on a booking to record that they were there, but they are never billed for their time.</li>
+      </ul>
+      <p>To mark someone as facility staff:</p>
+      <ol class="steps">
+        <li>Open the person's record (or start adding a new one).</li>
+        <li>Tick the <strong>Facility Staff</strong> checkbox.</li>
+        <li>Enter their <strong>Rate per hour</strong> — this is what gets charged when they're booked to help run a session.</li>
+        <li>Save.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/25-person-core-staff-fields.png" alt="A person's edit form with the Facility Staff checkbox ticked and a Rate per hour field visible" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/25-person-core-staff-fields.png</div>
+        <figcaption>Ticking Facility Staff reveals the hourly rate field used when this person is booked to help run a session.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="../screenshots/51-facility-staff.png" alt="Help text next to the Facility Staff checkbox explaining what it controls" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/51-facility-staff.png</div>
+        <figcaption>The Facility Staff checkbox, with its explanation of what ticking it changes.</figcaption>
+      </figure>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way.</strong> A booking often has a room full of people, but only one or two of them are actually running the equipment on the clock. Splitting "who was there" from "who gets paid for their time" means you can log a full list of attendees for your records without accidentally billing every researcher in the room. Only people flagged Facility Staff show up in a booking's "Assign Facility Staff" picker at all — everyone else can only ever be added as a plain attendee. For the bigger picture on why this split exists, see <a href="big-ideas.html#facility-staff-vs-attendees">The Big Ideas</a>.</p>
+      </div>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> Use the "Facility staff only" filter in the People directory to quickly see everyone who can be booked as staff, along with their rates.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="labs-departments">Labs & departments — and the "+ Add New" caveat</h2>
+      <p>Lab/Group and Department aren't a fixed list you're stuck with — they're built up from whatever the people already in your directory have. When you type or pick one for a new person, you're either choosing an existing value or creating a brand new one on the spot with <strong>+ Add New</strong>.</p>
+      <figure class="shot">
+        <img src="../screenshots/17-people-department.png" alt="The People directory's Department column showing free-text lab and department values" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/17-people-department.png</div>
+        <figcaption>The Department column — these values come from whatever the people in your directory already use.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="../screenshots/18-add-new-value.png" alt="A dropdown open with an Add New option at the bottom, and a text box for typing a brand new value" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/18-add-new-value.png</div>
+        <figcaption>Choosing "+ Add New" opens a box to type a brand-new lab, department, or role.</figcaption>
+      </figure>
+      <div class="callout warn">
+        <p><strong>⚠️ Careful — a new lab or department only sticks when you actually save the person.</strong> If you type a new Lab/Group name using + Add New and then close the form without saving (or cancel out of it), that new lab name is thrown away — it never gets added to the shared list, and the next person you add won't see it as a choice. If you need a new lab to exist, the fastest safe way is to save at least one person into it.</p>
+      </div>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way.</strong> There's no separate screen for "manage labs" — the list of labs is simply read off the people who already belong to one. That keeps things simple, but it means a lab only really exists once someone is actually saved as being in it. See also <a href="rough-edges.html#new-lab-lost">Appendix A</a> for this exact gotcha, and <a href="rough-edges.html#lab-typos">Appendix A</a> for the related trap of typos creating accidental duplicate labs.</p>
+      </div>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> Because a typo (say, "Bio-Photonics" vs. "BioPhotonics Lab") creates two separate labs as far as the app is concerned, it's worth double-checking existing spellings before typing a new one — pick from the dropdown whenever the lab already exists rather than retyping it.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="retire-restore">Retiring and restoring a person</h2>
+      <p>People leave labs, graduate, or move on. When that happens, you don't delete them from the app — you <strong>retire</strong> them.</p>
+      <ol class="steps">
+        <li>Open the person's record.</li>
+        <li>Choose <strong>Retire</strong>.</li>
+        <li>The app looks at everything this person is connected to and shows you a dialog.</li>
+      </ol>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way — the app decides delete vs. retire, not you.</strong> If this person has never been used anywhere — no projects, no teams, no milestones, no bookings — the app offers a real, permanent <strong>Delete</strong> instead, because there's nothing to protect and it was likely a typo or a duplicate entry. But the moment a person has any history attached (they were a PI on a project, they attended or ran a booking, they own a milestone), the app will only let you retire them. This isn't a limitation you can override — it's protecting old records: a booking from six months ago that says "run by Dana" needs to keep saying that even after Dana leaves. See <a href="rough-edges.html#forced-retire">Appendix A</a> and <a href="big-ideas.html#retire-vs-delete">The Big Ideas</a> for more on this pattern, which works the same way for instruments and projects.</p>
+      </div>
+      <figure class="shot">
+        <img src="../screenshots/42-retire-person.png" alt="Retire person dialog listing where this person appears: projects, teams, milestones, and bookings" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/42-retire-person.png</div>
+        <figcaption>The retire dialog spells out exactly where this person's history lives before you confirm.</figcaption>
+      </figure>
+      <p>Once retired, the person:</p>
+      <ul>
+        <li>Shows "(Retired)" next to their name everywhere they appear — this is just a label; nothing about the historical record itself changes.</li>
+        <li>Disappears from pickers used for <em>new</em> work (you can't assign a retired person to a new booking or milestone).</li>
+        <li>Stays exactly where they already were — as a milestone owner, a project's PI, an attendee or staff member on past bookings.</li>
+        <li>Is hidden from the main People list by default, behind a <strong>Show retired (n)</strong> toggle.</li>
+      </ul>
+      <figure class="shot">
+        <img src="../screenshots/44-people-retired.png" alt="People directory with the Show retired toggle expanded, revealing retired people labelled Retired" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/44-people-retired.png</div>
+        <figcaption>Turning on "Show retired" reveals people who've left, still labelled clearly.</figcaption>
+      </figure>
+      <p>To bring someone back, open their record while retired people are shown, and choose <strong>Restore</strong>.</p>
+      <div class="callout try">
+        <p><strong>🧪 Try it.</strong> Load the sample data, retire one of the demo researchers who has bookings, then open one of their old bookings — notice their name still shows there, now labelled "(Retired)." Then open the "Assign People" picker on a new booking and confirm they no longer appear as a choice.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="project-teams">Project teams</h2>
+      <p>A person can be added to a project's team with a specific role (for example, "Principal Investigator" or "Collaborator"). Removing someone from a team just takes them off that project's roster — it does not delete or retire them. See <a href="projects.html#team">Projects</a> for how to manage a project's team.</p>
+    </section>
+
+    <section>
+      <h2 id="filters">Finding people in the directory</h2>
+      <p>The People screen gives you a few ways to narrow a long list:</p>
+      <ul>
+        <li><strong>Search</strong> — free-text, matches names and other details.</li>
+        <li><strong>Role filter</strong> — show only people with a particular Position/Role.</li>
+        <li><strong>Show retired (n)</strong> — reveals people who've left (hidden by default).</li>
+        <li><strong>Facility staff only (n)</strong> — shows only people flagged as billable staff, useful for reviewing rates.</li>
+      </ul>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>A researcher attends a booking but never operates the microscope. Should you tick Facility Staff for them?</summary><p>No. Facility Staff is only for people who operate equipment and get billed hourly for it. A researcher who is simply present is an attendee — they're never billed regardless of this flag.</p></details>
+      <details class="quiz-q"><summary>You type a brand-new lab name into "+ Add New" while adding a person, then close the form without saving. Does the new lab exist now?</summary><p>No — a new lab or department name only becomes real once you actually save a person with it. Closing or cancelling the form throws it away.</p></details>
+      <details class="quiz-q"><summary>You try to retire a person and the app offers to delete them instead. Why?</summary><p>Because that person has zero history — no projects, teams, milestones, or bookings reference them. With nothing to protect, the app treats it as a likely typo or duplicate and offers a true delete instead of a retire.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

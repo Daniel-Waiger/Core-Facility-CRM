@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backups, Restore &amp; Exports — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="backups-exports.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><!-- rendered by manual.js --></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Backups, Restore &amp; Exports</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 13</p>
+      <h1>Backups, Restore &amp; Exports</h1>
+      <p class="lede">Save your data to a file, bring it back, move it to a new computer, and hand out reports without risking the one copy you have.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Export a full backup of everything in your tracker, including uploaded files</li>
+        <li>Restore a backup — and know exactly what it will wipe out first</li>
+        <li>Turn on automatic daily backups so you don't have to remember</li>
+        <li>Use a silent backup folder in Chrome or Edge, and re-grant it after a restart</li>
+        <li>Move your data from one computer to another, step by step</li>
+        <li>Export a single project's report, or every project at once, in the right format for the job</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="json-backup">Exporting a backup</h2>
+      <p>A backup is a single file that contains your entire tracker — every project, person, instrument, milestone, and booking, plus any files you've uploaded to projects. It's the only way to move your data anywhere, and the only way to protect it against something going wrong on this device.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> from the sidebar.</li>
+        <li>Find <strong>Export Backup</strong> under "Portable Data &amp; Backups."</li>
+        <li>Click it. Your browser downloads a single file — treat it like any other important document.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/14-settings.png" alt="Settings screen showing the Portable Data and Backups section" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/14-settings.png</div>
+        <figcaption>The Portable Data &amp; Backups section of Settings, where Export Backup and Restore from Backup live.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Your data <a href="big-ideas.html#your-data-lives-here">lives only in this browser on this device</a> — there is no server copy sitting somewhere safe. A backup file is the one thing that exists outside that browser, so it's the only real safety net you have.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Any file you've uploaded to a project — a PDF, an image, a document — travels inside this same backup file. You don't need to back those up separately, and you can't split them out; restoring the backup brings the files back along with everything else.</p></div>
+    </section>
+
+    <section>
+      <h2 id="restore">Restoring a backup</h2>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find <strong>Restore from Backup</strong>.</li>
+        <li>Choose the backup file you want to load.</li>
+        <li>Confirm when asked — this is the moment that matters, read the next warning before you click through it.</li>
+      </ol>
+
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Restoring a backup <strong>replaces everything currently in your tracker</strong> — every project, person, booking, and setting is thrown away and swapped for whatever is in the file you're restoring. There is no merge and no undo. Make it a habit: <strong>always export a fresh backup of what you have right now, before you restore anything else</strong> — even if you're sure you don't need the current data, a thirty-second export costs you nothing and a mistaken restore cannot be undone.</p></div>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A restore has to fully swap the database out from under the app, so there's no safe way to keep "a bit of both." Treating restore as all-or-nothing is simpler and far less error-prone than trying to merge two sets of projects and bookings automatically and guessing which one you meant.</p></div>
+
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, export a backup. Then go add a throwaway project — call it "Test Delete Me" — and restore the backup you just made. Confirm the throwaway project is gone. This is exactly the safety net you'd rely on for real data.</p></div>
+    </section>
+
+    <section>
+      <h2 id="auto-backup">Automatic daily backup</h2>
+      <p>You don't have to remember to export manually. The tracker can do it for you in the background.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and turn on <strong>Automatic Daily Backup</strong>.</li>
+        <li>Leave the app open in your browser from time to time — the backup runs roughly once every 24 hours while the tracker is open, and is skipped automatically if there's nothing worth backing up yet.</li>
+      </ol>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Automatic daily backup still produces ordinary downloaded files (unless you also set up the silent folder below) — it's worth occasionally checking your downloads to make sure they're actually landing somewhere, and periodically clearing out old ones.</p></div>
+    </section>
+
+    <section>
+      <h2 id="silent-folder">The silent backup folder</h2>
+      <p>Normally, every backup — automatic or manual — triggers a browser download, landing in your Downloads folder and prompting a save dialog. If you're on Chrome or Edge, you can skip that and have backups written quietly into a folder you choose.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find the <strong>Silent Backup Folder</strong> option.</li>
+        <li>Pick a folder on your computer when your browser asks.</li>
+        <li>From then on, automatic (and manual) backups are written straight into a <strong>backups</strong> subfolder inside the one you chose, with no download prompt.</li>
+      </ol>
+
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> This feature only works in Chrome and Edge (or other browsers built on the same engine) — it isn't available in Firefox or Safari, where automatic backups fall back to a normal download instead. Also, the browser can forget the permission after you restart it; if silent backups stop appearing, come back to Settings and click <strong>Re-enable</strong> to grant folder access again. See <a href="rough-edges.html#silent-backup-regrant">this rough edge</a> for more.</p></div>
+    </section>
+
+    <section>
+      <h2 id="move-computers">Move your data to a new computer</h2>
+      <p>Because your data lives only in this browser, moving to a new computer (or a new browser, or handing the facility off to someone else) means moving the backup file across, not "logging in" anywhere.</p>
+      <ol class="steps">
+        <li>On the <strong>old</strong> computer, open <strong>Settings</strong> and click <strong>Export Backup</strong>. This downloads a single file — note where it lands.</li>
+        <li>Copy that file to the new computer — by USB drive, cloud storage folder, email attachment to yourself, or however you'd normally move a file.</li>
+        <li>On the <strong>new</strong> computer, open the tracker in a browser for the first time. If the welcome screen appears, choose <strong>Start Fresh</strong> (you're about to restore instead) or simply proceed — restoring in the next step will replace whatever is there either way.</li>
+        <li>Open <strong>Settings</strong> on the new computer, click <strong>Restore from Backup</strong>, and choose the file you copied over.</li>
+        <li>Confirm the restore. Your projects, people, instruments, milestones, bookings — and any uploaded files — now all exist on the new computer, exactly as they were when you exported.</li>
+        <li>Double-check a project or two to confirm everything came across, then you're free to keep working from the new computer.</li>
+      </ol>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> There's no account and no server in the middle, so there's nothing to "sign into" on the new machine — the backup file <em>is</em> the entire transfer mechanism. See <a href="big-ideas.html#backups-are-not-sync">Backups are not sync</a> for why the two computers won't silently stay in step afterward.</p></div>
+
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> After this move, the old computer's copy is now out of date — if you keep entering bookings on the old computer too, the two will drift apart and neither backup will be "the real one" anymore. Pick one computer to be the working copy going forward, or export-and-restore between them every time you switch.</p></div>
+    </section>
+
+    <section>
+      <h2 id="project-exports">Exporting a single project's report</h2>
+      <p>Open any project's detail page to export a polished report of just that project — useful for sharing progress with a PI, a funding body, or your own records.</p>
+      <div class="table-wrap">
+      <table>
+        <thead><tr><th>Format</th><th>Best for</th><th>What's in it</th></tr></thead>
+        <tbody>
+          <tr><td>XLSX (spreadsheet)</td><td>Crunching numbers yourself, importing into other tools</td><td>Project details, milestones, team, bookings and their costs, as structured rows and columns</td></tr>
+          <tr><td>DOCX (Word document)</td><td>A readable written summary to send someone</td><td>The same information laid out as prose and tables, ready to print or attach to an email</td></tr>
+          <tr><td>PDF</td><td>A final, non-editable copy for records or signatures</td><td>Same content as the DOCX, fixed in place so it looks the same on any device</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> All three formats are generated from the same underlying numbers used in <a href="reports.html">Reports</a> and the project's own cost view, so you never have to worry about one export disagreeing with another.</p></div>
+    </section>
+
+    <section>
+      <h2 id="export-all">Export All — the facility-wide report</h2>
+      <p>From the main <strong>Projects</strong> registry, the <strong>Export All</strong> button produces one spreadsheet covering every project in the facility at once — handy for a facility-wide review instead of project-by-project.</p>
+      <ol class="steps">
+        <li>Open <strong>Projects</strong> from the sidebar.</li>
+        <li>Click <strong>Export All</strong> near the top of the registry.</li>
+        <li>An XLSX spreadsheet downloads, with every project's details, milestones, and costs as rows you can sort, filter, or pivot in your own spreadsheet program.</li>
+      </ol>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A single project's report reads best as a document (DOCX/PDF) because there's a natural narrative — "here's this one project's story." A facility-wide export is really a dataset, not a story, so it only comes as a spreadsheet, which is what you'd want to actually analyze it in anyway.</p></div>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>You're about to restore an old backup because you need one record that's in it. What should you do first, and why?</summary><p>Export a fresh backup of your current data first. Restoring replaces everything currently in the tracker with no merge and no undo — if you don't save today's data first, you'll lose it the moment you restore the old file.</p></details>
+      <details class="quiz-q"><summary>You set up the silent backup folder in Chrome, but a week later you notice no new backups have appeared. What's the likely cause and fix?</summary><p>Chrome (and Edge) can forget the folder permission after the browser restarts. Go to Settings and click Re-enable to grant access to the folder again.</p></details>
+      <details class="quiz-q"><summary>You want to email a PI a clean summary of their project's progress. Which export format should you pick, and why not the facility-wide Export All?</summary><p>Export the project as a DOCX (or PDF) from its own detail page — it reads as prose, ready to send. Export All is a facility-wide spreadsheet covering every project, not a readable single-project summary.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

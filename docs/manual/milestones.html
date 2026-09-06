@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Milestones — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="milestones.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Milestones</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 5</p>
+      <h1>Milestones</h1>
+      <p class="lede">Milestones are the checkpoints inside a project — the things that need to happen, by when, and who is responsible for them.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Add a milestone to a project, with a due date and a note.</li>
+        <li>Assign one or more owners (people) and instruments to a milestone.</li>
+        <li>Move a milestone through its three statuses: pending, in progress, done.</li>
+        <li>Understand what makes a milestone show up as "overdue."</li>
+        <li>Delete a milestone you created by mistake — and know why the confirm dialog looks the way it does.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="add-a-milestone">Adding a milestone</h2>
+      <p>Milestones live inside a project. You'll find them on the project's detail page, in the Milestones section.</p>
+      <ol class="steps">
+        <li>Open the project the milestone belongs to (see <a href="projects.html#create-a-project">Projects</a> if you need a refresher on finding or creating one).</li>
+        <li>Find the Milestones section on the project page and choose <strong>Add Milestone</strong>.</li>
+        <li>Type a short, clear title — this is what shows up on the Dashboard and in lists, so make it specific ("Order objective lens," not "Stuff").</li>
+        <li>Pick a due date.</li>
+        <li>Optionally, add a note with more detail.</li>
+        <li>Optionally, assign one or more <strong>owners</strong> (the people responsible) and one or more <strong>instruments</strong> this milestone concerns.</li>
+        <li>Save.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/09-milestones.png" alt="A project's milestones list showing titles, due dates, status markers, and owner chips" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/09-milestones.png</div>
+        <figcaption>A project's milestone list — each row shows its title, due date, status, and who owns it.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="owners-instruments">Owners and instruments</h2>
+      <p>You can attach two kinds of chips to a milestone:</p>
+      <ul>
+        <li><strong>Owners</strong> — the people responsible for getting it done. You can add more than one.</li>
+        <li><strong>Instruments</strong> — the equipment this milestone depends on or concerns, if any.</li>
+      </ul>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way.</strong> If you retire a person or an instrument (see <a href="people-labs.html#retire-restore">People & Labs</a> and <a href="instruments.html#retire-restore">Instruments</a>), they don't disappear from milestones that already list them — a retired person keeps showing as an owner chip on the milestones they were already assigned to. This is deliberate: the milestone is a historical record of who was responsible, and that fact doesn't change just because the person has since left. The only thing retiring affects is whether they show up as a choice for <em>new</em> assignments — a retired person or instrument will not appear in the picker's dropdown list, but their existing chip stays put and stays visible.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="status-cycle">Moving a milestone through its status</h2>
+      <p>Every milestone is in one of three states: <strong>pending</strong>, <strong>in progress</strong>, or <strong>done</strong>. There's no dropdown to jump straight to a status — instead, you click the status marker itself and it advances one step, wrapping back around to pending after done.</p>
+      <ol class="steps">
+        <li>Find the milestone's status marker (on the project page, or on the Dashboard's upcoming/overdue lists).</li>
+        <li>Click it once: pending → in progress.</li>
+        <li>Click it again: in progress → done.</li>
+        <li>Click a third time: done → pending again (useful if you marked something done by accident).</li>
+      </ol>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> You can cycle a milestone's status right from the Dashboard's overdue or upcoming list — you don't have to open the project first. See <a href="dashboard.html#upcoming-overdue">Dashboard & Today's Agenda</a>.</p>
+      </div>
+      <div class="callout warn">
+        <p><strong>⚠️ Careful.</strong> Because there's no direct picker, going from pending straight to done takes two clicks, and undoing a mistaken "done" takes one more click to complete the loop back to pending. Count your clicks.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="overdue">What makes a milestone "overdue"</h2>
+      <p>A milestone counts as overdue when its due date has already passed <em>and</em> it isn't marked done yet. A milestone due today is not yet overdue; one due yesterday and still pending or in progress is.</p>
+      <p>Overdue milestones show up in two places: the Dashboard's overdue tile and feed (see <a href="dashboard.html#tiles">Dashboard & Today's Agenda</a>), and Today's Agenda. Marking a milestone done removes it from both immediately.</p>
+      <div class="callout try">
+        <p><strong>🧪 Try it.</strong> Load the sample data (Settings → Load Sample Data — see <a href="getting-started.html#sample-data">Getting Started</a>), then open a project with milestones and set one due date to yesterday without marking it done. Go to the Dashboard and confirm it now appears in the overdue feed.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="delete">Deleting a milestone</h2>
+      <p>If you created a milestone by mistake, you can delete it outright — unlike people, instruments, and projects, milestones don't have a "retire" option, because a milestone doesn't carry the same kind of history that needs protecting.</p>
+      <ol class="steps">
+        <li>Open the milestone you want to remove.</li>
+        <li>Choose <strong>Delete</strong>.</li>
+        <li>A confirmation dialog appears — read it carefully (see the callout below), then confirm.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/38-delete-milestone-confirm.png" alt="Delete milestone confirmation dialog with a red Cancel button and a plain Delete button" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/38-delete-milestone-confirm.png</div>
+        <figcaption>The delete-confirmation dialog — notice the red button is Cancel, not Delete.</figcaption>
+      </figure>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way.</strong> On every dangerous confirmation in this app, the eye-catching red button is the <em>safe</em> choice — Cancel — not the destructive one. That's on purpose: if your eye is drawn to the red button by habit, it should pull you away from the mistake, not into it. Always read the button labels rather than going by color alone.</p>
+      </div>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>You accidentally clicked a milestone's status all the way to "done." How do you get it back to pending?</summary><p>Click the status marker one more time — the cycle is pending → in progress → done → pending, so a third click from "done" wraps it back to pending.</p></details>
+      <details class="quiz-q"><summary>A milestone owner retired last month, but the milestone still shows their name as a chip. Is that a bug?</summary><p>No — that's intentional. Retired people keep any chips they were already assigned before they retired, because the milestone is a record of who was responsible at the time. They just won't appear as a choice for new milestones.</p></details>
+      <details class="quiz-q"><summary>A milestone is due today and still pending. Does it show up as overdue?</summary><p>No. "Overdue" means the due date has already passed and the milestone isn't done — a milestone due today isn't overdue yet.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

@@ -3,6 +3,12 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.3] — 2026-09-06
+
+### Added
+- **A full user manual**, searchable and illustrated, hosted at `docs/manual/`.
+- **A new Manual button in the sidebar**, linking straight to the hosted manual.
+
 ## [1.5.2] — 2026-09-06
 
 ### Fixed

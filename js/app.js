@@ -203,6 +203,7 @@
             <button class="btn btn-tour btn-sm" data-act="tour" data-tooltip="Interactive Guided Tour">${ic('play')}<span class="lbl">Tour</span></button>
             <button class="btn btn-secondary btn-sm sidebar-theme-btn" data-act="theme-toggle" data-tooltip="Switch Appearance"></button>
             <button class="btn btn-secondary btn-sm sidebar-settings-btn" data-nav="settings" data-tooltip="Backups &amp; Settings">${ic('gear')}<span class="lbl">Settings</span></button>
+            <a class="btn btn-secondary btn-sm sidebar-manual-btn" href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/" target="_blank" rel="noopener noreferrer" data-tooltip="User manual — how to use every feature">${ic('book')}<span class="lbl">Manual</span></a>
             <a class="btn btn-mango btn-sm sidebar-relnotes-btn" href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/" target="_blank" rel="noopener noreferrer" data-tooltip="What&#39;s new — release notes">${ic('sparkles')}<span class="lbl">Release Notes</span></a>
           </div>
         </aside>
