@@ -14,11 +14,11 @@
   <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
   <!-- ?v= cache-busters (kept at the app version): bump these when css/js change so browsers
        (and the service-worker precache) pick up the new files instead of a stale copy. -->
-  <link rel="stylesheet" href="css/app.css?v=1.3.6">
+  <link rel="stylesheet" href="css/app.css?v=1.5.3">
   <!-- Installable/offline support when served over https (e.g. GitHub Pages). Both are
        no-ops under file:// or plain http — the app still runs via the boot fallbacks below. -->
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="#5b48c7">
 </head>
 <body>
   <div id="app"></div>
@@ -38,12 +38,13 @@
   <script src="libs/jspdf.umd.min.js"></script>
   <script src="libs/docx.iife.js"></script>
 
-  <script src="js/consts.js?v=1.3.6"></script>
-  <script src="js/db.js?v=1.3.6"></script>
-  <script src="js/ui.js?v=1.3.6"></script>
-  <script src="js/views.js?v=1.3.6"></script>
-  <script src="js/exports.js?v=1.3.6"></script>
-  <script src="js/app.js?v=1.3.6"></script>
+  <script src="js/consts.js?v=1.5.3"></script>
+  <script src="js/db.js?v=1.5.3"></script>
+  <script src="js/ui.js?v=1.5.3"></script>
+  <script src="js/views.js?v=1.5.3"></script>
+  <script src="js/reports.js?v=1.5.3"></script>
+  <script src="js/exports.js?v=1.5.3"></script>
+  <script src="js/app.js?v=1.5.3"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       // Last-resort net: App.boot() already catches its own errors and renders a diagnostic
@@ -69,6 +70,10 @@
     // secure context), so this is guarded to only run when actually served over http(s).
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       window.addEventListener('load', function () {
+        // No "an update is available" prompt here on purpose: registration runs at page load, so
+        // such a toast could only ever appear immediately after a reload — and sw.js now serves the
+        // HTML shell network-first, which means that same reload has already switched you to the
+        // new release. The message would be telling you to do the thing you just did.
         navigator.serviceWorker.register('sw.js').catch(function (e) {
           console.warn('Service worker registration failed (app still works without it):', e);
         });

@@ -11,3 +11,6 @@ Thumbs.db
 
 # Outreach / marketing drafts — private working folder, never ships
 outreach/
+
+.claude/worktrees/
+

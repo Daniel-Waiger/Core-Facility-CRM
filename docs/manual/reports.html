@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports &amp; Utilization — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="reports.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Reports &amp; Utilization</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 12</p>
+      <h1>Reports &amp; Utilization</h1>
+      <p class="lede">Two rules decide what counts as "happened" and what counts as "billed" — once you know them, every number on this screen makes sense.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Explain the two rules that govern every figure on the Reports screen.</li>
+        <li>Read the instrument, staff, matrix, and project/lab cards, column by column.</li>
+        <li>Understand why a booking with two instruments counts double on hours, but not on sessions.</li>
+        <li>Pick a date range and know why some rows disappear when you narrow it.</li>
+        <li>Trust that the exported spreadsheet always matches what's on screen.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="two-rules">The two rules — read these first</h2>
+      <p>Almost everything confusing on this screen traces back to two simple rules. Learn these and the rest of the chapter is just bookkeeping.</p>
+      <div class="callout math">
+        <p><strong>🧮 Rule 1 — Occupancy/hours: a cancelled booking never happened.</strong> If a booking is cancelled, it stops counting toward any instrument's or staff member's hours — the slot it once held is treated as if it had always been free. This matches <a href="cancelling.html#reinstate">how cancelling frees up the slot</a> for someone else to book.</p>
+      </div>
+      <div class="callout math">
+        <p><strong>🧮 Rule 2 — Money: a charge counts unless it was cancelled AND waived.</strong> A booking's cost still counts toward revenue totals as long as its charge wasn't dropped or waived — even if the booking itself was cancelled. This is exactly the <a href="cancelling.html#decision-table">cancel decision table</a> from the previous chapter.</p>
+      </div>
+      <div class="callout why">
+        <p><strong>🔍 Why it works this way.</strong> These two rules can point in different directions on the same booking, and that's intentional. A booking cancelled <em>after</em> its start time, with its charge kept, is a real example: the facility held that instrument's time (so it should count as revenue — the slot really was occupied and paid for), but the booking never actually ran a session (so it shouldn't count as occupied hours — nobody was using the instrument). That booking adds money to the Money card but zero hours to the Instrument card. It looks inconsistent until you remember these are two separate questions: "did this booking cost the facility anything?" and "was equipment actually in use?"</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="date-range">Choosing a date range</h2>
+      <p>Every card on this screen is scoped to one date range at a time, set at the top of the page.</p>
+      <ol class="steps">
+        <li>Pick <strong>From</strong> and <strong>To</strong> dates, or use one of the presets: <strong>This Month</strong>, <strong>This Year</strong>, or <strong>All Time</strong>.</li>
+        <li>The default range is the current year, so the screen shows something useful the moment you open it.</li>
+        <li>Every card below updates together — there's no per-card range.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/49-reports.png" alt="The Reports screen with its date range bar and the four report cards" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/49-reports.png</div>
+        <figcaption>The date range bar at the top scopes every card on the page at once.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="instrument-card">Card 1 — Instrument utilization</h2>
+      <p>One row per instrument, for bookings that fall in the selected date range:</p>
+      <ul>
+        <li><strong>Bookings</strong> — how many bookings used this instrument (cancelled ones excluded, per Rule 1).</li>
+        <li><strong>Booked hours</strong> — the total time this instrument was reserved for, across those bookings.</li>
+        <li><strong>Billed revenue</strong> — the money those bookings' instrument charges brought in (per Rule 2, so a cancelled-but-charged booking's revenue still shows here even though its hours don't).</li>
+        <li><strong>Share of total hours</strong> — a bar showing this instrument's hours as a percentage of all instrument hours in the range, so you can see at a glance which instruments are the busiest.</li>
+      </ul>
+      <div class="callout warn">
+        <p><strong>⚠️ Careful — parallel occupancy.</strong> If a single 2-hour booking uses two instruments together, each instrument gets credited with the <strong>full 2 hours</strong>, not 1 hour each. That's not double-counting — both instruments really were occupied for the whole 2 hours, at the same time, by the same booking.</p>
+      </div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> Load the sample data and open Reports with the default (This Year) range. Find a booking that uses two instruments at once in the Calendar, then check that both instruments show that booking's full duration in their Booked hours — not half each.</p></div>
+    </section>
+
+    <section>
+      <h2 id="staff-card">Card 2 — Facility staff time</h2>
+      <p>One row per facility staff member:</p>
+      <ul>
+        <li><strong>Sessions</strong> — how many bookings this person was assigned to as staff (cancelled ones excluded).</li>
+        <li><strong>Raw hours</strong> — their actual time on each booking: their own start/end window if they had one, or the whole booking if they didn't set one.</li>
+        <li><strong>Billed hours</strong> — the same time run through the <a href="costs-math.html#staff-hours">one-hour minimum, round-up rule</a>, so this is always the same as or larger than raw hours — never smaller.</li>
+        <li><strong>Staff revenue</strong> — the money their billed hours brought in.</li>
+      </ul>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> If a staff member's line for a booking has no personal start/end time set, their raw hours count as the <em>whole booking window</em>, exactly the same rule the live cost breakdown uses (see <a href="costs-math.html#staff-hours">How Costs Are Calculated</a>).</p></div>
+      <div class="callout try">
+        <p><strong>🧪 Try it.</strong> The sample data's three facility staff bill at 95, 110, and 80 per hour. Pick one, find their row on the Staff card, and check that Billed hours is never less than Raw hours — if any booking involved a partial hour, Billed hours should be visibly rounded up from it.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="matrix">Card 3 — Staff × instrument matrix</h2>
+      <p>This card cross-tabulates facility staff against instruments: one row per staff member, one column per instrument, and a cell showing how much of that person's time was spent on that instrument.</p>
+      <ul>
+        <li>Each cell reads as <strong>"n sess · x h"</strong> — a count of sessions, and a number of hours.</li>
+        <li><strong>Sessions are not split.</strong> If a staff member worked one booking that used two instruments, that's one full session credited under each instrument column they touched.</li>
+        <li><strong>Hours ARE split</strong> across the booking's instruments, so that each staff member's row still adds up to their real total hours rather than over-counting them. If someone spent 2 hours on a booking that used 2 instruments, each instrument's cell gets 1 of those 2 hours — the two combined give back their true 2 hours.</li>
+      </ul>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This is the opposite of Card 1's rule, and deliberately so: the Instrument card is answering "how occupied was this instrument?" (both instruments really were tied up for the whole time, so each gets full hours). The matrix is answering "how did this person's time break down by instrument?" — and a person only has so many hours in a day, so splitting keeps their row honest rather than making it look like they worked twice as many hours as they did.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> Find a staff member and instrument pair in the sample data's matrix, then cross-check the hours against that person's Raw hours total on Card 2 — the matrix row should sum to the same total.</p></div>
+    </section>
+
+    <section>
+      <h2 id="projects-groups">Card 4 — By Project and By Lab/Group</h2>
+      <p>Two related tables, grouping the same bookings a different way:</p>
+      <ul>
+        <li><strong>By Project</strong> — one row per project, plus a <strong>"Facility-wide"</strong> row for bookings that weren't attached to any project.</li>
+        <li><strong>By Lab/Group</strong> — one row per lab/group named on a booking. A booking with no lab/group recorded is simply <strong>omitted</strong> from this table (there's nothing to group it under) — it still shows up in By Project and in Cards 1–2.</li>
+      </ul>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> "Facility-wide" isn't a real project — it's how the app labels bookings that were never attached to one. See <a href="bookings.html#book-a-session">Booking a Session</a> for how a booking's project is (or isn't) chosen.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Not every booking is tied to a specific research project — general facility maintenance sessions, walk-in demos, and the like still need to be tracked, so they're grouped under "Facility-wide" instead of being forced onto a project they don't belong to. Lab/Group is optional on a booking in a way project isn't always, so a booking genuinely missing that field is left out of the By-Lab table rather than inventing a fake "unknown lab" bucket.</p></div>
+    </section>
+
+    <section>
+      <h2 id="retired-archived">Retired people, retired instruments, archived projects</h2>
+      <p>Reports intentionally does <strong>not</strong> hide retired people, retired instruments, or archived projects — they still show up with their real historical hours and charges, labeled the same "(Retired)" way you'd see them anywhere else in the app.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This is the entire point of <a href="big-ideas.html#retire-vs-delete">retiring instead of deleting</a> — a piece of equipment that was retired last month still ran real sessions before that, and a report that quietly dropped its history the moment it was retired would misstate the facility's actual utilization for the period. See <a href="people-labs.html#retire-restore">Retire &amp; restore</a> and <a href="instruments.html#retire-restore">Instruments: Retire &amp; restore</a>.</p></div>
+    </section>
+
+    <section>
+      <h2 id="export">Exporting to a spreadsheet</h2>
+      <ol class="steps">
+        <li>Set your date range as usual.</li>
+        <li>Choose <strong>Export XLSX</strong>.</li>
+        <li>A spreadsheet downloads with the same figures shown on screen for that range.</li>
+      </ol>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> The screen and the exported spreadsheet are generated from exactly the same underlying calculations — there isn't a separate export routine that could drift out of sync. Whatever the screen says, the spreadsheet says too, so you can hand the export to someone else with confidence it matches what you saw.</p></div>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q">
+        <summary>A booking is cancelled after its start time, and Admin Mode keeps its charge (Cancel &amp; Keep Charge). Does it add hours to the Instrument card? Does it add revenue?</summary>
+        <p>No hours — cancelled bookings never count as occupied time (Rule 1). Yes revenue — the charge wasn't waived, so it still counts (Rule 2).</p>
+      </details>
+      <details class="quiz-q">
+        <summary>A 3-hour booking uses two instruments at once. How many hours does each instrument's row on Card 1 show? How many hours total does the matrix credit a staff member who worked the whole booking?</summary>
+        <p>Each instrument shows the full 3 hours on Card 1 (both were occupied the whole time). On the matrix, the staff member's 3 hours are split across the two instruments (e.g. 1.5 h each) so their row still totals their real 3 hours.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>A booking has no Lab/Group recorded. Where does it show up, and where doesn't it?</summary>
+        <p>It shows up in By Project (as itself or under "Facility-wide" if it has no project either) and in the Instrument/Staff cards as usual — but it's omitted from the By Lab/Group table, since there's no lab to group it under.</p>
+      </details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

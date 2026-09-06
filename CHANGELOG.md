@@ -3,6 +3,108 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.3] — 2026-09-06
+
+### Added
+- **A full user manual**, searchable and illustrated, hosted at `docs/manual/`.
+- **A new Manual button in the sidebar**, linking straight to the hosted manual.
+- **Browser Back/forward now works, and every screen has its own address** (`#/projects`, `#/project/12`, `#/reports`, …) so a screen can be bookmarked, reloaded, or shared between devices. Dialogs and the guided tour stay out of the URL.
+- **A safety copy of your current data is downloaded automatically before a Restore** replaces the database (skipped when the database is empty), named `core-facility-pre-restore-backup-<date>.json`.
+- **"Show all labs" on the booking form's Assign People picker** — tick it to invite a collaborator from another lab without switching the booking's Group/Lab. The chosen Group/Lab still decides the group discount.
+- **Rename / Merge Lab tool** in Settings (Admin Mode): renames a lab everywhere at once — people, the lab's standing discount row, and the lab label saved on past bookings. Merging into an existing name keeps that name's own discount; historical booking totals are never recomputed.
+
+### Changed
+- **Milestone status is picked directly** from a small chooser (project page, dashboard lists, Today's Agenda) instead of click-cycling pending → in-progress → done.
+- **"+ Add New" Lab/Group and Department values now persist immediately**, even if the form they were added from is cancelled.
+- **The "Single Instrument Booking?" question has a "Don't ask me again" checkbox**; Settings → Preferences can turn the question back on.
+
+## [1.5.2] — 2026-09-06
+
+### Fixed
+- **Installed clients were stuck on an old release even though the server was serving the new one.** A user reported that the booking form still forced them to pick the core facility as the Group/Lab before any facility staff appeared — the exact thing 1.5.1 fixed. Their Settings screen read **Version: 1.4.0** while the hosted app, every version string on it, and its service worker all said 1.5.1. The cause was in `sw.js`, not in the booking form:
+  - `index.html` and `./` are the only precached URLs with **no `?v=` on them** — they are what *names* which versioned assets to load. GitHub Pages serves them with `Cache-Control: max-age=600`, and `cache.addAll()` is free to satisfy a request from the browser's own HTTP cache. So a newly-installing service worker could fill its brand-new `…-1.5.1` cache with the **previous release's** `index.html` — a shell still asking for `?v=1.4.0` files. Those weren't in the precache list, so the cache-first fetch handler fetched and cached them too. The result was a client pinned to 1.4.0 inside a correctly-named 1.5.1 cache, with no reload count able to break out of it.
+  - Precaching now requests every entry with `cache: 'reload'`, so the new cache can only ever be filled from the network.
+  - The HTML shell is now served **network-first** (falling back to cache when offline) instead of cache-first. Versioned assets stay cache-first — their URLs are immutable per release, so a cache hit is always correct — but the shell must be allowed to change, or a stale one keeps pointing at a stale release forever.
+  - Cache lookups are now scoped to the current release's cache, so a leftover cache can never answer for it.
+  Reproduced end-to-end against a server sending the same `max-age=600` GitHub Pages sends: a client on 1.4.0 stayed on 1.4.0 across three reloads with the old worker, and moved to the new release with the fixed one. Anyone currently stuck will pick this up on their next couple of reloads; from here on an update arrives on the first reload after a deploy.
+
+## [1.5.1] — 2026-09-06
+
+### Changed
+- **The demo dataset now actually exercises the Reports screen.** 1.5.0 shipped Reports & Utilization against a demo dataset with three bookings, only one of which carried any billing data at all — so a new user loading the sample data saw one instrument of five, one staff member, no cancellations, and nothing on the third project. The feature looked broken on the very dataset meant to demonstrate it. The seed now has ten bookings covering all five instruments and three facility staff, deliberately including the cases that make each part of the report meaningful:
+  - a **multi-instrument** session (parallel sample runs), the only thing that exercises the even-split staff attribution — and it reconciles: 4 staff hours across two instruments shows as 2h against each, and the row still sums to the person's true total;
+  - a **per-unit** instrument line (Glacios Cryo-TEM, billed per sample rather than per hour), whose cost is correctly excluded from the discount base;
+  - a **facility-wide** booking with no project, so the "Facility-wide" row is demonstrated rather than theoretical;
+  - **both kinds of cancellation** — one cancelled before its start (hours and charge both drop out) and one cancelled after, with the charge retained (hours drop out, revenue stands). On the Leica SP8 these two rules visibly disagree, which is the point;
+  - a **partial staff window** (40 minutes inside a four-hour booking), so worked hours and billed hours differ and the 1-hour floor is visible;
+  - two consultations with **no line items**, because plenty of real sessions aren't billable.
+- **Demo dates are now relative to the day the sample data is loaded** rather than hardcoded to 2025–2026. Eighteen fixed dates across projects, milestones and bookings became offsets from today, so the demo never reads as stale history and always falls inside the Reports screen's default range. Milestone statuses keep their narrative shape — completed ones in the past, upcoming ones ahead, and one deliberately overdue so the dashboard's overdue feed isn't empty.
+- **Seeded cost snapshots are computed, not typed in.** `computeBookingBOM` moved from `app.js` into `ui.js` (it was already pure — times, rates and line items in, numbers out), so the seed prices its bookings with the exact calculator the booking modal uses. Every stored `subtotal` / `total_before_tax` / `total_cost` and every `line_cost` is therefore what the app itself would have written had a user entered the booking by hand, and none of it can drift if the seeded overhead or tax rates are ever changed. Verified in a browser by recomputing all ten bookings from their own line items and comparing against what was stored — and the original demo booking still prices at exactly $490 / $546.25 / $589.95, unchanged.
+- A `seedBooking()` helper replaces the per-booking blocks of raw INSERTs. It builds the denormalized `meetings.attendees` display string and the `meeting_people` rows from one shared id list, so the pair cannot drift — the exact failure this project hit once before.
+
+## [1.5.0] — 2026-09-06
+
+### Added
+- **A Reports & Utilization screen**, answering the two questions a core facility is actually asked: how much each instrument gets used, and where facility-staff time goes. Pick any date range (or This Month / This Year / All Time) and get four tables:
+  - **Instrument utilisation** — bookings, booked hours, billed revenue and each instrument's share of total facility hours.
+  - **Facility staff time** — sessions, hours actually worked, hours billed, and revenue per staff member. Worked and billed hours are reported separately because billing applies a 1-hour floor and rounds up to whole hours; one number is workload, the other is the invoice.
+  - **Staff × instrument** — for "am I mostly helping users on one scope?". **Sessions** counts bookings unsplit, which is the figure that actually answers the question. **Attributed hours** divides a booking's staff hours evenly across every instrument on it, purely so the column reconciles against the person's true total — multi-instrument bookings are usually parallel sample runs, so that split is a bookkeeping convenience, not a claim about where the time "really" went. Both rules are stated on the card.
+  - **Projects & groups** — bookings, hours and cost per project and per lab. A booking with no project is grouped as "Facility-wide".
+  Two rules are applied consistently and spelled out on screen: booked hours exclude cancelled bookings entirely (a cancellation releases the slot, so the instrument was never held), while revenue follows the same retained-charge rule as Project Costs. Retired people, retired instruments and archived projects still appear — that is the point of keeping them.
+- **XLSX export of the whole report**, including a Notes sheet carrying the date range and both of those rules, so an exported total can be reconciled against its rows. Screen and export are built from the same aggregation functions, so an exported figure cannot drift from the on-screen one.
+- `UI.ymd()` / `UI.todayPlusDays()` for local calendar dates, and `UI.timeToMinutes` / `UI.hoursBetween` / `UI.billableStaffHours` moved into `ui.js` so the Reports screen and the booking cost calculator count hours with one shared implementation rather than two copies.
+- A **"Facility staff only (N)"** filter on the People list, alongside the existing retired toggle.
+
+### Fixed
+- **The calendar showed bookings on the wrong day for anyone east of Greenwich.** A booking created on 9 September appeared in the cell captioned 9 but opened, correctly, as 8 September. The calendar built each day cell as a local-midnight date, then captioned it with the local day number while looking its bookings up under a **UTC** date string — and at a UTC+ offset local midnight falls on the previous UTC day. Replaying the cell loop under Node: at `Asia/Jerusalem` and `Europe/Paris` all 35 cells in the grid disagreed with their own caption; at `UTC` and `America/Los_Angeles` none did, which is why this went unreported for so long. The edit form had been right all along — it reads the stored date directly.
+  - The same wrong date was handed to click-to-book, so clicking an empty cell opened a new booking on the previous day, and the cell's tooltip named the previous day.
+  - The calendar's own query bounds carried the same shift, silently excluding the last day of the visible grid from its results.
+  - Two other places used the same conversion and are fixed with it: the dashboard's 30-day upcoming-milestone window (one day short) and a project's overdue-milestone flag (could fire a day early). `UI.today()` itself returned *yesterday* between local midnight and 02:00/03:00 at UTC+ offsets, affecting every caller.
+- **Un-ticking Facility Staff on a person silently deleted them from bookings they had already worked.** The booking form's staff picker only ever listed people currently flagged as Facility Staff, and saving a booking rebuilds its staff rows from whatever the form shows — so the next save of any booking that person was on destroyed their assignment *and* the billing line behind it. Confirmed end-to-end in a browser before and after the fix: pre-fix, a re-save took `meeting_staff` from one row to none, taking a $190 line with it. The picker now keeps anyone already assigned to the booking, exactly as it already did for retired staff, while still not offering them for new assignments.
+
+### Changed
+- **"Core Staff" is now "Facility Staff" everywhere**, and the forms say what the flag actually does. The person form explains that ticking it puts someone in the "Assign Facility Staff" picker and bills their hourly rate, and that researchers and lab members should be left unticked because they belong in "Assign People". Both booking modals carry a line distinguishing the two pickers and stating that only people ticked as Facility Staff appear in the staff one. The People list's column is labelled "Facility Staff" with a tooltip saying where the flag is set. No stored data changed — this is naming and help text only.
+
+## [1.4.0] — 2026-09-05
+
+### Changed
+- **People, instruments and projects are retired or archived instead of deleted.** Deleting them destroyed historical fact: who actually attended a booking, which instrument a session actually ran on, who was PI on a project, and the billing behind a cost snapshot. None of that should disappear because someone leaves the facility or a scope is decommissioned. The delete actions are now **Retire** (people, instruments) and **Archive** (projects), which keep every existing link exactly as it is and only take the record out of the day-to-day lists.
+  - Retired and archived records are labelled **(Retired)** / **Archived** everywhere they appear — lists, project team and instrument cards, milestone assignees, booking badges, and XLSX/DOCX/PDF exports (the facility-wide export gains an explicit status column). The stored name is never modified; the suffix is added at display time, so historical records read back exactly as they were entered.
+  - They stop being offered when assigning new work, but stay selected wherever they already are. This matters more than it sounds: saving a milestone or a booking rebuilds its assignees from what the form shows, so a hidden assignee would have been silently dropped on the next save. Retired records still render on the forms they already belong to.
+  - Lists hide them by default behind a **Show retired / Show archived (N)** toggle that only appears when there are any. The dashboard's counters and overdue alerts now cover active projects only.
+  - Both are reversible with **Restore**. Only a record that nothing references at all — a typo or duplicate, with no history to protect — still offers a permanent delete.
+- **On a destructive confirmation, the red button is now Cancel, not Confirm.** Colour is what the eye lands on first, and on a dialog whose whole purpose is to prevent an accident, the safe way out deserves that attention rather than the irreversible choice. The destructive action stays plainly labelled — the buttons now read "Delete", "Retire" or "Archive" instead of a generic "Confirm" — but is styled quietly. Non-destructive confirmations keep the ordinary neutral-Cancel / primary-Confirm pairing.
+- **Bookings are cancelled, not deleted.** A booking is an accounting record as much as a diary entry — it says the facility held instrument and staff time on a date, and what that was worth. Cancelling keeps the booking and its line items logged, and frees the instrument and staff time so the slot can be booked by someone else. Whether the charge still stands follows when it was cancelled:
+  - cancelled **before** its start time — nothing was held, so the charge is dropped from Project Costs;
+  - cancelled **after** its start time — the slot was held, so the charge stands. **Admin Mode** (which already gates every other billing decision in this app) offers a three-way choice to waive it instead; without Admin Mode the charge stands and the dialog says so.
+  - Cancelled bookings are badged in the project's Meetings and Project Costs cards (waived charges struck through and excluded from the running total), struck through on the calendar, and carry a Status column in the XLSX exports plus an inline marker in DOCX/PDF. **Reinstate** puts one back, re-running the double-booking check first since it starts holding its slot again.
+  - A booking with no attendees, line items or cost is an empty note and can still be deleted.
+
+### Added
+- `people.is_retired` / `retired_at`, `instruments.is_retired` / `retired_at`, `projects.is_archived` / `archived_at`, and `meetings.is_cancelled` / `cancelled_at` / `billing_retained`, with additive migrations so existing databases pick them up on load.
+
+## [1.3.9] — 2026-09-04
+
+### Fixed
+- **A custom metadata field's Edit and Delete icons were invisible and impossible to click.** On a project's Metadata & Custom Fields card, both icons are bare `<span>`s, so none of the CSS rules that size the app's inline SVG icons (`.btn svg`, `.card-title svg`, …) applied to them. Unsized inside an inline span, each SVG collapsed to 0×0 — measured in a browser, the controls were 0px wide and a click at their position landed on the row behind them, so a custom field could never be edited or removed once saved. Both icons now have a real 22×22 hit area with a 14px glyph and a hover background, fitting the row's existing 48px action column. (This also made 1.3.8's new "Delete Field" confirmation reachable — it was previously behind an unclickable icon.)
+
+## [1.3.8] — 2026-09-04
+
+### Fixed
+- **One-click deletes now ask first.** The trash icons for meetings/bookings (in a project's meeting list), milestones, custom key-value fields, and file links deleted immediately with no confirmation — a stray tap permanently removed the record (and, for a booking, its billing line items). All four now show the same danger-styled confirmation dialog every other delete in the app already used, naming the record about to be deleted.
+- **Deleting a person now fully unlinks them.** Their meeting attendee and core-staff assignments are removed, the denormalized attendee display list on affected meetings is recomputed so it no longer shows the deleted name, and any project that had them as PI has its PI cleared (that reference carries no foreign key, so nothing else would ever have cleaned it up).
+- **Booking cost breakdown no longer overstates discounts.** When a group discount plus a manual discount together exceeded 100%, the actual deduction was correctly capped at 100% of the instrument-time charge, but the two summary rows still displayed their uncapped amounts. The displayed rows are now scaled so they always sum to the real deduction.
+
+### Changed
+- **The Delete Project dialog now tells the truth about meetings.** It claimed the project's "meeting records" would be deleted; they never were — bookings are kept and become facility-wide (the schema unlinks them via `ON DELETE SET NULL`). The dialog now says milestones, files, and custom fields are deleted while meetings are kept as facility-wide bookings.
+- **Delete paths clean up linked records explicitly.** Deleting a project, person, instrument, or booking now removes its dependent join-table rows directly instead of relying on SQLite cascades alone — a belt-and-suspenders guard, since sql.js's `export()` silently disables foreign-key enforcement as a side effect (the app reasserts it after every autosave, verified working, but explicit cleanup survives even if a future code path forgets to). Person and instrument delete dialogs now also warn that affected bookings keep their historical cost snapshots while losing the deleted line items.
+- **Documentation refresh (docs-only, no app change).** Every screenshot in `docs/screenshots/` was re-captured: the whole set still showed the pre-1.3.7 stock palette. Added shots for the new confirmation dialogs, and rewrote the hosted release-notes page (`docs/index.html`) for 1.3.7–1.3.8 — its hero, highlight cards, and screenshot walkthrough are hand-maintained rather than generated from this changelog. The README gained a "Safe deletes" section covering the same ground.
+
+## [1.3.7] — 2026-09-04
+
+### Changed
+- **Restyled color palette and motion tokens.** Moved off the stock Tailwind indigo/violet palette (shared with other apps built on the same starting template) onto a distinct neutral/violet "Facility Design Language" system, in both light and dark themes: backgrounds, borders, text, and status colors (success/warning/danger) all recolored, with WCAG-AA-verified contrast. The logo gradient and PWA theme colors (favicon, manifest, meta tag) moved to the same violet identity. Dark-mode primary buttons now use a dedicated dark-ink text color instead of white, fixing a contrast failure against the lighter dark-mode primary. Added shared motion tokens (`--dur-fast`, `--dur-move`, `--ease`) and retargeted existing transitions to them, plus a `prefers-reduced-motion` override. No layout, typography, or component structure changes.
+
 ## [1.3.6] — 2026-09-03
 
 ### Added

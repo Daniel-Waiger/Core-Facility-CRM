@@ -9,14 +9,16 @@
     if (!p) return null;
 
     const ppl = DB.rows(`
-      SELECT pp.role, pe.name, pe.type, pe.organization, pe.department, pe.email, pe.is_staff, pe.rate
+      SELECT pp.role, pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END AS name,
+             pe.type, pe.organization, pe.department, pe.email, pe.is_staff, pe.rate
       FROM project_people pp
       JOIN people pe ON pe.id = pp.person_id
       WHERE pp.project_id=?
       ORDER BY pe.name`, [id]);
 
     const inst = DB.rows(`
-      SELECT i.name, i.kind, i.status, i.cost, i.cost_unit
+      SELECT i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END AS name,
+             i.kind, i.status, i.cost, i.cost_unit
       FROM project_instruments pi
       JOIN instruments i ON i.id = pi.instrument_id
       WHERE pi.project_id=?
@@ -24,8 +26,8 @@
 
     const ms = DB.rows(`
       SELECT m.*,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
       FROM milestones m
       WHERE m.project_id=?
       ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
@@ -54,6 +56,12 @@
     return new DOMParser().parseFromString(UI.sanitizeHtml(html || ''), 'text/html').body;
   }
   const BLOCK_TAGS = { P: 1, DIV: 1, UL: 1, OL: 1, LI: 1 };
+  // A cancelled booking still appears in every report — it is part of the record — flagged with
+  // whether its charge still counts toward the project's costs.
+  function bookingStatusSuffix(m) {
+    if (!m.is_cancelled) return '';
+    return m.billing_retained ? '  [CANCELLED — charge kept]' : '  [CANCELLED — charge waived]';
+  }
   function htmlToPlainText(html) {
     let s = '';
     (function walk(node) {
@@ -246,7 +254,7 @@
     XLSX.utils.book_append_sheet(wb, ws2, 'Milestones');
 
     // Sheet 3: Team
-    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Core Staff', 'Rate/hr']];
+    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Facility Staff', 'Rate/hr']];
     d.ppl.forEach((pe) => {
       teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
@@ -264,12 +272,16 @@
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
-    const mtRows = [['Meeting Title', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
+    const mtRows = [['Meeting Title', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
-      mtRows.push([m.title, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, m.total_cost || 0]);
+      // A cancelled booking stays in the report — it is part of the record — with its status and
+      // whether its charge still counts, so a total can be reconciled against the rows.
+      const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
+      const counts = !(m.is_cancelled && !m.billing_retained);
+      mtRows.push([m.title, status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
 
     // Sheet 6: Files
@@ -339,7 +351,7 @@
     if (d.ppl.length) {
       d.ppl.forEach((pe) => {
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Core Staff, ' + (pe.rate || 0) + '/hr' : ''}` }));
+        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}` }));
       });
     } else {
       children.push(new Paragraph({ text: 'No team members assigned.' }));
@@ -360,7 +372,7 @@
     if (d.mtgs.length) {
       d.mtgs.forEach((m) => {
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}`, heading: HeadingLevel.HEADING_3 }));
+        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
@@ -499,7 +511,7 @@
       d.ppl.forEach((pe) => {
         checkPage(6);
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Core Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
+        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
         y += 5;
       });
     } else {
@@ -531,7 +543,7 @@
         checkPage(14);
         pdf.setFont('helvetica', 'bold');
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}`, margin, y);
+        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}${bookingStatusSuffix(m)}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (m.attendees) {
@@ -637,30 +649,32 @@
     XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
 
     // Sheet 3: People
-    const peopleRows = [['Name', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Core Staff', 'Rate/hr']];
-    DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate FROM people ORDER BY name').forEach((pe) => {
-      peopleRows.push([pe.name, pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
+    const peopleRows = [['Name', 'Status', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Facility Staff', 'Rate/hr']];
+    DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate, is_retired FROM people ORDER BY is_retired, name').forEach((pe) => {
+      peopleRows.push([pe.name, pe.is_retired ? 'Retired' : 'Active', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
     const wsPe = XLSX.utils.aoa_to_sheet(peopleRows);
-    wsPe['!cols'] = [{ wch: 25 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
+    wsPe['!cols'] = [{ wch: 25 }, { wch: 10 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsPe, 'People');
 
     // Sheet 4: Instruments
-    const instRows = [['Name', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Cost', 'Unit']];
-    DB.rows('SELECT name, kind, status, location, note, cost, cost_unit FROM instruments ORDER BY name').forEach((i) => {
-      instRows.push([i.name, i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.cost || 0, i.cost_unit || 'time']);
+    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Cost', 'Unit']];
+    DB.rows('SELECT name, kind, status, location, note, cost, cost_unit, is_retired FROM instruments ORDER BY is_retired, name').forEach((i) => {
+      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.cost || 0, i.cost_unit || 'time']);
     });
     const wsI = XLSX.utils.aoa_to_sheet(instRows);
-    wsI['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
+    wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
-    const mtRows = [['Project Code', 'Project', 'Meeting', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
+      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title,
+        m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
+        m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
     wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
@@ -669,20 +683,26 @@
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
     // computeBookingBOM in app.js at the time the booking was saved).
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Date', 'Start', 'End', 'Instruments', 'Core Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              (SELECT GROUP_CONCAT(i.name, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
              (SELECT GROUP_CONCAT(pe.name, ', ') FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = mt.id) as staff
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
+      // A waived cancellation contributes 0 to the Total Cost column so the column sums to what
+      // the facility actually bills; the Status column says why.
+      const counts = !(m.is_cancelled && !m.billing_retained);
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.date || '—', m.start_time || '—', m.end_time || '—',
-        m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0, m.total_before_tax || 0, m.total_cost || 0
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title,
+        m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
+        m.date || '—', m.start_time || '—', m.end_time || '—',
+        m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
+        m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -690,6 +710,96 @@
     UI.toast(`Exported ${projects.length} project${projects.length === 1 ? '' : 's'} to XLSX`);
   }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx };
+  /* ---------------- Reports & Utilization XLSX Export ---------------- */
+  /* Every row here comes from js/reports.js's own compute* functions — the exact same
+     aggregation the Reports screen renders from — so this file can never disagree with what the
+     screen shows for the same date range. See js/reports.js's file header for the full
+     cancellation-rule writeup; the short version is repeated in the Notes sheet below so an
+     exported file is self-explanatory without the app open next to it. */
+  function exportReportsXlsx(from, to) {
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    const Reports = global.Reports;
+    if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
+
+    const instr = Reports.computeInstrumentRows(from, to);
+    const staff = Reports.computeStaffRows(from, to);
+    const matrix = Reports.computeStaffInstrumentMatrix(from, to);
+    const proj = Reports.computeProjectRows(from, to);
+
+    const wb = XLSX.utils.book_new();
+    const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
+
+    // Sheet 1: Notes — the date range and both cancellation rules, spelled out, so the numbers
+    // in every other sheet can be reconciled without needing this code open alongside it.
+    const notes = [
+      ['FACILITY REPORTS & UTILIZATION EXPORT'],
+      [''],
+      ['Date range', rangeLabel],
+      ['Exported', new Date().toLocaleString()],
+      [''],
+      ['Occupancy rule (Bookings / Hours / Sessions columns)'],
+      ['A cancelled booking releases its slot — the instrument or staff time was never actually spent — so cancelled bookings are excluded entirely from these columns, regardless of whether the cancellation charge was retained.'],
+      [''],
+      ['Money rule (Revenue / Total Cost columns)'],
+      ["A booking's charge still counts unless it was BOTH cancelled AND the charge was waived. So a cancelled-but-charged booking still contributes revenue even though it contributes zero occupied hours — the facility got paid for a slot nobody used."],
+      [''],
+      ['Staff x Instrument attribution'],
+      ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total.'],
+      [''],
+      ['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']
+    ];
+    const wsNotes = XLSX.utils.aoa_to_sheet(notes);
+    wsNotes['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
+
+    // Sheet 2: Instrument utilisation
+    const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Billed Revenue', 'Share of Total Hours %']];
+    instr.rows.forEach((r) => {
+      instrRows.push([UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), round2(r.sharePct)]);
+    });
+    const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
+    wsInstr['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, wsInstr, 'Instrument Utilisation');
+
+    // Sheet 3: Facility staff time
+    const staffRows = [['Staff Member', 'Sessions', 'Raw Hours', 'Billed Hours', 'Staff Revenue']];
+    staff.rows.forEach((r) => {
+      staffRows.push([UI.retiredName(r.name, r.retired), r.sessions, round2(r.rawHours), round2(r.billHours), round2(r.revenue)]);
+    });
+    const wsStaff = XLSX.utils.aoa_to_sheet(staffRows);
+    wsStaff['!cols'] = [{ wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsStaff, 'Facility Staff Time');
+
+    // Sheet 4: Staff x instrument matrix — one row per non-empty (staff, instrument) pair rather
+    // than a wide grid, so the sheet reads cleanly regardless of how many instruments there are.
+    const matrixRows = [['Staff Member', 'Instrument', 'Sessions', 'Attributed Hours']];
+    const staffById = new Map(matrix.staffList.map((s) => [s.id, s]));
+    const instById = new Map(matrix.instrumentList.map((i) => [i.id, i]));
+    matrix.cells.forEach((cell) => {
+      const s = staffById.get(cell.personId), i = instById.get(cell.instrumentId);
+      matrixRows.push([UI.retiredName(s.name, s.retired), UI.retiredName(i.name, i.retired), cell.sessions, round2(cell.attributedHours)]);
+    });
+    const wsMatrix = XLSX.utils.aoa_to_sheet(matrixRows);
+    wsMatrix['!cols'] = [{ wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsMatrix, 'Staff x Instrument');
+
+    // Sheet 5: Projects & groups
+    const pgRows = [['Scope', 'Name', 'Bookings', 'Hours', 'Total Cost']];
+    proj.projects.forEach((r) => pgRows.push(['Project', r.label, r.bookings, round2(r.hours), round2(r.cost)]));
+    proj.groups.forEach((r) => pgRows.push(['Lab / Group', r.label, r.bookings, round2(r.hours), round2(r.cost)]));
+    const wsPg = XLSX.utils.aoa_to_sheet(pgRows);
+    wsPg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsPg, 'Projects & Groups');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
+    UI.toast('Exported Reports & Utilization to XLSX');
+  }
+  // Two-decimal rounding for exported hour/money figures — avoids floating-point noise (e.g.
+  // 1.9999999999998) showing up in a spreadsheet cell.
+  function round2(n) { return Math.round((n || 0) * 100) / 100; }
+
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, exportReportsXlsx };
 
 })(window);

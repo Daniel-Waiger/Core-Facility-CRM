@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard &amp; Today's Agenda — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="dashboard.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><!-- rendered by manual.js --></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Dashboard &amp; Today's Agenda</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 3</p>
+      <h1>Dashboard &amp; Today's Agenda</h1>
+      <p class="lede">Your at-a-glance view of the whole facility, and the one-click summary of what's happening today.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Read the four dashboard tiles and know exactly what each one counts</li>
+        <li>Jump straight from a milestone on the dashboard to its project</li>
+        <li>Set a milestone's status directly without leaving the dashboard</li>
+        <li>Open Today's Agenda for a same-day view of milestones and bookings</li>
+        <li>Log a session or edit a booking directly from the agenda</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="tiles">The four tiles</h2>
+      <ol class="steps">
+        <li>Click <strong>Dashboard</strong> in the sidebar (it's usually the screen you land on when you open the app).</li>
+        <li>Look at the four numbered tiles across the top: <strong>Total projects</strong>, <strong>Active</strong>, <strong>Overdue milestones</strong>, and <strong>Completed</strong>.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/02-dashboard.png" alt="Dashboard screen with four KPI tiles across the top and two milestone feeds below" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/02-dashboard.png</div>
+        <figcaption>The four tiles at the top summarize your whole project list; the feeds below list individual milestones.</figcaption>
+      </figure>
+
+      <p>Here's what each tile actually counts:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tile</th><th>What it counts</th></tr></thead>
+          <tbody>
+            <tr><td>Total projects</td><td>Every project that is not archived</td></tr>
+            <tr><td>Active</td><td>Projects currently marked with an active-type status</td></tr>
+            <tr><td>Overdue milestones</td><td>Milestones whose due date has passed and are not marked done</td></tr>
+            <tr><td>Completed</td><td>Projects marked as completed</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Archived projects are excluded from every dashboard number, not just hidden from the list — see <a href="big-ideas.html#archive">Archive</a>. The dashboard is meant to answer "what's live right now," so old, wound-down work never inflates or muddies these counts.</p></div>
+    </section>
+
+    <section>
+      <h2 id="upcoming-overdue">Upcoming and overdue milestones</h2>
+      <p>Below the tiles are two lists of milestones: one for what's coming up in the next 30 days, and one for what's already overdue. Each list shows up to 10 items.</p>
+      <ol class="steps">
+        <li>Find a milestone you want to check on in either list.</li>
+        <li>Click its <strong>name</strong> to jump straight to the project it belongs to.</li>
+        <li>Click its <strong>status badge</strong> instead to open a small chooser and pick pending, in progress, or done directly, right there, without leaving the dashboard.</li>
+      </ol>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> The chooser lets you jump straight to the status you want in one click, from whichever status the milestone is currently in. See <a href="milestones.html#status-cycle">Setting a milestone's status</a>.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> "Overdue" always means the due date is in the past <em>and</em> the milestone isn't done yet — a milestone due yesterday but already finished simply doesn't appear here. That keeps the overdue list a genuine to-do list, not a historical record.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, find a milestone in the Overdue list and click its status badge once or twice to mark it done. Watch it disappear from Overdue — and the dashboard's Overdue tile count drop by one.</p></div>
+    </section>
+
+    <section>
+      <h2 id="todays-agenda">Today's Agenda</h2>
+      <p>Today's Agenda is a single pop-up window that answers "what do I need to deal with today," pulling together milestones, bookings, and a quick snapshot of active projects.</p>
+      <ol class="steps">
+        <li>Open <strong>Calendar</strong> from the sidebar.</li>
+        <li>Click the <strong>Today</strong> button.</li>
+        <li>In the window that opens, review each section: milestones due today, today's bookings, an overdue-items list (up to 10), and a snapshot of your active projects (up to 6).</li>
+        <li>From a milestone row, click its status to set it directly (or open it to edit), right from this window.</li>
+        <li>From a booking row, open it to edit, or click <strong>Log</strong> to add a quick meeting note against it.</li>
+      </ol>
+
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Clicking <strong>Today</strong> opens this pop-up window — it does not scroll the calendar grid behind it to today's date. If you want to see today highlighted on the month grid itself, look for it visually rather than expecting the click to jump there.</p></div>
+
+      <p>Today's Agenda is a good five-minute morning check: it's the fastest way to see everything time-sensitive without opening Projects, People, and Instruments separately.</p>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> For the details of booking a brand-new session (rather than editing one already on today's agenda), see <a href="bookings.html#book-a-session">Booking a Session</a>.</p></div>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>A project was archived last month. Does it count toward the "Total projects" tile?</summary><p>No. Archived projects are excluded from every dashboard tile and feed — the dashboard only reflects non-archived, currently-live work.</p></details>
+      <details class="quiz-q"><summary>A milestone was due yesterday but you already marked it done. Will it show up in the dashboard's Overdue feed?</summary><p>No. Overdue means the due date has passed AND the milestone is not yet done. Once it's marked done, it drops out of Overdue regardless of its due date.</p></details>
+      <details class="quiz-q"><summary>You click "Today" on the Calendar screen expecting the month grid to jump to today's date. What actually happens?</summary><p>A separate Today's Agenda pop-up window opens listing today's milestones and bookings — the calendar grid behind it does not scroll or highlight today automatically.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

@@ -129,18 +129,28 @@
 <body>
 
 <!--
-  This hero (through the "In detail" section below) is hand-written, not derived from
-  CHANGELOG.md — see the note right before the changelog-rendering script near the bottom
-  of this file for why, and update it manually on every release that changes booking/billing
-  behavior enough to warrant a highlight card or screenshot.
+  The PROSE of this hero (through the "In detail" section below) is hand-written, not derived from
+  CHANGELOG.md — see the note right before the changelog-rendering script near the bottom of this
+  file for why — so update the lede, the highlight cards and the feature blocks manually on every
+  release that changes behavior enough to warrant a card or a screenshot.
+
+  The release VERSION AND DATE are no longer hand-written: the "Release X.Y.Z · DD Mon YYYY"
+  eyebrow and the footer version are both filled in from CHANGELOG.md's newest heading at load
+  time. They used to be typed in here and went stale twice in one day, which is a bad use of
+  anyone's memory when the changelog already states them.
 -->
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.3.1 – 1.3.6 · 03 Sep 2026</span>
+    <!-- The version and date here are filled in from CHANGELOG.md's newest heading by the script
+         at the bottom of this file, the same source the footer version uses. The text below is
+         only the no-JS/offline fallback — it was hand-maintained until 1.5.2 and had already gone
+         stale twice, which is exactly the kind of thing not worth remembering by hand. -->
+    <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">Six releases in one day, all pointed at the same seam opened up by 1.3.0’s billing work: a booking is only as good as the Group/Lab it’s filed under. Assigning people or core staff now waits for one; the lab’s standing discount follows automatically and can be revoked per-booking or for good; and a handful of smaller fixes — safer sample-data reseeding, a real favicon, a lockable single-instrument booking, a full screenshot gallery — round out the batch.</p>
+    <p class="lede">A facility manager's two standing questions are how much each instrument actually gets used, and where their own time goes. 1.5.1 answers both with a <strong>Reports</strong> screen — instrument hours, facility-staff time per instrument, and spend per project and lab, over any date range. It also fixes a calendar bug that had been quietly showing bookings on the wrong day for everyone east of Greenwich &mdash; and, in 1.5.2, the reason some installed copies were still showing you none of this.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
+      <a class="btn btn-ghost" href="manual/">User Manual</a>
       <a class="btn btn-ghost" href="#changelog">Full changelog</a>
       <a class="btn btn-ghost" href="https://github.com/Daniel-Waiger/Core-Facility-CRM">GitHub repo</a>
     </div>
@@ -151,14 +161,16 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">The headline changes across 1.3.1–1.3.6.</p>
+    <p class="section-sub">What changed in 1.5.0 &ndash; 1.5.2.</p>
     <div class="cards">
-      <div class="card"><div class="ic">🔒</div><h3>Group/Lab comes first</h3><p>Assign People and Assign Core Staff both stay locked until a Group/Lab is picked — directly, or auto-filled from the project’s PI.</p></div>
-      <div class="card"><div class="ic">🏷️</div><h3>Discounts follow the lab</h3><p>Picking a Group/Lab offers its standing discount automatically; Admin Mode can Revoke or Apply it, for just this booking or for the lab going forward.</p></div>
-      <div class="card"><div class="ic">🧰</div><h3>One instrument, locked in</h3><p>The first instrument added to a booking can be marked as the only one needed, locking further additions until it’s removed.</p></div>
-      <div class="card"><div class="ic">🖼️</div><h3>Screenshot gallery</h3><p>A full-size, keyboard/swipe-navigable carousel of every screenshot, listing <code>docs/screenshots/</code> live from GitHub.</p></div>
-      <div class="card"><div class="ic">🩹</div><h3>Load Sample Data, fixed</h3><p>Reseeding demo data no longer crashes on a second run — “Load Demo &amp; Start Tour” is safe to click more than once.</p></div>
-      <div class="card"><div class="ic">🖥️</div><h3>Real favicon everywhere</h3><p>Browser tabs and bookmarks now show the app logo instead of a generic globe, with PNG/ICO fallbacks alongside the SVG.</p></div>
+      <div class="card"><div class="ic">📊</div><h3>Instrument utilisation</h3><p>Bookings, booked hours and billed revenue per instrument over any date range, with each instrument&rsquo;s share of total facility hours.</p></div>
+      <div class="card"><div class="ic">⏱️</div><h3>Where staff time goes</h3><p>Hours per facility-staff member, and a staff&nbsp;&times;&nbsp;instrument breakdown &mdash; so &ldquo;am I mostly helping users on one scope?&rdquo; has an answer.</p></div>
+      <div class="card"><div class="ic">🧮</div><h3>Worked hours and billed hours</h3><p>Reported separately, because billing rounds every staff line up to a whole hour. One number is workload, the other is the invoice.</p></div>
+      <div class="card"><div class="ic">🏫</div><h3>Per project and per lab</h3><p>Bookings, hours and cost grouped by project and by lab &mdash; including facility-wide sessions that belong to no project.</p></div>
+      <div class="card"><div class="ic">🗓️</div><h3>The calendar was a day out</h3><p>East of Greenwich, every cell was captioned with one date and filled with the previous day&rsquo;s bookings. Fixed, along with the click-to-book prefill it fed.</p></div>
+      <div class="card"><div class="ic">🔄</div><h3>Updates actually arrive</h3><p>An installed copy could pin itself to an old release: the cached shell naming which files to load was itself allowed to come from the browser’s cache. Settings said 1.4.0 while every file on the server said 1.5.1. Reloading now gets you the release that is actually deployed.</p></div>
+      <div class="card"><div class="ic">🧪</div><h3>A demo that shows the reports</h3><p>The sample dataset carried billing on a single booking, so Reports looked empty on the very data meant to demonstrate it. Ten bookings now cover every instrument, three staff, both cancellation rules and a per-unit charge &mdash; priced by the app&rsquo;s own calculator, and dated relative to the day you load it.</p></div>
+      <div class="card"><div class="ic">👥</div><h3>Facility Staff, spelled out</h3><p>One consistent name, and the forms now say what the flag does: tick it and the person becomes bookable, billable staff. Untick it and their past sessions stay intact.</p></div>
     </div>
   </div>
 </section>
@@ -166,54 +178,163 @@
 <section>
   <div class="wrap">
     <h2>In detail</h2>
-    <p class="section-sub">The three changes worth a screenshot.</p>
+    <p class="section-sub">The changes worth a screenshot.</p>
 
-    <!-- Group/Lab required for People (1.3.4) and Core Staff (1.3.6) -->
     <div class="feature">
       <div class="txt">
-        <h3>Assign People and Assign Core Staff both wait for a Group/Lab <span class="tag">new</span></h3>
-        <p>Both pickers now lock the same way: with no Group/Lab chosen yet, clicking either dropdown shows a not-allowed cursor and a “Choose Group/Lab First” hint instead of opening the list. It makes sense once you notice every person <em>and</em> every core-staff member on record already belongs to a lab or group — the picker has nothing meaningful to filter until it knows which one.</p>
-        <ul>
-          <li>People got the lock in 1.3.4; Core Staff got the identical lock two releases later, in 1.3.6.</li>
-          <li>Already-assigned people or staff are never removed by this — only adding more is blocked.</li>
-          <li>Picking a Group/Lab — directly, or auto-filled from the project’s PI — unlocks both immediately.</li>
-        </ul>
+        <h3>Reports: how much the scopes get used, and where staff time goes <span class="tag">new</span></h3>
+        <p>Every booking already recorded which instrument was held, for how long, and which facility staff worked it. Nothing read that back in aggregate. <strong>Reports &amp; Utilization</strong> does: pick a date range and get booked hours and revenue per instrument, hours per staff member, a staff&nbsp;&times;&nbsp;instrument breakdown, and spend per project and per lab &mdash; exportable to XLSX.</p>
+        <p>Two numbers are deliberately kept apart. <strong>Hours worked</strong> is the real time; <strong>hours billed</strong> applies the 1-hour minimum and rounds up to whole hours, exactly as the booking calculator does. One is workload, the other is the invoice, and a facility needs both.</p>
+        <p>Cancelled bookings are handled the way the rest of the app already handles them: their hours drop out entirely, because a cancellation frees the slot and the instrument was never held &mdash; while their charge counts only if it was retained rather than waived. Both rules are printed under the tables they govern, so a total can always be reconciled against its rows. Retired staff, retired instruments and archived projects still appear; keeping them was the whole point.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/35-booking-group-required-lock.png" alt="Booking modal with the people and core-staff pickers locked until a Group/Lab is chosen" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/35-booking-group-required-lock.png</code></span></div>
-        <figcaption>No Group/Lab chosen yet — Assign People and Assign Core Staff both stay locked with the same hint.</figcaption>
+        <img src="screenshots/49-reports.png" alt="Reports and Utilization screen showing instrument utilisation, facility staff time, a staff-by-instrument matrix, and per-project and per-lab totals" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <figcaption>Instrument hours, staff time, and per-project spend over a chosen date range.</figcaption>
       </figure>
     </div>
 
-    <!-- Group selector driving the standing discount (1.3.1) -->
+    <div class="feature">
+      <div class="txt">
+        <h3>The calendar was a day out, east of Greenwich <span class="tag">fixed</span></h3>
+        <p>A booking made on 9&nbsp;September showed up in the cell captioned 9, but opened as 8&nbsp;September. The edit form was right the whole time &mdash; it reads the stored date directly. The calendar was captioning each cell with the local day number while looking that cell&rsquo;s bookings up under a <em>UTC</em> date string, and at a UTC+ offset local midnight falls on the previous UTC day. Replaying the grid under Node, all 35 cells disagreed with their own caption at <code>Asia/Jerusalem</code> and <code>Europe/Paris</code>, and none did at <code>UTC</code> or <code>America/Los_Angeles</code> &mdash; which is why it took a user east of Greenwich to notice.</p>
+        <p>The same wrong date fed click-to-book, so clicking an empty cell opened a booking on the day before. The month&rsquo;s own query bounds were shifted too, quietly leaving the last day of the visible grid out of its results. All of it now goes through one local-date helper, and two further places that shared the bug &mdash; the dashboard&rsquo;s 30-day milestone window and a project&rsquo;s overdue flag &mdash; are fixed with it.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/50-calendar-date.png" alt="Calendar grid with a booking sitting in the cell matching its own date" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <figcaption>A booking now sits in the cell that carries its date.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Facility Staff, spelled out &mdash; and no longer able to vanish <span class="tag">changed</span></h3>
+        <p>A booking has two people fields on purpose: <strong>Assign People</strong> is the researchers the session is for, never billed and scoped to the booking&rsquo;s group; <strong>Assign Facility Staff</strong> is the core staff running it, billed by the hour. What the app never said out loud is how it decides who is which &mdash; a person appears in the staff picker for exactly one reason, the <strong>Facility Staff</strong> box on their own record. Not their role, not their group. Both forms now say so, the wording is consistent throughout (it used to alternate between &ldquo;Core Staff&rdquo; and &ldquo;Facility Staff&rdquo;), and the People list gains a Facility Staff column and filter. No separate staff group is needed to make staff assignable.</p>
+        <p>Writing that down surfaced a real bug. The staff picker only ever listed people <em>currently</em> flagged as staff, and saving a booking rebuilds its staff rows from whatever the form shows &mdash; so un-ticking the box on someone silently deleted them from every booking they had already worked, along with the billing line behind it, on that booking&rsquo;s next save. Reproduced in a browser: a re-save took the staff table from one row to none and a $190 line with it. The picker now keeps anyone already assigned, exactly as it already did for retired staff, while still not offering them for new work.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/51-facility-staff.png" alt="Person form showing the Facility Staff checkbox with help text explaining that it controls the booking staff picker and hourly billing" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <figcaption>The flag now explains itself, on the form where it is set.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>People are retired, and every record they touched stays <span class="tag">new</span></h3>
+        <p>The previous release deleted a person and carefully unlinked them from everything on the way out — from project teams, from milestones they owned, from the attendee list of every booking they sat in, from the staff line of every booking they were billed on. That tidiness was the bug. Who actually attended a session is a fact about the session, not a property of someone’s current employment, and a booking’s cost is only auditable while the staff line behind it still exists.</p>
+        <ul>
+          <li>The dialog counts up precisely where they appear before you decide, and commits to keeping all of it.</li>
+          <li>They stop being offered when assigning new work, but stay selected wherever they already are — which matters, because saving a milestone or booking rebuilds its assignees from the form, so a hidden one would be silently dropped.</li>
+          <li>Their stored name never changes; “(Retired)” is added at display time, so historical records read back exactly as entered.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/42-retire-person.png" alt="Retire Person dialog listing every project, milestone and booking the person appears on" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/42-retire-person.png</code></span></div>
+        <figcaption>Retiring a core-staff member — every place they appear, and a promise to keep it.</figcaption>
+      </figure>
+    </div>
+
     <div class="feature reverse">
       <div class="txt">
-        <h3>The lab’s standing discount, applied automatically — and revocable <span class="tag">new</span></h3>
-        <p>Choosing a Group/Lab for a booking offers that lab’s standing discount right away, live in the cost breakdown. In Admin Mode, a Revoke/Apply control on that line lets you turn it off — and asks whether that’s <strong>just for this booking</strong> or <strong>for every future booking under that lab</strong> (the latter edits the lab’s standing rate in Settings, same as changing it there directly). Re-applying restores the rate with no further prompt.</p>
+        <h3>Projects are archived, billing and all <span class="tag">new</span></h3>
+        <p>A project is the thread tying together who worked on it, which instruments ran, and what was charged. Deleting one destroyed the facility’s record of work it actually did and money it actually billed — so there is no longer a way to do that. Archiving keeps the title, the team, the instruments, the milestones, the files, the custom fields and every booking with its cost snapshot; it only takes the project out of the day-to-day registry.</p>
         <ul>
-          <li>Picking a project auto-fills the Group from its PI’s lab; it can also be set directly for a facility-wide booking.</li>
-          <li>A booking now stores which Group/Lab it was made under, so reopening it restores the exact filter and discount state rather than re-deriving it live.</li>
+          <li>The dialog names the billing total it is preserving, so you know what is at stake before you confirm.</li>
+          <li>An archived project keeps a banner explaining its state, and Restore brings it straight back.</li>
+          <li>The dashboard’s counters and overdue alerts now cover active projects only, so archived work stops raising flags.</li>
         </ul>
       </div>
       <figure class="shot">
-        <img src="screenshots/34-booking-group-discount-revoke.png" alt="Booking modal showing the live cost breakdown with an applied group discount and its Revoke control" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/34-booking-group-discount-revoke.png</code></span></div>
-        <figcaption>A lab’s standing discount, applied live in the Cost &amp; Time Breakdown, with its admin-only Revoke control.</figcaption>
+        <img src="screenshots/41-archive-project.png" alt="Archive Project dialog listing the team, instruments, milestones, bookings and billing that are preserved" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/41-archive-project.png</code></span></div>
+        <figcaption>Archiving names what it keeps — down to the billing total.</figcaption>
       </figure>
     </div>
 
-    <!-- Consequence: Project Costs' running total reflects the discount (existing 1.3.0 feature, shown post-1.3.1) -->
     <div class="feature">
       <div class="txt">
-        <h3>And it rolls straight into the project’s running total</h3>
-        <p>Project Costs — the per-project list of booking subtotals, pre-tax figures, and totals, with a running total for the project — already existed as of 1.3.0. It didn’t need a code change to pick up 1.3.1’s discount work: each booking’s total is computed and snapshotted at save time, discount included, so the running total downstream was always going to reflect whatever discount that booking actually got.</p>
+        <h3>Out of the way, never out of the record</h3>
+        <p>Retired people and archived projects would clutter a roster that grows for years, so they are hidden from the everyday lists behind a toggle that only appears once there is something to show. Reveal them and they are badged, muted, and offer Restore. Everywhere they form part of a historical record — a booking’s attendees, a milestone’s owners, a project’s team, an exported report — they simply stay, marked for what they are.</p>
       </div>
       <figure class="shot">
-        <img src="screenshots/36-project-costs-running-total.png" alt="Project Costs card listing each booking's subtotal, before-tax amount and total with a running project total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
-        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/36-project-costs-running-total.png</code></span></div>
-        <figcaption>Project Costs — the running total already reflects each booking’s group discount.</figcaption>
+        <img src="screenshots/44-people-retired.png" alt="People directory with the Show retired toggle enabled, showing a retired person badged and muted" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/44-people-retired.png</code></span></div>
+        <figcaption>“Show retired (1)” — badged, muted, restorable.</figcaption>
       </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>The red button is the one that stops you <span class="tag">changed</span></h3>
+        <p>A confirmation dialog exists to prevent an accident, so the choice that prevents it is the one that should catch the eye. Colour is what the eye lands on first, and a red “Confirm” spends that attention advertising the irreversible option. On destructive dialogs the red now belongs to <strong>Cancel</strong>; the destructive button is styled quietly and says exactly what it will do — Delete, Retire, Archive — rather than a generic “Confirm”, so going through with it is a deliberate read instead of a reflex. Non-destructive confirmations keep the ordinary pairing.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/38-delete-milestone-confirm.png" alt="Delete Milestone confirmation with a red Cancel button and a quietly styled Delete button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/38-delete-milestone-confirm.png</code></span></div>
+        <figcaption>Red stops you; the quiet button is the one that acts.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>A cancelled booking keeps its record and frees its slot <span class="tag">new</span></h3>
+        <p>A booking says the facility held instrument time and staff time on a date, and what that was worth — so cancelling one keeps it logged with its line items, and only releases the slot so someone else can take it. Whether the charge still counts follows from <em>when</em> it was cancelled, because that is what decides whether the facility actually held anything.</p>
+        <ul>
+          <li><strong>Before the start time</strong> — nothing was held, so the charge is dropped from Project Costs.</li>
+          <li><strong>After the start time</strong> — the slot was held, so the charge stands. Admin Mode offers the three-way choice above to waive it instead; without it, the charge stands and the dialog says so.</li>
+          <li>Cancelled bookings are badged in the Meetings and Project Costs cards, struck through on the calendar, and carry a status in every export — a waived charge shows struck through and drops out of the running total, so the total always matches what is actually billed.</li>
+          <li><strong>Reinstate</strong> puts one back, re-running the double-booking check first, since it starts holding its slot again.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/37-cancel-booking-admin.png" alt="Three-way cancellation dialog offering Keep Booking, Cancel and Waive Charge, or Cancel and Keep Charge" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/37-cancel-booking-admin.png</code></span></div>
+        <figcaption>Cancelling a session that already started — the admin decides whether the charge stands.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Every confirmation, side by side</h2>
+    <p class="section-sub">The dialogs that guard the rest — and the two that now retire instead of delete.</p>
+    <div class="cards">
+      <figure class="shot shot-thumb"><img src="screenshots/47-booking-cancelled-costs.png" alt="Project Costs card showing a cancelled booking whose charge was kept" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/47-booking-cancelled-costs.png</code></span></div><figcaption>Cancelled, charge kept — still in the total</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/48-booking-cancelled-meetings.png" alt="Meetings card showing a cancelled booking with its Reinstate control" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/48-booking-cancelled-meetings.png</code></span></div><figcaption>Cancelled, logged, reinstatable</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/38-delete-milestone-confirm.png" alt="Delete Milestone confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/38-delete-milestone-confirm.png</code></span></div><figcaption>Milestone</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/39-delete-custom-field-confirm.png" alt="Delete custom field confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/39-delete-custom-field-confirm.png</code></span></div><figcaption>Custom metadata field</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/40-delete-attachment-confirm.png" alt="Delete attachment confirmation" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/40-delete-attachment-confirm.png</code></span></div><figcaption>File attachment</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/43-retire-instrument.png" alt="Retire Instrument dialog listing the projects, milestones and bookings that are kept" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/43-retire-instrument.png</code></span></div><figcaption>Instrument — retired, bookings intact</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/46-project-archived-banner.png" alt="An archived project's detail page with its banner and Restore button" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/46-project-archived-banner.png</code></span></div><figcaption>An archived project, restorable</figcaption></figure>
+      <figure class="shot shot-thumb"><img src="screenshots/45-projects-archived.png" alt="Projects registry with Show archived enabled" loading="lazy" onerror="this.closest('.shot').classList.add('pending')"><div class="ph"><span class="badge">Snapshot pending</span><span><code>docs/screenshots/45-projects-archived.png</code></span></div><figcaption>Registry, archived shown</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>Why Admin Mode decides the charge</h3>
+      <p>Waiving a late cancellation’s charge is a billing decision, and every other billing decision in this app already sits behind Admin Mode — the per-lab group discount’s Revoke/Apply control, the manual per-booking discount override, the overhead and tax rates. Cancellation follows the same line: anyone can cancel a booking and free the slot, but deciding that the facility will not bill for time it held is an administrator’s call. Without Admin Mode the charge simply stands, and the dialog says so rather than quietly dropping revenue.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>Still true from 1.3.9: a bug the screenshots found <span class="tag">1.3.9</span></h3>
+      <p>Capturing the “Delete Field” dialog above turned out to be impossible by clicking, because the icon that opens it could not be clicked at all. A custom field’s <strong>Edit</strong> and <strong>Delete</strong> icons are bare spans, so none of the CSS rules that size the app’s inline icons applied to them — measured in a browser, both were <strong>0 pixels wide</strong>, and a click where they should be landed on the row behind. Once a custom field was saved, it could never be edited or removed. Both now have a proper 22×22 hit area, which is also what makes 1.3.8’s new confirmation reachable in the first place.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout">
+      <h3>Under the hood: cascades, verified</h3>
+      <p>The codebase carried two contradictory comments about whether the database’s <code>ON DELETE CASCADE</code> rules actually fire, after an old note claimed the SQLite build silently disables foreign keys when it saves. That got settled empirically for 1.3.8 by running the app’s own bundled SQLite build headlessly: saving <em>does</em> reset the foreign-key setting, and the app’s existing re-assert after every save <em>does</em> restore it, so cascades work. The delete paths clean up their child records explicitly anyway — belt and suspenders, in case some future save path ever forgets that re-assert.</p>
     </div>
   </div>
 </section>
@@ -269,15 +390,15 @@
   <div class="wrap">
     <div class="callout">
       <h3>Browse every screenshot</h3>
-      <p>The <a href="gallery.html">interactive screenshot gallery</a> is a full-size carousel of every screen — thumbnails, keyboard/swipe navigation, and a shareable link per shot. It lists <code>docs/screenshots/</code> live from the repository, so it always reflects the current set. (Docs-only addition, added post-1.3.6 — no version bump.)</p>
+      <p>The <a href="gallery.html">interactive screenshot gallery</a> is a full-size carousel of every screen — thumbnails, keyboard/swipe navigation, and a shareable link per shot. It lists <code>docs/screenshots/</code> live from the repository, so it always reflects the current set — including the shots re-captured for 1.3.7’s palette and the new 1.3.8 confirmation dialogs. (The gallery itself was a docs-only addition post-1.3.6 — no version bump.)</p>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · <span id="footer-version">v1.3.6</span> · Bioimaging Facility</div>
-    <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
+    <div>Core Facility Tracker · <span id="footer-version">v1.5.2</span> · Bioimaging Facility</div>
+    <div><a href="../index.html">Open the app</a> · <a href="manual/">Manual</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>
 
@@ -315,6 +436,14 @@
         body.innerHTML = render(md);
         var m = md.match(/^##\s+\[([^\]]+)\]/m);
         if (m) document.getElementById('footer-version').textContent = 'v' + m[1];
+        // Hero "Release X.Y.Z · DD Mon YYYY", from the same newest changelog heading
+        // ("## [1.5.2] — 2026-09-06"), so it can never disagree with the release it describes.
+        var h = md.match(/^##\s+\[([^\]]+)\]\s*[—–-]\s*(\d{4})-(\d{2})-(\d{2})/m);
+        var hero = document.getElementById('hero-release');
+        if (h && hero) {
+          var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          hero.textContent = h[1] + ' · ' + h[4] + ' ' + months[Number(h[3]) - 1] + ' ' + h[2];
+        }
       })
       .catch(function (){ body.innerHTML = '<p>Couldn’t load the changelog here — <a href="' + CL_GH + '" target="_blank" rel="noopener">read it on GitHub</a>.</p>'; });
   })();

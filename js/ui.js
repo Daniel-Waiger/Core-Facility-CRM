@@ -164,7 +164,13 @@
       toast('Could not copy — your browser blocked clipboard access', 'error');
     }
   }
-  function confirmModal(title, body, { danger = false } = {}) {
+  /* On a destructive confirmation the RED button is Cancel, not Confirm. Colour is what the eye
+     lands on first, and on a dialog that exists to prevent an accident the safe way out is what
+     deserves that attention — a red "Confirm" advertises the irreversible choice. The
+     destructive action stays plainly labelled ("Delete", "Retire" — see confirmText) but is
+     styled quietly, so going through with it is a deliberate read rather than a reflex.
+     Non-destructive confirmations keep the ordinary neutral-Cancel / primary-Confirm pairing. */
+  function confirmModal(title, body, { danger = false, confirmText = 'Confirm', cancelText = 'Cancel' } = {}) {
     return new Promise((resolve) => {
       // Tapping outside the dialog (easy to do by accident on a touch screen) still needs to
       // settle this promise — otherwise whatever's awaiting the answer hangs forever even
@@ -173,8 +179,8 @@
         <div class="head"><span class="t" style="font-weight:600">${title}</span></div>
         <div class="body"><p class="mt-0 mb-8">${body}</p></div>
         <div class="foot">
-          <button class="btn btn-secondary" data-act="no">Cancel</button>
-          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="yes">Confirm</button>
+          <button class="btn ${danger ? 'btn-danger' : 'btn-secondary'}" data-act="no">${esc(cancelText)}</button>
+          <button class="btn ${danger ? 'btn-secondary' : 'btn-primary'}" data-act="yes">${esc(confirmText)}</button>
         </div>`, null, () => resolve(false));
       const dim = m.closest('.modal-dim');
       const yes = m.querySelector('[data-act="yes"]');
@@ -254,7 +260,7 @@
     closeTourModals();
 
     if (step.route && global.App && global.App.route) {
-      global.App.route(step.route, step.projectId);
+      global.App.route(step.route, step.projectId, true);
       window.scrollTo(0, 0);                 // a fresh view starts at the top, not wherever we were
     }
     if (typeof step.action === 'function') {
@@ -442,7 +448,9 @@
     collapse: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9-3 3 3 3"/>',
     expand: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m11 9 3 3-3 3"/>',
     copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>'
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+    archive: '<rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/>',
+    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>'
   };
   function icon(name) {
     return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
@@ -465,7 +473,108 @@
     const dt = new Date(String(d).slice(0, 10) + 'T00:00:00');
     return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString();
   }
-  function today() { return new Date().toISOString().slice(0, 10); }
+  /* 'YYYY-MM-DD' for a Date's LOCAL calendar day.
+     Why not toISOString().slice(0,10)? A Date is a single instant, and toISOString() re-describes
+     that instant in UTC. Local midnight at a UTC+ offset (Israel is UTC+2/+3) happened while it
+     was still the PREVIOUS day in UTC, so toISOString() reports yesterday's date. Bookings are
+     stored as plain local 'YYYY-MM-DD' strings taken straight from <input type="date">, so every
+     Date -> date-string conversion in this app has to read the local calendar fields instead. */
+  function ymd(d) {
+    const dt = (d instanceof Date) ? d : new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0')
+      + '-' + String(dt.getDate()).padStart(2, '0');
+  }
+  function today() { return ymd(new Date()); }
+  // Today shifted by a whole number of days, as a local 'YYYY-MM-DD' string.
+  function todayPlusDays(n) {
+    const d = new Date();
+    d.setDate(d.getDate() + (Number(n) || 0));
+    return ymd(d);
+  }
+
+  /* ---------------- Booking time maths ----------------
+     Shared by the booking cost calculator (app.js) and the Reports screen (reports.js) so both
+     count hours the same way. Times are stored as plain 'HH:MM' strings on the same calendar day,
+     so this is minute arithmetic — no Date objects and no timezones involved. */
+  // "HH:MM" -> minutes since midnight, or null if not a valid time.
+  function timeToMinutes(hhmm) {
+    const mm = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+    return mm ? Number(mm[1]) * 60 + Number(mm[2]) : null;
+  }
+  // Hours between two "HH:MM" times as a decimal (9:00->11:30 is 2.5). Missing or non-positive
+  // spans count as 0 hours, so a booking with no times contributes nothing.
+  function hoursBetween(start, end) {
+    const a = timeToMinutes(start), b = timeToMinutes(end);
+    if (a == null || b == null || b <= a) return 0;
+    return (b - a) / 60;
+  }
+  // The 1-hour floor: any staff time above zero bills at least 1 hour, and anything past that
+  // rounds UP to the next whole hour. So 10 minutes bills as 1 hour and 65 minutes as 2 hours.
+  function billableStaffHours(rawHours) {
+    return rawHours > 0 ? Math.max(1, Math.ceil(rawHours)) : 0;
+  }
+
+  /* ---------------- Booking cost math (bill of materials) ----------------
+     Plain-language walkthrough of every number below, since this is money math that has to be
+     auditable, not just "works":
+       1. Booking hours = how long the instrument is reserved for, as a decimal number of hours
+          (9:00 to 11:30 is 2.5 hours). No start+end time on the booking → 0 hours.
+       2. Each instrument bills either by that duration (unit "time", e.g. $/hour) or by a
+          manually-typed amount (any other unit — $/sample, $/gram, etc).
+       3. Each Facility Staff assignee bills by their OWN window inside the booking (left blank =
+          the full booking window), but never less than 1 hour, and always rounded UP to a whole
+          hour beyond that — so 10 minutes bills as 1 hour, and 65 minutes bills as 2 hours.
+       4. Discounts — a standing per-lab percent plus a manual admin override, added together —
+          apply ONLY to the time-billed instrument cost, never to staff time or to per-unit/
+          per-weight instrument costs.
+       5. What's left after the discount then has BOTH overhead percentages (internal + external)
+          added on top of it — that "before tax" figure is what a facility would actually invoice
+          before any tax line — and finally the tax percentage is added on top of THAT to get the
+          final total. */
+  function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates }) {
+    const bookingHours = hoursBetween(start, end);
+    const ohInternal = (rates && rates.ohInternal) || 0;
+    const ohExternal = (rates && rates.ohExternal) || 0;
+    const taxPct = (rates && rates.taxPct) || 0;
+
+    let instrTime = 0, instrAmount = 0;
+    const instrumentLines = (instruments || []).map((it) => {
+      const isTime = (it.cost_unit || 'time') === 'time';
+      const line = isTime ? (it.cost || 0) * bookingHours : (it.cost || 0) * (Number(it.amount) || 0);
+      if (isTime) instrTime += line; else instrAmount += line;
+      return Object.assign({}, it, { isTime, line });
+    });
+
+    let staffTotal = 0;
+    const staffLines = (staff || []).map((p) => {
+      const rawHours = (p.start && p.end) ? hoursBetween(p.start, p.end) : bookingHours;
+      const billHours = billableStaffHours(rawHours);
+      const line = (p.rate || 0) * billHours;
+      staffTotal += line;
+      return Object.assign({}, p, { rawHours, billHours, line });
+    });
+
+    const subtotal = instrTime + instrAmount + staffTotal;
+    const discPct = Math.min(100, (groupPct || 0) + (manualPct || 0));
+    const discountAmt = instrTime * (discPct / 100);
+    const afterDiscount = subtotal - discountAmt;
+    const overheadPct = ohInternal + ohExternal;
+    const overheadAmt = afterDiscount * (overheadPct / 100);
+    const beforeTax = afterDiscount + overheadAmt;
+    const taxAmt = beforeTax * (taxPct / 100);
+    const total = beforeTax + taxAmt;
+
+    return {
+      bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
+      groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
+      ohInternal, ohExternal, overheadAmt, beforeTax, taxPct, taxAmt, total
+    };
+  }  /* A retired person/instrument keeps its real name in the database — the suffix is added at
+     display time only, so historical records still read back exactly as they were entered. */
+  function retiredName(name, isRetired) {
+    return isRetired ? String(name == null ? '' : name) + ' (Retired)' : String(name == null ? '' : name);
+  }
   function isSafeUrl(u) { return /^https?:\/\//i.test(String(u || '').trim()); }
 
   /* ---------------- Rich-text notes: sanitize + render ----------------
@@ -529,7 +638,14 @@
     sanitizeHtml,
     noteHtml,
     fmtDate,
+    computeBookingBOM,
+    ymd,
     today,
+    todayPlusDays,
+    timeToMinutes,
+    hoursBetween,
+    billableStaffHours,
+    retiredName,
     isSafeUrl,
     detectOS,
     copyToClipboard,

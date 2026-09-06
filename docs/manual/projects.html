@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css">
+</head>
+<body data-chapter="projects.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"><!-- rendered by manual.js --></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Projects</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 4</p>
+      <h1>Projects</h1>
+      <p class="lede">Create, organize, and maintain the projects your facility works on — from first setup through archiving when the work is done.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Create a new project, including registering its PI on the spot if they're not in the system yet</li>
+        <li>Read and change a project's code, status, and quick-status bar, and add your own custom statuses</li>
+        <li>Add metadata, tags, and custom fields to keep track of anything the built-in fields don't cover</li>
+        <li>Build a project's team, and manage its files and links</li>
+        <li>Duplicate a project to reuse its setup for similar work</li>
+        <li>Archive a finished project (and restore it later), and know when a true delete is offered instead</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="create-a-project">Creating a project</h2>
+      <ol class="steps">
+        <li>Click <strong>New Project</strong> — it's available from the sidebar footer and from the top of the Projects registry.</li>
+        <li>Type a <strong>Title</strong>. This is the only field that's required.</li>
+        <li>Choose the <strong>PI</strong> (Principal Investigator) from the existing list of people, or register a brand-new one right there — see <a href="#inline-pi">Registering a new PI inline</a> below.</li>
+        <li>Fill in whatever else applies: modality, funding source, sample type (each a dropdown built from existing values, plus "+ Add New" — see <a href="big-ideas.html#add-new">"Other" really means "Add New"</a>), flags such as At-risk / Blocked / Needs-review, start and end dates, tags, and notes.</li>
+        <li>Click <strong>Save</strong>. The project appears in the registry immediately, with an auto-generated project code.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/04-project-header.png" alt="Project header showing its title, code, PI, and action buttons" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/04-project-header.png</div>
+        <figcaption>A saved project's header: its auto-generated code sits next to the title, with the PI and key actions nearby.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Only the title is required so you can create a placeholder project the moment work is discussed, then fill in the rest as details firm up — you're never blocked from starting a record just because you don't yet know the funding source.</p></div>
+    </section>
+
+    <section>
+      <h2 id="inline-pi">Registering a new PI inline</h2>
+      <p>If the project's PI isn't already in your People &amp; Labs directory, you don't need to leave the New Project form to add them.</p>
+      <ol class="steps">
+        <li>On the New Project form, open the PI picker.</li>
+        <li>Choose the option to register a new person instead of picking an existing one.</li>
+        <li>Type their first and last name and save — they're added to your People directory on the spot.</li>
+        <li>Continue filling out the rest of the project as normal.</li>
+      </ol>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A brand-new project is often exactly when you meet a brand-new PI — requiring you to go create their person record first, then come back to the project form, would just be a detour. The PI you register or pick here is automatically added to the project's team with the role "Principal Investigator," so you don't have to add them a second time in <a href="#team">Team</a>.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> This inline registration only fills in a name. To add the PI's lab, email, or hourly rate, open their full record afterward from <a href="people-labs.html#add-a-person">People &amp; Labs</a>.</p></div>
+    </section>
+
+    <section>
+      <h2 id="project-codes">Project codes</h2>
+      <p>Every new project gets a code automatically, in the form <code>PRJ-YYMM-NNN</code> — the year and month it was created, followed by a sequence number that restarts each month. So the third project created in April 2026 would be coded <code>PRJ-2604-003</code>.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> An automatic, sortable code means every project gets a unique, consistent identifier without anyone having to invent or remember one — and the month embedded in it makes it easy to tell roughly when a project was opened just from its code.</p></div>
+      <ol class="steps">
+        <li>Open a project and click <strong>Edit</strong>.</li>
+        <li>The <strong>Code</strong> field is editable — change it if your facility has its own naming convention you'd rather use.</li>
+        <li>Save. The code you typed replaces the auto-generated one everywhere the project is shown.</li>
+      </ol>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> The Projects registry search box matches against the code as well as the title, PI, funding source, modality, sample type, tags, and notes — so a well-chosen code also becomes a fast search shortcut.</p></div>
+
+      <figure class="shot">
+        <img src="../screenshots/03-projects-registry.png" alt="Projects registry showing the list of projects with the search box and filters" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/03-projects-registry.png</div>
+        <figcaption>The Projects registry: search the list by any of the fields above, and narrow it further with the filters alongside it.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="quick-status">The quick-status bar</h2>
+      <p>Every project detail page shows a row of status buttons — its quick-status bar — so you can move a project from one stage to the next without opening an edit form.</p>
+      <ol class="steps">
+        <li>Open any project's detail page.</li>
+        <li>Find the row of status buttons near the top.</li>
+        <li>Click the status you want. It's applied immediately — one click, no separate save step.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/26-project-status-workflow.png" alt="Quick-status bar on a project detail page with one status highlighted as current" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/26-project-status-workflow.png</div>
+        <figcaption>Each button in the quick-status bar is one click away — the highlighted one is the project's current status.</figcaption>
+      </figure>
+
+      <div class="callout try"><p><strong>🧪 Try it.</strong> Open one of the sample projects and click through a couple of statuses on its quick-status bar. Then check the Projects registry — its Status filter and the badge next to the project's name update to match immediately.</p></div>
+    </section>
+
+    <section>
+      <h2 id="custom-statuses">Adding a custom status</h2>
+      <p>If none of the built-in statuses describes your workflow, you can add your own.</p>
+      <ol class="steps">
+        <li>On the quick-status bar, click <strong>+ Add status</strong>.</li>
+        <li>Type the new status name and save.</li>
+        <li>It's now available on the quick-status bar for <em>every</em> project, not just this one, and appears in the Projects registry's Status filter.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/27-add-custom-status.png" alt="Add custom status dialog with a text field for the new status name" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/27-add-custom-status.png</div>
+        <figcaption>A custom status you add here joins the shared list used across every project in your tracker.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Statuses are a shared vocabulary across your whole facility (the same idea behind <a href="big-ideas.html#add-new">"+ Add New"</a> everywhere else), so adding one benefits every project rather than being locked to the project you happened to be looking at when you added it.</p></div>
+    </section>
+
+    <section>
+      <h2 id="metadata-tags">Metadata and tags</h2>
+      <p>Beyond the built-in fields, a project carries free-text <strong>tags</strong> (short labels you can search and filter by) and can hold any number of <strong>custom metadata fields</strong> — see <a href="#custom-fields">Custom fields</a> below for those.</p>
+      <ol class="steps">
+        <li>Open a project and click <strong>Edit</strong>.</li>
+        <li>Find the <strong>Tags</strong> field and add or remove short labels — anything meaningful to your facility (e.g. "grant-funded," "priority," an equipment name).</li>
+        <li>Save. Tags now show on the project's card in the registry and are searchable there.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/06-metadata-tags.png" alt="Project detail page showing its tags and a list of custom metadata fields" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/06-metadata-tags.png</div>
+        <figcaption>Tags sit alongside the project's custom metadata fields on its detail page.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Tags are meant to be quick and searchable, while custom fields (next section) are meant to hold a specific labeled value — the two cover different note-taking needs without forcing every project into the same rigid template.</p></div>
+    </section>
+
+    <section>
+      <h2 id="custom-fields">Custom fields</h2>
+      <p>Custom fields let you record project-specific information the built-in form doesn't have a place for — a grant number, an IRB approval code, a collaborating institution, anything at all.</p>
+      <ol class="steps">
+        <li>Open a project's detail page and find the custom fields area (shown together with tags, above).</li>
+        <li>Click to add a field, type a label (the key) and its value, and save.</li>
+        <li>To change one later, edit it in place; to remove one, delete it — you'll be asked to confirm first.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/39-delete-custom-field-confirm.png" alt="Confirmation dialog before deleting a custom field, with a plain neutral confirm button" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/39-delete-custom-field-confirm.png</div>
+        <figcaption>Deleting a custom field asks first — notice the confirm button is plain, not the attention-grabbing color.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Every facility tracks a slightly different set of details per project. Rather than the app guessing which fields you need, custom fields let each project carry exactly the extra information that matters for it, with no limit on how many you add.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Custom fields are one of the things a <a href="#duplicate">duplicated</a> project keeps — handy for a series of similar projects that all track the same extra details.</p></div>
+    </section>
+
+    <section>
+      <h2 id="team">Team</h2>
+      <p>A project's team is the roster of people working on it, each with a role (the PI you picked or registered when creating the project is added here automatically as "Principal Investigator").</p>
+      <ol class="steps">
+        <li>Open a project's detail page and find its <strong>Team</strong> section.</li>
+        <li>Click to add a member: pick an existing person from People &amp; Labs and type their role on this project.</li>
+        <li>To remove someone from the team, use the remove action next to their row — this only takes them off <em>this project's</em> team, it does not touch their person record or any other project.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/07-team-collaborators.png" alt="Team section of a project listing members and their roles" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/07-team-collaborators.png</div>
+        <figcaption>Each row is one team member and the role they hold specifically on this project.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A person can be on several projects at once with a different role on each — a postdoc might be "Lead" here and "Consultant" there. Keeping roles per-project (rather than one fixed role on the person) lets that reflect reality.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Adding someone to a project's team is separate from adding them to a specific booking as an attendee or facility staff — see <a href="big-ideas.html#facility-staff-vs-attendees">Facility Staff vs. attendees</a> and <a href="bookings.html#book-a-session">Booking a Session</a>.</p></div>
+    </section>
+
+    <section>
+      <h2 id="files-attachments">Files and attachments</h2>
+      <p>A project can hold both uploaded files and web links, side by side in one list.</p>
+      <ol class="steps">
+        <li>Open a project's detail page and find its files/attachments section.</li>
+        <li>To add a file, use the upload option and choose a file from your computer.</li>
+        <li>To add a link instead, choose the link option and paste a web address (starting with <code>http://</code> or <code>https://</code>).</li>
+        <li>Use the download action on a row to get an uploaded file back out, or the delete action to remove a row — deleting asks for confirmation first.</li>
+      </ol>
+
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Only web links (starting with <code>http://</code> or <code>https://</code>) are clickable in this list. A link typed without that prefix, or any other kind of reference, is stored as text but won't open when clicked.</p></div>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Uploaded files are stored inside the same private, per-browser storage as the rest of your data (see <a href="big-ideas.html#your-data-lives-here">Your data lives here</a>) — which means they're included automatically when you export a backup. That's a real convenience (one file captures everything), but also a real size consideration: a project with many large uploads makes for a large backup file. See <a href="backups-exports.html#json-backup">Backups, Restore &amp; Exports</a>.</p></div>
+
+      <figure class="shot">
+        <img src="../screenshots/40-delete-attachment-confirm.png" alt="Confirmation dialog before deleting an attachment row" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/40-delete-attachment-confirm.png</div>
+        <figcaption>Deleting an attachment or link always asks first, whether it's an uploaded file or a pasted link.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="duplicate">Duplicating a project</h2>
+      <p>Duplicating gives you a fresh copy of a project's setup, ready for new work, without repeating all the data entry.</p>
+      <ol class="steps">
+        <li>Open the project you want to copy and find its <strong>Duplicate</strong> action.</li>
+        <li>Confirm. A new project appears named "<em>original title</em> (Copy)."</li>
+        <li>Open the new copy and adjust whatever needs to change — its title, dates, and status are the first things worth checking.</li>
+      </ol>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Copied to the new project</th><th>Deliberately NOT copied</th></tr></thead>
+          <tbody>
+            <tr><td>Basic fields (funding, modality, sample type, notes, tags)</td><td>Meetings / bookings</td></tr>
+            <tr><td>Team roster</td><td>Files and attachments</td></tr>
+            <tr><td>Assigned instruments</td><td>Start/end dates (cleared)</td></tr>
+            <tr><td>Custom fields</td><td>&nbsp;</td></tr>
+            <tr><td>Milestones (statuses reset to pending, due dates cleared)</td><td>&nbsp;</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The new copy always starts with the status "Initiated," regardless of what the original's status was.</p>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Duplicating is meant for reusing a project's <em>setup</em> — its team, its milestone plan, its instrument list — for a new round of similar work, not for cloning its history. Bookings and files are specific to what already happened on the original project, so copying them into a brand-new project would misrepresent history that belongs only to the original. That's the same reasoning behind <a href="big-ideas.html#cost-snapshots">why costs are frozen</a> and <a href="big-ideas.html#cancelled-vs-deleted">why bookings are cancelled, not deleted</a> — history stays with the record it actually happened on.</p></div>
+
+      <div class="callout try"><p><strong>🧪 Try it.</strong> Duplicate one of the sample projects, then compare its Milestones tab with the original's — the milestone titles are identical, but every due date is empty and every status has reset to pending, ready for you to plan afresh. See <a href="milestones.html#add-a-milestone">Milestones</a>.</p></div>
+    </section>
+
+    <section>
+      <h2 id="archive-restore">Archiving and restoring a project</h2>
+      <ol class="steps">
+        <li>Open the project you want to archive and find its <strong>Archive</strong> action.</li>
+        <li>Read the dialog carefully: if the project has any history at all — team members, instruments, milestones, bookings, files, or custom fields — it lists everything the project holds, including its total billed amount, before you confirm.</li>
+        <li>Confirm. The project is archived: it disappears from the dashboard and the main registry, and gets a clear "Archived" banner on its own detail page.</li>
+        <li>To bring it back, open it (use the registry's <strong>Show archived</strong> toggle to find it) and click <strong>Restore</strong>.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/41-archive-project.png" alt="Archive project dialog listing everything the project holds before confirming" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/41-archive-project.png</div>
+        <figcaption>Before archiving, the dialog spells out exactly what the project holds — including its total billed amount.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../screenshots/46-project-archived-banner.png" alt="Project detail page showing an archived banner near the top" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/46-project-archived-banner.png</div>
+        <figcaption>An archived project keeps every record intact — the banner is the only visible change on its own page.</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="../screenshots/45-projects-archived.png" alt="Projects registry with the Show archived toggle expanded" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/45-projects-archived.png</div>
+        <figcaption>The "Show archived (n)" toggle only appears in the registry once at least one project has been archived.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Archiving is the project-level version of the same idea covered in <a href="big-ideas.html#retire-vs-delete">Retire vs. delete</a> and <a href="big-ideas.html#archive">Archive</a>: cost history and milestone history are real facts you don't want to lose just because a project wound down. Archiving keeps them all, while still keeping your everyday project list focused on live work.</p></div>
+
+      <h3 id="true-delete">When a true delete is offered instead</h3>
+      <p>If a project has absolutely nothing on it yet — no team beyond default setup, no instruments, no milestones, no bookings, no files, no custom fields — the same action offers a genuine, permanent <strong>Delete</strong> instead of archiving. Use this only for a project created by mistake or as an empty duplicate that turned out unneeded.</p>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> There is no undo for a true delete. If you're not certain a project truly has zero history, archive it instead — you can always restore an archived project, but a deleted one is gone for good.</p></div>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q"><summary>You create a new project for a PI who isn't in your People directory yet. Do you need to add them as a person first?</summary><p>No — the New Project form lets you register a new PI by name right there. They're added to your People directory and to the project's team as "Principal Investigator" automatically.</p></details>
+      <details class="quiz-q"><summary>You duplicate a project that has 12 bookings and 3 uploaded files. How many bookings and files does the new copy start with?</summary><p>Zero of each. Duplicating deliberately does not copy meetings/bookings or files and attachments — only the setup (fields, team, instruments, custom fields, and milestones with statuses and due dates reset).</p></details>
+      <details class="quiz-q"><summary>You try to archive a project and the dialog offers to permanently Delete it instead. What does that tell you?</summary><p>That the project has zero references anywhere — no team beyond setup, no instruments, milestones, bookings, files, or custom fields. A true delete is only ever offered when there's no history to protect; anything with history gets archived instead.</p></details>
+    </section>
+
+    <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
+  </main>
+</div>
+<script src="manual.js"></script>
+</body>
+</html>

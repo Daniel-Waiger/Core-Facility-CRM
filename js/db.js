@@ -20,6 +20,8 @@
     start_date TEXT,
     end_date TEXT,
     notes TEXT DEFAULT '',
+    is_archived INTEGER DEFAULT 0,
+    archived_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -34,6 +36,8 @@
     is_staff INTEGER DEFAULT 0,
     rate REAL DEFAULT 0,
     rate_unit TEXT DEFAULT 'hour',
+    is_retired INTEGER DEFAULT 0,
+    retired_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS instruments (
@@ -45,6 +49,8 @@
     note TEXT DEFAULT '',
     cost REAL DEFAULT 0,
     cost_unit TEXT DEFAULT 'time',
+    is_retired INTEGER DEFAULT 0,
+    retired_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS project_people (
@@ -95,6 +101,9 @@
     subtotal REAL DEFAULT 0,
     total_before_tax REAL DEFAULT 0,
     total_cost REAL DEFAULT 0,
+    is_cancelled INTEGER DEFAULT 0,
+    cancelled_at TEXT DEFAULT '',
+    billing_retained INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -185,6 +194,17 @@
     try { db.exec("ALTER TABLE meetings ADD COLUMN total_before_tax REAL DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN total_cost REAL DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN amount REAL DEFAULT 0"); } catch (_) {}
+    // Retirement: a person or instrument that leaves the facility is retired, never deleted, so
+    // every historical record that references them (bookings, milestones, projects) stays intact.
+    try { db.exec("ALTER TABLE people ADD COLUMN is_retired INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN retired_at TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE instruments ADD COLUMN is_retired INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE instruments ADD COLUMN retired_at TEXT DEFAULT ''"); } catch (_) {}
+    // A project is archived rather than deleted, for the same reason: its bookings, their cost
+    // snapshots, and the team and instruments that worked on it are the facility's record of
+    // what was actually done and billed.
+    try { db.exec("ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE projects ADD COLUMN archived_at TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN line_cost REAL DEFAULT 0"); } catch (_) {}
     try {
       db.exec(`
@@ -264,6 +284,12 @@
         `);
       }
     } catch (e) { console.warn('meetings.project_id migration skipped:', e); }
+
+    // Cancellation. Runs AFTER the meetings rebuild above on purpose: that rebuild copies an
+    // explicit column list into a fresh table, so anything added before it would be dropped.
+    try { db.exec("ALTER TABLE meetings ADD COLUMN is_cancelled INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN cancelled_at TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE meetings ADD COLUMN billing_retained INTEGER DEFAULT 0"); } catch (_) {}
   }
 
   async function boot() {
@@ -549,7 +575,9 @@
 
   function projectFlags(pid) {
     const flags = [];
-    const now = new Date().toISOString().slice(0, 10);
+    // global.UI is defined by the time this runs (called at render time, after all scripts have
+    // loaded), even though db.js itself loads before ui.js — see CLAUDE.md module load order.
+    const now = global.UI.today();
     const ms = rows('SELECT status, due_date FROM milestones WHERE project_id=? AND status!="done"', [pid]);
     for (const m of ms) {
       if (m.due_date && m.due_date < now) {
@@ -619,6 +647,166 @@
     return rows('SELECT org, percent FROM group_discounts ORDER BY org');
   }
 
+  /* ---------------- Retirement (people & instruments) ----------------
+     A person who leaves the facility, or an instrument that is decommissioned, must never be
+     deleted while anything references them: who actually attended a booking and which
+     instrument a session actually ran on are historical facts, and a booking's cost snapshot
+     is only meaningful if the line items behind it still exist. So the object is marked
+     retired instead — it keeps every link it ever had, is labelled "(Retired)" wherever it
+     appears, and simply stops being offered when assigning new work.
+
+     countPersonRefs/countInstrumentRefs report how much history a record carries. Zero
+     references means there is nothing to preserve, so a genuine delete is safe and offered
+     instead of retirement (otherwise a mistyped entry could never be tidied away). */
+  function countPersonRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM project_people WHERE person_id=?) AS projects,
+      (SELECT COUNT(*) FROM milestone_owners WHERE person_id=?) AS milestones,
+      (SELECT COUNT(*) FROM meeting_people WHERE person_id=?) AS bookings,
+      (SELECT COUNT(*) FROM meeting_staff WHERE person_id=?) AS staffed,
+      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi`, [id, id, id, id, id]) || {};
+    const parts = {
+      projects: r.projects || 0, milestones: r.milestones || 0,
+      bookings: r.bookings || 0, staffed: r.staffed || 0, pi: r.pi || 0
+    };
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.pi;
+    return parts;
+  }
+  function countInstrumentRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM project_instruments WHERE instrument_id=?) AS projects,
+      (SELECT COUNT(*) FROM milestone_instruments WHERE instrument_id=?) AS milestones,
+      (SELECT COUNT(*) FROM meeting_instruments WHERE instrument_id=?) AS bookings`,
+      [id, id, id]) || {};
+    const parts = {
+      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0
+    };
+    parts.total = parts.projects + parts.milestones + parts.bookings;
+    return parts;
+  }
+  function countProjectRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM project_people WHERE project_id=?) AS team,
+      (SELECT COUNT(*) FROM project_instruments WHERE project_id=?) AS instruments,
+      (SELECT COUNT(*) FROM milestones WHERE project_id=?) AS milestones,
+      (SELECT COUNT(*) FROM meetings WHERE project_id=?) AS bookings,
+      (SELECT COUNT(*) FROM files WHERE project_id=?) AS files,
+      (SELECT COUNT(*) FROM kv WHERE project_id=?) AS fields,
+      (SELECT COALESCE(SUM(total_cost),0) FROM meetings WHERE project_id=?) AS billed`,
+      [id, id, id, id, id, id, id]) || {};
+    const parts = {
+      team: r.team || 0, instruments: r.instruments || 0, milestones: r.milestones || 0,
+      bookings: r.bookings || 0, files: r.files || 0, fields: r.fields || 0,
+      billed: Number(r.billed) || 0
+    };
+    parts.total = parts.team + parts.instruments + parts.milestones + parts.bookings + parts.files + parts.fields;
+    return parts;
+  }
+  /* What a booking carries: billing line items, its saved total, and the people recorded as
+     having been there. A booking with none of that is an empty note and can be deleted; anything
+     else is cancelled instead, so the session stays on the record. */
+  function countBookingRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM meeting_instruments WHERE meeting_id=?) AS instruments,
+      (SELECT COUNT(*) FROM meeting_staff WHERE meeting_id=?) AS staff,
+      (SELECT COUNT(*) FROM meeting_people WHERE meeting_id=?) AS attendees,
+      (SELECT COALESCE(total_cost,0) FROM meetings WHERE id=?) AS total`,
+      [id, id, id, id]) || {};
+    const parts = {
+      instruments: r.instruments || 0, staff: r.staff || 0,
+      attendees: r.attendees || 0, total: Number(r.total) || 0
+    };
+    parts.lines = parts.instruments + parts.staff;
+    parts.any = parts.lines + parts.attendees + (parts.total > 0 ? 1 : 0);
+    return parts;
+  }
+  /* retained: does this cancelled booking's cost still count toward Project Costs? A session
+     cancelled after its start time was still time the facility held; one cancelled beforehand
+     was not. Either way the booking itself stays logged. */
+  function setBookingCancelled(id, cancelled, retained) {
+    if (cancelled) {
+      run("UPDATE meetings SET is_cancelled=1, cancelled_at=datetime('now'), billing_retained=?, updated_at=datetime('now') WHERE id=?",
+        [retained ? 1 : 0, id]);
+    } else {
+      run("UPDATE meetings SET is_cancelled=0, cancelled_at='', billing_retained=0, updated_at=datetime('now') WHERE id=?", [id]);
+    }
+  }
+  function setProjectArchived(id, archived) {
+    if (archived) {
+      run("UPDATE projects SET is_archived=1, archived_at=datetime('now'), updated_at=datetime('now') WHERE id=?", [id]);
+    } else {
+      run("UPDATE projects SET is_archived=0, archived_at='', updated_at=datetime('now') WHERE id=?", [id]);
+    }
+  }
+  // table is 'people' or 'instruments' — nothing else is retirable.
+  function setRetired(table, id, retired) {
+    if (table !== 'people' && table !== 'instruments') return;
+    if (retired) {
+      run(`UPDATE ${table} SET is_retired=1, retired_at=datetime('now') WHERE id=?`, [id]);
+    } else {
+      run(`UPDATE ${table} SET is_retired=0, retired_at='' WHERE id=?`, [id]);
+    }
+  }
+
+  // Every organization name on record anywhere, not just people.organization — a lab can show
+  // up only in a discount row or on a booking's saved group_org snapshot (e.g. after a person
+  // who belonged to it was reassigned or removed), and the rename tool needs to offer those too.
+  function listAllOrgNames() {
+    const set = new Set();
+    rows("SELECT DISTINCT organization as org FROM people WHERE organization IS NOT NULL AND TRIM(organization) != ''").forEach((r) => set.add(r.org));
+    rows("SELECT DISTINCT org FROM group_discounts WHERE org IS NOT NULL AND TRIM(org) != ''").forEach((r) => set.add(r.org));
+    rows("SELECT DISTINCT group_org as org FROM meetings WHERE group_org IS NOT NULL AND TRIM(group_org) != ''").forEach((r) => set.add(r.org));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }
+
+  // How much of the app a lab name touches, for the rename/merge confirm dialog: people rows
+  // that would be relabeled, bookings whose saved group snapshot would be relabeled, and whether
+  // it carries a standing discount row.
+  function countOrgRefs(org) {
+    const peopleCount = (row('SELECT COUNT(*) as c FROM people WHERE organization=?', [org]) || {}).c || 0;
+    const bookingsCount = (row('SELECT COUNT(*) as c FROM meetings WHERE group_org=?', [org]) || {}).c || 0;
+    const hasDiscount = !!row('SELECT 1 as x FROM group_discounts WHERE org=?', [org]);
+    return { peopleCount, bookingsCount, hasDiscount };
+  }
+
+  // Renames (or merges) a lab/organization name across the app. `people.organization` and every
+  // `meetings.group_org` snapshot are relabeled unconditionally — those are just display strings.
+  // The group_discounts row is trickier: org is its PRIMARY KEY, so if newName already has its
+  // OWN discount row this is a merge, not a plain rename — the existing target row wins (its
+  // percent is left alone) and the old row is dropped, rather than raced through an UPDATE that
+  // would collide on the primary key.
+  // Deliberately does NOT touch meetings.group_discount_pct: that's a historical snapshot of the
+  // percent actually billed on that booking, not a live reference to the lab, so it must not be
+  // recomputed just because the lab's name (or even its current standing rate) changed later.
+  function renameOrganization(oldName, newName) {
+    oldName = String(oldName || '').trim();
+    newName = String(newName || '').trim();
+    if (!oldName || !newName || oldName === newName) return null;
+
+    const peopleCount = (row('SELECT COUNT(*) as c FROM people WHERE organization=?', [oldName]) || {}).c || 0;
+    const bookingsCount = (row('SELECT COUNT(*) as c FROM meetings WHERE group_org=?', [oldName]) || {}).c || 0;
+    const oldDiscount = row('SELECT percent FROM group_discounts WHERE org=?', [oldName]);
+    const targetHadDiscount = !!row('SELECT 1 as x FROM group_discounts WHERE org=?', [newName]);
+    const merged = !!(oldDiscount && targetHadDiscount);
+
+    if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
+    if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
+
+    let discountMoved = false;
+    if (oldDiscount) {
+      if (targetHadDiscount) {
+        // Merge: the destination's own standing rate wins; drop the source row rather than
+        // fight it for the org primary key.
+        run('DELETE FROM group_discounts WHERE org=?', [oldName]);
+      } else {
+        run('UPDATE group_discounts SET org=? WHERE org=?', [newName, oldName]);
+        discountMoved = true;
+      }
+    }
+
+    return { peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount };
+  }
+
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
   function clearAllData() {
     db.exec(`
@@ -646,8 +834,88 @@
     markDirty();
   }
 
+  /* Builds one meetings row plus its meeting_people / meeting_instruments / meeting_staff rows
+     from the same inputs UI.computeBookingBOM takes in the real booking modal (mirrors
+     bookingSave in app.js) — so every seeded subtotal/total is computed, never typed in by hand.
+     Looks up each instrument's cost/cost_unit and each staff member's rate from the rows THIS
+     seed just inserted (never a literal), so the BOM always tracks whatever peopleData/instData
+     above say, even if those tables change later.
+       spec.instruments: [{id, amount}]  — amount only matters for a non-'time' cost_unit.
+       spec.staff:       [{id, start, end}] — blank start/end bills the whole booking window.
+       spec.peopleIds:   everyone who attended (attendees display string AND meeting_people —
+                          built from this ONE list so the two can never drift, see CLAUDE.md).
+       spec.cancelled:   {retained} or omitted/null for a live booking. */
+  function seedBooking(spec) {
+    const {
+      projectId = null, title, date, start = '', end = '',
+      instruments = [], staff = [], peopleIds = [], groupOrg = '',
+      note = '', actions = '', cancelled = null
+    } = spec;
+
+    const instRows = instruments.length
+      ? rows(`SELECT id, cost, cost_unit FROM instruments WHERE id IN (${instruments.map(() => '?').join(',')})`, instruments.map((i) => i.id))
+      : [];
+    const instrumentsForCalc = instRows.map((r) => {
+      const s = instruments.find((i) => i.id === r.id) || {};
+      return { id: r.id, cost: r.cost, cost_unit: r.cost_unit, amount: s.amount || 0 };
+    });
+
+    const staffRows = staff.length
+      ? rows(`SELECT id, rate FROM people WHERE id IN (${staff.map(() => '?').join(',')})`, staff.map((s) => s.id))
+      : [];
+    const staffForCalc = staffRows.map((r) => {
+      const s = staff.find((x) => x.id === r.id) || {};
+      return { id: r.id, rate: r.rate, start: s.start || '', end: s.end || '' };
+    });
+
+    // getGroupDiscount/getConfigNum read the app_config/group_discounts rows the real Settings
+    // screen reads — which is exactly why those are seeded BEFORE any seedBooking() call below;
+    // reading them from an empty table here would silently compute every booking at 0% discount
+    // and 0% overhead/tax.
+    const groupPct = getGroupDiscount(groupOrg);
+    const rates = {
+      ohInternal: getConfigNum('overhead_internal', 0),
+      ohExternal: getConfigNum('overhead_external', 0),
+      taxPct: getConfigNum('tax_pct', 0)
+    };
+    const bom = global.UI.computeBookingBOM({ start, end, instruments: instrumentsForCalc, staff: staffForCalc, groupPct, manualPct: 0, rates });
+
+    const attendees = peopleIds.length
+      ? rows(`SELECT name FROM people WHERE id IN (${peopleIds.map(() => '?').join(',')})`, peopleIds).map((r) => r.name).join(', ')
+      : '';
+
+    const isCancelled = !!(cancelled && cancelled.cancelled !== false);
+    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions,
+          discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost,
+          is_cancelled, cancelled_at, billing_retained)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      projectId, title, date, start, end, attendees, note, actions,
+      0, groupOrg, groupPct, bom.subtotal, bom.beforeTax, bom.total,
+      isCancelled ? 1 : 0,
+      // Full timestamp, not a calendar day — toISOString() is the right tool here (see CLAUDE.md).
+      isCancelled ? new Date().toISOString() : '',
+      isCancelled && cancelled.retained ? 1 : 0
+    ]);
+    const inserted = row('SELECT last_insert_rowid() as id');
+    const mid = inserted ? inserted.id : null;
+    if (!mid) return null;
+
+    // Same id list feeds both the `attendees` display string above and meeting_people below, so
+    // they can never drift the way CLAUDE.md documents an earlier seed drifting on this pair.
+    peopleIds.forEach((pid) => run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, pid]));
+    bom.instrumentLines.forEach((l) => run('INSERT INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [mid, l.id, l.amount || 0, l.line]));
+    bom.staffLines.forEach((l) => run('INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [mid, l.id, l.start || '', l.end || '', l.line]));
+    return mid;
+  }
+
   function seedSampleData() {
     clearAllData();
+
+    // Demo dates are relative to the day the sample data is loaded, so the dataset never reads as
+    // stale history and always lands inside the Reports screen's default range (the current year).
+    // Built on the existing UI.todayPlusDays (local-calendar-day math, see CLAUDE.md's "Dates are
+    // local calendar days" section) rather than a second date formatter.
+    const day = (n) => global.UI.todayPlusDays(n);
 
     // 1. People (is_staff/rate: only facility staff are billable core-staff assignees)
     const peopleData = [
@@ -656,7 +924,9 @@
       ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy', 'Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening', 0, 0],
       ['Alex Chen', 'Researcher', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses', 0, 0],
       ['Maya Patel', 'Researcher', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays', 0, 0],
-      ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', '', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer', 1, 95]
+      ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', '', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer', 1, 95],
+      ['Dr. Priya Anand', 'Facility Staff', 'Bioimaging Core Facility', '', 'panand@corefacility.edu', 'Cryo-EM specialist overseeing grid vitrification and Glacios operation', 1, 110],
+      ['Tom Alvarez', 'Facility Staff', 'Bioimaging Core Facility', '', 'talvarez@corefacility.edu', 'Image analysis specialist supporting the Imaris/Fiji quantification pipeline', 1, 80]
     ];
     for (const p of peopleData) {
       run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', p);
@@ -688,8 +958,8 @@
       'Transgenic murine lymph node (in vivo)',
       '',
       'Immunology, Intravital, CAR-T, In-Vivo',
-      '2026-01-10',
-      '2026-10-31',
+      day(-150),
+      day(180),
       'Real-time tracking of chimeric antigen receptor T-cell kinetics and tumor cell lysis rates across 4D spatial volumes.'
     ]);
 
@@ -706,8 +976,8 @@
       'Primary hippocampal cultures (96-well glass bottom)',
       '',
       'Neuroscience, Synapse, STED, Screening',
-      '2026-03-01',
-      '2026-11-30',
+      day(-15),
+      day(270),
       'Targeted STED nanoscopy resolving pre- and post-synaptic scaffold protein cluster colocalization under candidate therapeutics.'
     ]);
 
@@ -724,8 +994,8 @@
       'CUBIC-cleared murine pancreas',
       '',
       'Endocrinology, Cleared Tissue, Volume 3D',
-      '2025-08-01',
-      '2026-01-20',
+      day(-380),
+      day(-70),
       'Full organ clearing, refractive index matching, and complete volumetric islet distribution mapping completed successfully.'
     ]);
 
@@ -747,12 +1017,14 @@
     run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (2, 4)'); // Nikon AX R
     run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (3, 3)'); // Zeiss Lightsheet
 
-    // 6. Milestones
-    // Project 1 Milestones
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (1, 1, "Laser Power Calibration & Biosafety Clearance", "2026-02-15", "done", "Optimized pulse power at 920nm to avoid tissue phototoxicity")');
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (2, 1, "Intravital 4D Time-lapse Acquisition (100h)", "2026-04-25", "in-progress", "72 hours acquired across 6 cohorts; continuous stage tracking active")');
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (3, 1, "Cell Tracking & Velocity Segmentation", "2026-06-30", "pending", "Surface reconstruction and track displacement analysis in Imaris")');
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (4, 1, "Final Report & Publication Figure Rendering", "2026-09-15", "pending", "Render 3D movies and generate statistical figures for manuscript")');
+    // 6. Milestones (due dates are day()-relative; see the narrative note at the top of each
+    // project's block for why a given milestone's status/date pairing was chosen)
+    // Project 1 Milestones: mid-flight — one done, one actively worked (not yet due), one
+    // pending-but-overdue on purpose (feeds the dashboard's overdue list), one pending ahead.
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (1, 1, "Laser Power Calibration & Biosafety Clearance", '${day(-120)}', "done", "Optimized pulse power at 920nm to avoid tissue phototoxicity")`);
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (2, 1, "Intravital 4D Time-lapse Acquisition (100h)", '${day(15)}', "in-progress", "72 hours acquired across 6 cohorts; continuous stage tracking active")`);
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (3, 1, "Cell Tracking & Velocity Segmentation", '${day(-5)}', "pending", "Surface reconstruction and track displacement analysis in Imaris; slipped behind schedule while acquisition ran long")`);
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (4, 1, "Final Report & Publication Figure Rendering", '${day(90)}', "pending", "Render 3D movies and generate statistical figures for manuscript")`);
 
     run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (1, 4)');
     run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (2, 4)');
@@ -763,78 +1035,22 @@
     run('INSERT INTO milestone_instruments (milestone_id, instrument_id) VALUES (1, 2)');
     run('INSERT INTO milestone_instruments (milestone_id, instrument_id) VALUES (2, 2)');
 
-    // Project 2 Milestones
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (5, 2, "Antibody Titration & Depletion Laser Alignment", "2026-03-25", "pending", "Optimize STAR635P / Alexa594 pairs on 775nm depletion line")');
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (6, 2, "High-Content STED Imaging of 120 Wells", "2026-06-10", "pending", "Automated multi-position tile scanning with autofocus")');
+    // Project 2 Milestones: project just initiated, so both milestones are still ahead of us.
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (5, 2, "Antibody Titration & Depletion Laser Alignment", '${day(45)}', "pending", "Optimize STAR635P / Alexa594 pairs on 775nm depletion line")`);
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (6, 2, "High-Content STED Imaging of 120 Wells", '${day(120)}', "pending", "Automated multi-position tile scanning with autofocus")`);
     run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (5, 5)');
     run('INSERT INTO milestone_owners (milestone_id, person_id) VALUES (6, 5)');
     run('INSERT INTO milestone_instruments (milestone_id, instrument_id) VALUES (5, 1)');
 
-    // Project 3 Milestones (Done)
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (7, 3, "Tissue Clearing & Refractive Index Matching", "2025-09-10", "done", "CUBIC protocol yielded optical transparency with RI=1.520")');
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (8, 3, "Volumetric Lightsheet Stacks (2.4 TB)", "2025-11-20", "done", "Acquired dual-illumination 5µm z-step stacks on Z.1")');
-    run('INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (9, 3, "Final 3D Islet Morphometry Report", "2026-01-15", "done", "Delivered complete volume distribution metrics and data archive")');
+    // Project 3 Milestones (Done) — project completed, so every milestone lands in the past.
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (7, 3, "Tissue Clearing & Refractive Index Matching", '${day(-360)}', "done", "CUBIC protocol yielded optical transparency with RI=1.520")`);
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (8, 3, "Volumetric Lightsheet Stacks (2.4 TB)", '${day(-260)}', "done", "Acquired dual-illumination 5µm z-step stacks on Z.1")`);
+    run(`INSERT INTO milestones (id, project_id, name, due_date, status, note) VALUES (9, 3, "Final 3D Islet Morphometry Report", '${day(-90)}', "done", "Delivered complete volume distribution metrics and data archive")`);
 
-    // 7. Meetings (start_time/end_time now drive calendar display + instrument/staff conflict
-    // checks; discount/subtotal/total_* on meeting 1 are a snapshot BOM — see meeting_instruments
-    // / meeting_staff below for the line items that produced it).
-    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
-      1,
-      'Project Kickoff & Laser Alignment Review',
-      '2026-01-12',
-      '09:00',
-      '11:00',
-      'Elena Rostova, Alex Chen, David Kim',
-      'Reviewed intravital laser power levels and live-animal heating stage protocol.',
-      'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.',
-      0,                  // manual discount_pct
-      'Bio-Photonics Lab', // group_org: this project's PI (Elena Rostova) belongs to this lab
-      5,      // group_discount_pct snapshot (Bio-Photonics Lab standing discount, see group_discounts below)
-      490,    // subtotal: Olympus FV3000 300 (2h @ $150/hr) + David Kim 190 (2h @ $95/hr)
-      546.25, // total_before_tax: (490 - 5% of the $300 instrument-time line) x 1.15 overhead (10% internal + 5% external)
-      589.95  // total_cost: total_before_tax x 1.08 tax
-    ]);
-    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions) VALUES (?,?,?,?,?,?,?,?)`, [
-      1,
-      'Interim Progress & Channel Bleaching Check',
-      '2026-02-28',
-      '13:00',
-      '14:30',
-      'Alex Chen, David Kim',
-      'Observed minor fluorophore quenching in red channel. Switched to resonant line accumulation.',
-      'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.'
-    ]);
-    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions) VALUES (?,?,?,?,?,?,?,?)`, [
-      2,
-      'Screening Protocol Design & STED Parameter Setup',
-      '2026-03-05',
-      '10:00',
-      '11:30',
-      'Marcus Thorne, Maya Patel, David Kim',
-      'Discussed depletion laser doughnut alignment and immersion oil selection for 96-well glass plates.',
-      'Maya to prepare test 24-well plate for PSF and resolution calibration next week.'
-    ]);
-
-    // The `attendees` column above is a denormalized display string only — meeting_people is
-    // the join table features (e.g. emailing attendees) actually read from, so it needs the
-    // same rows the milestone_owners seeding above already provides for milestones.
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (1, 1)'); // Elena Rostova
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (1, 4)'); // Alex Chen
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (1, 6)'); // David Kim
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (2, 4)'); // Alex Chen
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (2, 6)'); // David Kim
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 2)'); // Marcus Thorne
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 5)'); // Maya Patel
-    run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (3, 6)'); // David Kim
-
-    // meeting_instruments/meeting_staff are the billable line items behind meeting 1's snapshot
-    // totals above: Olympus FV3000 (instrument_id 2) billed by time (amount unused), David Kim
-    // (person_id 6, the only is_staff=1 person) billed for the full booking window.
-    run('INSERT INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (1, 2, 0, 300)');
-    run("INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (1, 6, '', '', 190)");
-
-    // Global billing rates (Settings > Billing Rates) and one standing group discount, so the
-    // cost breakdown above is reproducible from Settings rather than a one-off hardcoded total.
+    // 7. Global billing rates (Settings > Billing Rates) and one standing group discount. These
+    // MUST be written before any seedBooking() call below — seedBooking reads them (via
+    // getGroupDiscount/getConfigNum) to compute each booking's BOM, so writing them after the
+    // bookings would silently price every booking at 0% discount and 0% overhead/tax.
     // Uses the upsert helpers, not a plain INSERT — clearAllData() deliberately leaves app_config
     // and group_discounts alone (they're facility settings, not "data" to wipe on Clear/Reseed),
     // so re-running Load Sample Data would otherwise hit a UNIQUE constraint on the second run.
@@ -842,9 +1058,154 @@
     setConfig('overhead_external', '5');
     setConfig('tax_pct', '8');
     setConfig('currency', '$');
-    setGroupDiscount('Bio-Photonics Lab', 5);
+    setGroupDiscount('Bio-Photonics Lab', 5); // only lab with a standing discount, on purpose —
+    // Neural Dynamics Institute and Therapeutics & Onco-Therapy deliberately have none, so
+    // Reports' By Lab/Group table shows a real contrast, not three identical discounted rows.
 
-    // 8. Custom KV Metadata
+    // 8. Meetings (start_time/end_time drive calendar display + instrument/staff conflict checks;
+    // every booking below goes through seedBooking(), which calls the exact same
+    // UI.computeBookingBOM() the booking modal uses — see the helper above seedSampleData for how
+    // subtotal/total_before_tax/total_cost are derived). Ten bookings, chosen to exercise every
+    // corner of the Reports & Utilization screen (see task notes): all five instruments, all
+    // three Facility Staff, a multi-instrument session, a per-unit (non-time) instrument charge,
+    // a facility-wide (no project) booking, both cancellation rules, project 3, both no-discount
+    // labs, a partial staff window, and a couple of no-line-item consultations. Dates/times are
+    // chosen so no instrument or staff member ever overlaps itself on the same day (checked by
+    // hand against findBookingConflicts' rule in app.js).
+
+    // #1 — kept as the regression check: same inputs as before (2h on the Olympus FV3000 @
+    // $150/hr, David Kim @ $95/hr for the full window, Bio-Photonics Lab's 5% discount, 10%+5%
+    // overhead, 8% tax) still has to land on 490 / 546.25 / 589.95.
+    seedBooking({
+      projectId: 1,
+      title: 'Project Kickoff & Laser Alignment Review',
+      date: day(-95), start: '09:00', end: '11:00',
+      instruments: [{ id: 2 }],
+      staff: [{ id: 6 }],
+      peopleIds: [1, 4, 6], // Elena Rostova, Alex Chen, David Kim
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Reviewed intravital laser power levels and live-animal heating stage protocol.',
+      actions: 'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.'
+    });
+
+    // #2/#3 — realistic no-line-item consultations: plenty of bookings are just a conversation,
+    // not a billable session.
+    seedBooking({
+      projectId: 1,
+      title: 'Interim Progress & Channel Bleaching Check',
+      date: day(-80), start: '13:00', end: '14:30',
+      peopleIds: [4, 6], // Alex Chen, David Kim
+      note: 'Observed minor fluorophore quenching in red channel. Switched to resonant line accumulation.',
+      actions: 'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.'
+    });
+    seedBooking({
+      projectId: 2,
+      title: 'Screening Protocol Design & STED Parameter Setup',
+      date: day(-70), start: '10:00', end: '11:30',
+      peopleIds: [2, 5, 6], // Marcus Thorne, Maya Patel, David Kim
+      note: 'Discussed depletion laser doughnut alignment and immersion oil selection for 96-well glass plates.',
+      actions: 'Maya to prepare test 24-well plate for PSF and resolution calibration next week.'
+    });
+
+    // #4 — multi-instrument (parallel sample runs): the only booking exercising Reports' even
+    // split of one staff member's hours across more than one instrument.
+    seedBooking({
+      projectId: 2,
+      title: 'Parallel Confocal Reference Imaging: STED vs. Standard Resolution Benchmarking',
+      date: day(-45), start: '09:00', end: '13:00',
+      instruments: [{ id: 1 }, { id: 4 }], // Leica SP8 FALCON + Nikon AX R Resonant, side by side
+      staff: [{ id: 6 }],
+      peopleIds: [2, 5, 6], // Marcus Thorne, Maya Patel, David Kim
+      groupOrg: 'Neural Dynamics Institute', // no standing discount — see setGroupDiscount above
+      note: 'Ran matched fields on the Leica SP8 FALCON and Nikon AX R Resonant in parallel to benchmark STED resolution gains against confocal and resonant-scan baselines on the same synaptic marker set.',
+      actions: 'Maya to tabulate FWHM measurements across both systems for the STED validation section of the grant renewal.'
+    });
+
+    // #5 — per-unit (non-'time') instrument charge: Glacios Cryo-TEM bills per grid, not per
+    // hour, and that per-unit cost is excluded from the discount base (see computeBookingBOM).
+    seedBooking({
+      projectId: 3,
+      title: 'Cryo-EM Grid Screening for Islet Ultrastructure Micrographs',
+      date: day(-100), start: '09:00', end: '12:00',
+      instruments: [{ id: 5, amount: 8 }], // Glacios Cryo-TEM, $45/grid x 8 grids screened
+      staff: [{ id: 7 }], // Dr. Priya Anand, EM specialist
+      peopleIds: [3, 7], // Sarah Lin, Priya Anand
+      groupOrg: 'Therapeutics & Onco-Therapy', // no standing discount
+      note: 'Screened 8 vitrified grids from the CUBIC-cleared islet prep for ice thickness and particle distribution ahead of high-resolution acquisition.',
+      actions: 'Proceed to full data collection on the 3 grids with the most uniform ice; discard grids 4 and 6 for crystalline contamination.'
+    });
+
+    // #6 — facility-wide (project_id NULL) booking, and also the partial-staff-window example:
+    // Tom Alvarez is only billed 10:00-10:40 of the 09:00-13:00 window, so his 0.67 raw hours
+    // round up to the 1-hour floor instead of matching the booking's own 4 hours.
+    seedBooking({
+      projectId: null,
+      title: 'Open Office Hours: Image Analysis Pipeline Consultation',
+      date: day(-1), start: '09:00', end: '13:00',
+      staff: [{ id: 8, start: '10:00', end: '10:40' }], // Tom Alvarez, image analysis specialist
+      peopleIds: [4, 5, 8], // Alex Chen, Maya Patel, Tom Alvarez
+      note: 'General walk-in session covering Imaris surface reconstruction and STED deconvolution workflows for whichever project needed help that week.',
+      actions: 'Circulate the shared Imaris batch-processing macro to both labs.'
+    });
+
+    // #7 — cancelled BEFORE its start time: nothing was held, so the charge is dropped
+    // (retained: false). Dated in the FUTURE relative to today so bookingHasStarted() agrees.
+    seedBooking({
+      projectId: 2,
+      title: 'Extended Resonant-Scan Session for Synaptic Density Screening',
+      date: day(10), start: '09:00', end: '10:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }],
+      peopleIds: [5, 6], // Maya Patel, David Kim
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Requested to add a second resonant-confocal acquisition block for a backup screening plate batch.',
+      actions: '',
+      cancelled: { cancelled: true, retained: false } // plate batch delayed in fixation; cancelled while the slot was still ahead of us
+    });
+
+    // #8 — cancelled AFTER its start time: the slot was held, so the charge stands
+    // (retained: true). Dated in the PAST relative to today so bookingHasStarted() agrees.
+    seedBooking({
+      projectId: 2,
+      title: 'Depletion Laser Realignment & Immersion Oil Retest',
+      date: day(-8), start: '09:00', end: '10:30',
+      instruments: [{ id: 1 }], // Leica SP8 FALCON
+      staff: [{ id: 6 }],
+      peopleIds: [5, 6], // Maya Patel, David Kim
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Booked to redo the 775nm depletion doughnut alignment after an immersion oil swap introduced spherical aberration.',
+      actions: '',
+      cancelled: { cancelled: true, retained: true } // failed a safety interlock check after the session had already started; facility held the slot so the charge stands
+    });
+
+    // #9 — completes instrument coverage (Zeiss Lightsheet Z.1) and gives project 3 a second,
+    // billable booking.
+    seedBooking({
+      projectId: 3,
+      title: 'Volumetric Reacquisition & Islet Segmentation QC',
+      date: day(-30), start: '09:00', end: '12:00',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [3, 6, 8], // Sarah Lin, David Kim, Tom Alvarez
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Re-ran two z-stacks that showed stitching artifacts and handed the corrected volumes to segmentation QC.',
+      actions: 'Tom to re-run the islet counting macro on the corrected volumes before the final report is regenerated.'
+    });
+
+    // #10 — instrument-only booking (no staff line item): plenty of sessions are unstaffed
+    // once a researcher is trained on a scope.
+    seedBooking({
+      projectId: 1,
+      title: 'Extended CAR-T Time-Lapse Re-acquisition (Automated Multipoint)',
+      date: day(-3), start: '09:00', end: '11:00',
+      instruments: [{ id: 2 }], // Olympus FV3000
+      peopleIds: [4], // Alex Chen
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Re-ran the multipoint time-lapse unattended overnight after last week’s run was cut short by a stage collision.',
+      actions: ''
+    });
+
+    // 9. Custom KV Metadata
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Biosafety Level", "BSL-2 (Murine Live In-Vivo)")');
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Laser Wavelength", "920nm Ti:Sapphire 80MHz")');
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Storage Tier", "NAS-Bioimaging-Vol4 / 4.8 TB")');
@@ -858,7 +1219,7 @@
     run('INSERT INTO kv (project_id, key, value) VALUES (3, "Refractive Index", "1.520 RI Matching Oil")');
     run('INSERT INTO kv (project_id, key, value) VALUES (3, "Archive Volume", "2.8 TB Cold Storage")');
 
-    // 9. Files
+    // 10. Files
     run('INSERT INTO files (project_id, name, kind, path) VALUES (1, "CAR-T_Intravital_Protocol_v3.pdf", "link", "https://core-facility.internal/docs/protocols/cart-v3.pdf")');
     run('INSERT INTO files (project_id, name, kind, path) VALUES (1, "Olympus_FV3000_Config_Laser920.json", "link", "https://core-facility.internal/configs/fv3000-cart.json")');
     run('INSERT INTO files (project_id, name, kind, path) VALUES (2, "STED_Resolution_Calibration_Guide.pdf", "link", "https://core-facility.internal/docs/sted-calib.pdf")');
@@ -894,6 +1255,16 @@
     getGroupDiscount,
     setGroupDiscount,
     listGroupDiscounts,
+    countPersonRefs,
+    countInstrumentRefs,
+    countProjectRefs,
+    setProjectArchived,
+    countBookingRefs,
+    setBookingCancelled,
+    setRetired,
+    listAllOrgNames,
+    countOrgRefs,
+    renameOrganization,
     seedSampleData,
     clearAllData
   };

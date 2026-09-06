@@ -83,21 +83,127 @@ rows, so a demo meeting displayed attendee names while any join-based feature sa
 Milestones' analogous tables (`milestone_owners`) didn't have this gap. When adding seed data or
 a new denormalized+relational pair, populate both, and check for this class of drift.
 
-### Cascading deletes are inconsistent — don't assume `ON DELETE CASCADE` fires
+### Cascading deletes: cascade works, but delete paths clean up child rows explicitly anyway
 
-The schema declares `ON DELETE CASCADE` on child tables, but sql.js's `db.export()` (called by
-every autosave) silently resets the connection's `foreign_keys` pragma to OFF as a side effect;
-`db.js`'s `currentBytes()` reasserts `PRAGMA foreign_keys = ON` right after every export to keep
-cascades working for the rest of the session. Despite that fix, `deleteMeeting()` in `app.js`
-still manually deletes `meeting_people`/`meeting_instruments` rows before deleting the meeting
-itself (with a comment claiming cascade "never fires" for those tables), while `deleteProject()`
-and `deletePerson()` delete only the parent row and rely on cascade alone. This is an unresolved
-inconsistency in the existing code, not a documented, verified rule — treat it as a warning, not
-settled fact: when writing a new delete path, the safer option (matching the more defensive
-existing pattern) is to explicitly delete dependent join-table/child rows rather than assume
-cascade will handle it, and if you need to know definitively whether cascade fires for a given
-table, verify empirically (delete a row, then query the child table) rather than trust either
-existing comment.
+Verified empirically (running the bundled `libs/sql-asm.js` under Node against this schema):
+sql.js's `db.export()` (called by every autosave) really does silently reset the connection's
+`foreign_keys` pragma to OFF as a side effect — it reads 1 right up until the first `export()`
+call, then 0. `db.js`'s `currentBytes()` reasserts `PRAGMA foreign_keys = ON` immediately after
+every export, and with that reassert in place `ON DELETE CASCADE` verifiably fires for every
+child/join table (`meeting_people`, `meeting_instruments`, `meeting_staff`, `milestones` and
+their joins, `project_people`, …) and `ON DELETE SET NULL` fires for `meetings.project_id`.
+A database reopened from exported bytes starts with the pragma OFF (standard SQLite
+per-connection behavior); `db.js` re-sets it on boot and restore.
+
+Despite cascade working, the remaining delete paths in `app.js` (`deleteMeetingRaw`, and the
+zero-reference delete branches of `archiveProject`/`retirePerson`/`retireInstrument`) delete
+dependent join-table/child rows explicitly as a
+defensive belt-and-suspenders measure: if any future code path ever calls `db.export()` directly
+without the pragma reassert, cascades would silently stop firing and only the explicit deletes
+would keep data consistent. Follow the same pattern in any new delete path. Note two things
+cascade can never handle here: `projects.pi_id` carries no `REFERENCES` clause (a deleted
+person's pi_id must be nulled explicitly), and the denormalized `meetings.attendees` display
+string must be recomputed from `meeting_people` when attendee rows are removed.
+
+### History is preserved: people/instruments retire, projects archive
+
+Deleting a person, instrument or project would destroy historical fact — who attended a booking,
+which instrument ran a session, who was PI, and the billing behind a saved cost snapshot. So
+those three are never deleted while anything references them:
+
+- `people.is_retired` / `retired_at`, `instruments.is_retired` / `retired_at`,
+  `projects.is_archived` / `archived_at` (all additive migrations in `db.js`).
+- `DB.countPersonRefs` / `countInstrumentRefs` / `countProjectRefs` report how much history a
+  record carries. **Zero references is the only case where a real delete is offered** (a typo or
+  duplicate, with nothing to protect); anything else retires/archives instead.
+- `DB.setRetired('people'|'instruments', id, bool)` and `DB.setProjectArchived(id, bool)` are the
+  only writers of those flags. Retiring/archiving never touches a join table.
+- Display only: `UI.retiredName(name, isRetired)` appends " (Retired)"; the stored name is never
+  modified, so historical records read back exactly as entered. SQL that renders a concatenated
+  list (milestone owners, exports) appends the same suffix with a `CASE WHEN ... is_retired`.
+
+**The rule for any picker or form that assigns work: "selectable = not retired OR already
+selected here."** This is not cosmetic. `msEditSave`, `bookingSave`/`bookingEditSave` and the
+project PI form all rebuild their join rows from whatever the form currently renders, so a
+retired assignee that is filtered out of the form is silently deleted from that record on the
+next save. `editMilestone` and `editProject` therefore keep a retired record in the list when it
+is the one already assigned, and `mountTokenPicker` keeps retired entries in `items` (so an
+existing badge still renders) while excluding them from the dropdown via `it.retired`.
+
+Lists hide retired/archived rows behind a "Show retired/archived (N)" toggle held in
+`views.js`'s `peopleFilter` / `instrumentFilter` / `projectFilter` state; the dashboard's counters
+and overdue feeds are scoped to `is_archived=0`.
+
+### Bookings are cancelled, not deleted
+
+`meetings.is_cancelled` / `cancelled_at` / `billing_retained`, written only by
+`DB.setBookingCancelled(id, cancelled, retained)`. `DB.countBookingRefs(id)` decides whether a
+booking is an empty note (no attendees, line items or cost → deletable) or a record (→ cancelled).
+
+Two rules drive `billing_retained`, both in `cancelBooking`:
+- **Before the start time** → nothing was held, charge dropped (`retained = 0`).
+- **After the start time** → the slot was held, charge stands (`retained = 1`). Admin Mode
+  (`UI.storage.getItem('admin-mode') === '1'`) offers `chooseCancelBilling`, a three-way dialog
+  to waive it instead. Without Admin Mode the charge stands — billing decisions are admin-gated
+  here exactly as the group-discount Revoke/Apply control is.
+
+`bookingHasStarted()` compares `date` + `start_time` (missing time ⇒ `00:00`) against now.
+A cancelled booking stops blocking its slot: `findBookingConflicts` filters on `m.is_cancelled = 0`.
+`reinstateBooking` therefore re-runs that conflict check before clearing the flag, since the
+booking starts holding its slot again. Project Costs sums `is_cancelled && !billing_retained`
+rows as 0, and the XLSX/DOCX/PDF exports carry the status so a total reconciles against its rows.
+
+### Dates are local calendar days, never UTC instants
+
+Every date a user picks or sees is a plain `'YYYY-MM-DD'` **local** calendar day, taken verbatim
+from an `<input type="date">` and stored verbatim in TEXT columns (`meetings.date`,
+`milestones.due_date`, …). No column holds a timestamp or an offset.
+
+So **never use `new Date(...).toISOString().slice(0, 10)` to produce one of those strings.** A
+`Date` is a single instant; `toISOString()` re-describes that instant in UTC, and at a UTC+ offset
+local midnight fell on the *previous* UTC day — so the conversion silently returns yesterday. Use
+`UI.ymd(date)` (local calendar fields) or `UI.today()` / `UI.todayPlusDays(n)`, which are built on
+it. Going the other way, `UI.fmtDate` appends `'T00:00:00'` (no `Z`) to force local parsing —
+that's deliberate, don't "simplify" it.
+
+This caused a real bug (issue #14, fixed in 1.5.0): the calendar labelled each cell with
+`cur.getDate()` (local) but keyed its events with `cur.toISOString()` (UTC), so east of Greenwich
+every cell was captioned with one day and filled with the previous day's bookings — while the edit
+form, reading the DB string directly, showed the truth. It was invisible at UTC and UTC−, so
+**test any date change under a UTC+ timezone** (`TZ='Asia/Jerusalem'`), not just locally. Full
+timestamps (`created_at`, backup filenames, `last-auto-backup-at`) are a different thing and
+legitimately use `toISOString()`.
+
+Booking durations are minute arithmetic on `'HH:MM'` strings on a single day — no `Date` objects
+involved. `UI.timeToMinutes`, `UI.hoursBetween` and `UI.billableStaffHours` (the 1-hour floor,
+rounding up) live in `ui.js` precisely so `app.js`'s cost calculator and `reports.js`'s
+aggregations count hours identically. Never fork a second copy: a report that disagrees with the
+booking modal about money is worse than no report.
+
+### Reports: aggregation lives in one place, screen and export both read it
+
+`js/reports.js` (`window.Reports`) owns the Reports & Utilization screen. Its aggregation
+functions are the single source for both the rendered tables and `Exports.exportReportsXlsx`, so an
+exported figure can never drift from the on-screen one. Two rules it encodes, both inherited from
+elsewhere in the app and both worth restating in any new aggregation:
+
+- **Occupancy excludes all cancelled bookings** (`is_cancelled = 1`) — a cancellation frees the
+  slot (see `findBookingConflicts`), so the instrument was never held.
+- **Money follows the Project Costs rule**: a row counts unless `is_cancelled && !billing_retained`.
+
+Two data-model traps: `meeting_staff.start_time = ''` means *the whole booking window*, not zero
+(so a naive `SUM` over those columns reports ~0), and `meetings.project_id` is nullable, so
+anything grouping by project needs a `LEFT JOIN` and a "Facility-wide" label or it silently drops
+rows. Retired people/instruments and archived projects **do** appear in reports — that's the point
+of keeping them — labelled via `UI.retiredName`.
+
+### Confirmation dialogs: the red button is Cancel
+
+`UI.confirmModal(title, body, { danger, confirmText, cancelText })`. On a `danger` dialog the
+**Cancel** button carries `btn-danger` and the action button is `btn-secondary` — colour draws
+the eye, and on a dialog meant to prevent an accident that attention belongs to the safe way out.
+Always pass `confirmText` naming the actual verb ("Delete", "Retire", "Archive") rather than
+leaving the generic "Confirm". Non-destructive confirmations keep neutral Cancel / primary Confirm.
 
 ### Modal system
 
@@ -116,5 +222,26 @@ without a hard refresh. This version string is **independent** from `window.APP_
 `js/consts.js`, which drives the "Version:" text shown in the app's own Settings screen — bump
 both, and add a `CHANGELOG.md` entry (this project's convention: one `## [X.Y.Z] — date` section
 per version, with `### Added`/`Changed`/`Fixed` subsections) matching whichever version
-`APP_VERSION` ends up at. `docs/index.html` (the hosted release-notes page) renders
-`CHANGELOG.md` live via `fetch`, so it never needs separate updates.
+`APP_VERSION` ends up at.
+
+`docs/index.html` (the hosted release-notes page) is **half live, half hand-written** — don't
+assume it updates itself.
+
+Derived from `CHANGELOG.md` at load time, so these look after themselves: the `## Full changelog`
+section, the `#footer-version` string, and the `#hero-release` version+date inside the
+`Release X.Y.Z · DD Mon YYYY` eyebrow. All three come from the newest `## [x.y.z] — YYYY-MM-DD`
+heading, parsed by the script at the bottom of the file. The static text inside those spans is
+only a no-JS fallback; leave it be.
+
+Hand-written per release, and genuinely easy to forget: the hero **lede**, the `Highlights`
+**cards**, and the `In detail` **feature blocks**. Update them whenever a release changes behaviour
+enough to warrant a card or a screenshot. `In detail` blocks reference `docs/screenshots/*.png`
+with an `onerror` handler that adds a `.pending` class, so a block may be written before its
+screenshot exists and degrades gracefully until one is added — and screenshot **numbering is
+sequential across the whole directory**, so check the highest existing number before picking one
+rather than assuming a free filename means a free slot. That section's own sub-head says it is for
+"the changes worth a screenshot": a fix with nothing to show (a caching bug, say) belongs in a
+Highlights card, not a feature block, which would otherwise leave an empty image column.
+
+A docs-only change needs no version bump and no `CHANGELOG.md` entry — the versioning rules above
+are about cache-busting the app shell, and this page isn't part of it.

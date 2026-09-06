@@ -6,6 +6,10 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 ---
 
+📖 **New to the app?** Read the [User Manual](https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/) — a searchable, illustrated guide to every feature.
+
+---
+
 ## Key Features
 
 - **Zero-Install & Zero-Server:** Runs on PC, Mac, Linux, Android, and iPad in modern web browsers (Chrome, Edge, Firefox, Safari). No Node.js, Python, or account required. On desktop you can open `index.html` directly; **on tablets you need to open it from a web address for saving to work** — see [Running on Tablets](#running-on-tablets-android--ipad).
@@ -25,12 +29,14 @@ Track research projects from initiation to completion with full lifecycle tracki
 - **Interactive Derived Calendar:** 7-day monthly schedule grid showing upcoming milestone deadlines and consultation meetings with direct navigation and "Today" quick view.
 - **Collapsible Navigation & Adaptive Theme:** Compact icon-only sidebar mode and smart next-theme switcher (`🌙 Dark Mode` / `☀️ Light Mode`).
 - **Search & Live Filtering:** Search by project title, code, PI name, modality, funding, sample type, or tags.
+- **Reports & Utilization:** A date-ranged reporting screen answering the questions a facility actually gets asked: how many hours each instrument was booked for, how much facility-staff time went into each instrument, and what each project and lab consumed. Booked hours exclude cancelled bookings (a cancellation releases the slot, so the instrument was never occupied), while revenue follows the same rule as Project Costs — a cancelled booking's charge counts only if it was retained. Staff time is reported both as hours actually worked and as hours billed, since billing rounds up to whole hours. Exportable to XLSX.
 - **Multi-Format Report Export:**
   - **XLSX:** Comprehensive multi-sheet workbook (Overview, Milestones, Team, Instruments, Meetings, Files) via SheetJS.
   - **DOCX:** Formatted Word document summary via `docx`.
   - **PDF:** Multi-page paginated report with headers, footers, and page numbers via `jsPDF`.
 - **Single-File Backup & Recovery:** Export your entire facility database (including attached files) into a self-contained `.json` backup file and restore it on any machine anytime. An automatic backup also runs roughly once every 24 hours while the app is open (toggleable in Settings), so you're never relying solely on browser storage — in Chrome/Edge, point it at the app's folder once and it writes silently into a `backups/` subfolder there with no download prompts; otherwise it falls back to a normal file download.
 - **Modern SaaS Minimalist UI:** Hand-written CSS design system with Dark/Light theme switching, toast feedback, custom brand favicon, and guided onboarding tour.
+- **History Is Never Destroyed:** People and instruments are **retired**, projects are **archived**, and bookings are **cancelled** — never deleted — so who attended a session, which instrument ran it, who was PI, and the billing behind every cost snapshot all survive. Retired and archived records are labelled wherever they appear, drop out of the pickers for new work, stay put on everything they already belong to, and can be restored at any time. A cancelled booking stays logged with its line items and frees its instrument slot; whether its charge still counts toward Project Costs depends on whether it had already started, with Admin Mode able to waive a late cancellation's charge. Only records nothing references at all can still be deleted outright.
 
 ---
 
@@ -116,7 +122,7 @@ A selection follows.
 
 <img src="docs/screenshots/35-booking-group-required-lock.png" width="420" alt="Booking modal with the people and core-staff pickers locked until a Group/Lab is chosen">
 
-*Figure 15 — A booking starts with its Group / Lab. Until one is picked (directly, or auto-filled from the project's PI), the "Assign People" and "Assign Core Staff" dropdowns stay locked with a "Choose Group/Lab First" hint — and the cost breakdown has no lab rate to bill against yet.*
+*Figure 15 — A booking starts with its Group / Lab. Until one is picked (directly, or auto-filled from the project's PI), the "Assign People" and "Assign Facility Staff" dropdowns stay locked with a "Choose Group/Lab First" hint — and the cost breakdown has no lab rate to bill against yet.*
 
 <img src="docs/screenshots/34-booking-group-discount-revoke.png" width="420" alt="Booking modal showing the live cost breakdown with an applied group discount and its Revoke control">
 
@@ -125,6 +131,64 @@ A selection follows.
 <img src="docs/screenshots/36-project-costs-running-total.png" width="720" alt="Project Costs card listing each booking's subtotal, before-tax amount and total with a running project total">
 
 *Figure 17 — Project Costs: every booking's saved cost snapshot (subtotal → before tax → total) with a running total for the project.*
+
+**Retiring, archiving & safe deletes**
+
+<img src="docs/screenshots/42-retire-person.png" width="520" alt="Retire Person dialog listing every project, milestone and booking the person appears on and promising those records are kept">
+
+*Figure 18 — People are retired, not deleted. The dialog counts up exactly where they appear — project teams, milestones, bookings they attended, bookings they were billable staff on — and every one of those records is kept untouched. Retiring only labels them "(Retired)" and stops them being offered for new work. It can be undone.*
+
+<img src="docs/screenshots/41-archive-project.png" width="520" alt="Archive Project dialog listing the team, instruments, milestones, bookings and billing that are preserved">
+
+*Figure 19 — Projects are archived, not deleted. A project is the thread tying together who worked on it, which instruments ran, and what was charged — so archiving keeps the title, team, instruments, milestones, files, custom fields and every booking with its cost snapshot, and names the billing total it is preserving. It only leaves the active registry.*
+
+<img src="docs/screenshots/44-people-retired.png" width="720" alt="People directory showing a retired person badged Retired, revealed by the Show retired toggle">
+
+*Figure 20 — Retired and archived records are hidden from day-to-day lists behind a "Show retired / Show archived" toggle that appears only when there are any — then shown badged, muted, and offering **Restore**. They remain visible wherever they are part of a historical record: a booking still lists the retired staff member who ran it.*
+
+<img src="docs/screenshots/38-delete-milestone-confirm.png" width="520" alt="Delete Milestone confirmation with a red Cancel button and a quietly styled Delete button">
+
+*Figure 21 — On a destructive confirmation the red button is **Cancel**, not the destructive one. Colour is what the eye lands on first, and on a dialog that exists to prevent an accident, the safe way out is what deserves that attention. The destructive button stays plainly labelled ("Delete", "Retire", "Archive") but is styled quietly.*
+
+<img src="docs/screenshots/37-cancel-booking-admin.png" width="520" alt="Three-way cancellation dialog offering Keep Booking, Cancel and Waive Charge, or Cancel and Keep Charge">
+
+*Figure 22 — Bookings are cancelled, not deleted: the session stays logged with its line items and its instrument slot is freed for someone else. Whether the charge still counts toward Project Costs follows from when it was cancelled — dropped if it never started, kept if the slot was held. For a late cancellation, Admin Mode offers this three-way choice to waive it instead.*
+
+<img src="docs/screenshots/47-booking-cancelled-costs.png" width="720" alt="Project Costs card showing a cancelled booking badged as charged and still counted in the running total">
+
+*Figure 23 — Project Costs after a late cancellation where the charge was kept: the row is badged, and the running total still reflects it. A waived charge instead shows struck through and drops out of the total, so the figure always matches what is actually billed.*
+
+---
+
+## Booking a Session: Attendees vs. Facility Staff
+
+A booking has two separate people fields, and they mean different things. Getting them the right
+way round is what makes the billing and the reports come out right.
+
+**Assign People** — the researchers the session is *for*: the PI, the student, whoever is bringing
+the samples. They are recorded as attendees and are **never billed by the hour**. A booking starts
+by picking its **Group / Lab**, and this picker is scoped to that group, because at institute scale
+a dropdown listing every person in the building is unusable. So book under the group the *user*
+belongs to — that is also what determines which standing lab discount applies to the session.
+
+**Assign Facility Staff** — the core staff *running or supporting* the session. Their time is
+billable: each one bills their own hourly rate, for their own window inside the booking (leave the
+window blank and it bills the whole booking), with a 1-hour minimum, rounded up to whole hours.
+
+### How the app knows who is facility staff
+
+It doesn't infer it. A person appears in the **Assign Facility Staff** picker for exactly one
+reason: the **Facility Staff** box is ticked on their own record (People & Labs → edit a person),
+which is also where their hourly rate lives. Nothing else — not their Role, not their Lab/Group,
+not their Department — has any effect on it.
+
+That means you do **not** need a separate "STAFF" group to make staff assignable. Tick the box on
+each core staff member once, and from then on they are available on every booking regardless of
+which group the booking itself is under. On the People list, the **Facility Staff** column shows
+who is flagged, and the **Facility staff only** filter shows just them.
+
+Un-ticking the box takes someone out of the picker for *new* assignments but leaves every booking
+they have already worked — and the billing line behind it — completely intact.
 
 ---
 
@@ -144,6 +208,7 @@ Core-Facility-CRM/
 │   ├── db.js             # sql.js engine, schema, IndexedDB persistence, sample dataset & clear
 │   ├── ui.js             # Toasts, modals, theme switcher, icons, interactive tour engine
 │   ├── views.js          # Screen renderers (Dashboard, Projects, Detail, People, Instruments, Calendar, Settings)
+│   ├── reports.js        # Reports & Utilization screen (instrument hours, facility-staff time, project/group spend)
 │   ├── exports.js        # Multi-page PDF, DOCX, and XLSX export engines
 │   └── app.js            # Routing, startup welcome modal, action dispatcher, CRUD modal logic
 ├── libs/
@@ -154,6 +219,7 @@ Core-Facility-CRM/
 ├── docs/
 │   ├── index.html        # Hosted release-notes page (renders CHANGELOG.md live)
 │   ├── gallery.html      # Screenshot carousel (lists docs/screenshots/ live from GitHub)
+│   ├── manual/           # Hosted user manual (searchable, illustrated)
 │   └── screenshots/      # README screenshots (not required to run the app)
 ├── LICENSE               # MIT License
 └── README.md             # Documentation

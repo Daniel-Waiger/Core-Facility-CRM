@@ -12,23 +12,22 @@
     const now = today();
     const counts = {};
     for (const s of global.DB.vocabList('STATUS')) counts[s] = 0;
-    const stRows = global.DB.rows('SELECT status, COUNT(*) as n FROM projects GROUP BY status');
+    const stRows = global.DB.rows('SELECT status, COUNT(*) as n FROM projects WHERE is_archived=0 GROUP BY status');
     for (const r of stRows) counts[r.status] = r.n;
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     const active = counts['Active'] || 0;
 
-    const win = new Date(); win.setDate(win.getDate() + 30);
-    const winStr = win.toISOString().slice(0, 10);
+    const winStr = global.UI.todayPlusDays(30);
     const upcoming = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
-      WHERE m.due_date IS NOT NULL AND m.due_date <= ? AND m.status != 'done'
+      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date <= ? AND m.status != 'done'
       ORDER BY m.due_date ASC LIMIT 10`, [winStr]);
 
     const overdue = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
-      WHERE m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
+      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
       ORDER BY m.due_date ASC LIMIT 10`, [now]);
 
     return `
@@ -46,7 +45,7 @@
             <div class="row milestone-quick-row">
               <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
               <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
-              <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status">${m.status}</span>
+              <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
               <span class="mono small">${fmt(m.due_date)}</span>
             </div>`).join('') : emptyState('calendar', 'Nothing due soon', 'No pending milestones in the next 30 days.')}
         </div>
@@ -58,7 +57,7 @@
             <div class="row milestone-quick-row">
               <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
               <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
-              <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to mark done">overdue</span>
+              <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">overdue</span>
               <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
             </div>`).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
         </div>
@@ -67,7 +66,7 @@
   }
 
   /* ---------------- Projects list ---------------- */
-  let projectFilter = { query: '', status: '', priority: '', modality: '' };
+  let projectFilter = { query: '', status: '', priority: '', modality: '', showArchived: false };
   function setProjectFilter(f) {
     projectFilter = Object.assign(projectFilter, f);
     global.App.refresh();
@@ -81,11 +80,15 @@
              pe.name as pi_name
       FROM projects p
       LEFT JOIN people pe ON pe.id = p.pi_id
-      ORDER BY p.updated_at DESC`);
+      ORDER BY p.is_archived, p.updated_at DESC`);
+    const archivedCount = allProjects.filter((p) => p.is_archived).length;
 
     // Apply client-side filters
     const qLower = (projectFilter.query || '').trim().toLowerCase();
     const rows = allProjects.filter((p) => {
+      // Archived projects keep everything (team, instruments, bookings and their billing) but
+      // step out of the day-to-day registry until the toggle brings them back.
+      if (p.is_archived && !projectFilter.showArchived) return false;
       if (projectFilter.status && p.status !== projectFilter.status) return false;
       if (projectFilter.priority && p.priority !== projectFilter.priority) return false;
       if (projectFilter.modality && !(p.modality || '').includes(projectFilter.modality)) return false;
@@ -116,6 +119,7 @@
           ${C.MODALITY.map((m) => `<option value="${m}" ${projectFilter.modality === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
         <button class="btn btn-secondary" data-act="export-all-xlsx" title="Export all projects to one spreadsheet">${ic('file')} Export All</button>
+        ${archivedCount ? `<label class="retired-toggle" data-tooltip="Archived projects keep their team, instruments, bookings and billing"><input type="checkbox" id="proj-archived-filter" ${projectFilter.showArchived ? 'checked' : ''} /> Show archived (${archivedCount})</label>` : ''}
         <button class="btn btn-primary" data-act="new-project">${ic('plus')} New Project</button>
       </div>
     </div>
@@ -147,9 +151,9 @@
               const pct = total ? Math.round((done / total) * 100) : 0;
               const flags = (p.flags || '').split(',').filter(Boolean);
               return `
-              <tr class="row-link" data-goto="project" data-id="${p.id}">
+              <tr class="row-link ${p.is_archived ? 'row-retired' : ''}" data-goto="project" data-id="${p.id}">
                 <td>
-                  <div style="font-weight:600;font-size:14px;color:var(--text)">${esc(p.title)}</div>
+                  <div style="font-weight:600;font-size:14px;color:var(--text)">${esc(p.title)}${p.is_archived ? ' <span class="badge neutral" data-tooltip="Archived — every record kept, out of the active registry">Archived</span>' : ''}</div>
                   <div class="faint mono small">Code: ${esc(p.code)}</div>
                 </td>
                 <td>${statusBadge(p.status)}</td>
@@ -200,21 +204,21 @@
     if (!p) return emptyState('folder', 'Project not found', 'This project may have been deleted.');
 
     const ppl = global.DB.rows(`
-      SELECT pp.role, pe.id, pe.name, pe.type, pe.email
+      SELECT pp.role, pe.id, pe.name, pe.type, pe.email, pe.is_retired
       FROM project_people pp
       JOIN people pe ON pe.id = pp.person_id
       WHERE pp.project_id=?`, [id]);
 
     const inst = global.DB.rows(`
-      SELECT pi.instrument_id, i.name, i.kind, i.status
+      SELECT pi.instrument_id, i.name, i.kind, i.status, i.is_retired
       FROM project_instruments pi
       JOIN instruments i ON i.id = pi.instrument_id
       WHERE pi.project_id=?`, [id]);
 
     const ms = global.DB.rows(`
       SELECT m.*,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
       FROM milestones m
       WHERE m.project_id=?
       ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
@@ -248,9 +252,13 @@
           <button class="btn btn-secondary btn-sm" data-act="export-xlsx" title="Export Spreadsheet">${ic('file')} XLSX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-docx" title="Export Word Document">${ic('file')} DOCX</button>
           <button class="btn btn-secondary btn-sm" data-act="export-pdf" title="Export Formatted PDF">${ic('file')} PDF</button>
-          <button class="btn btn-danger btn-sm" data-act="delete-project" title="Delete Project">${ic('trash')} Delete</button>
+          ${p.is_archived
+            ? `<button class="btn btn-secondary btn-sm" data-act="restore-project" data-id="${p.id}" title="Restore to the active registry">${ic('rocket')} Restore</button>`
+            : `<button class="btn btn-secondary btn-sm" data-act="archive-project" title="Archive — keeps the team, instruments, bookings and billing">${ic('archive')} Archive</button>`}
         </div>
       </div>
+
+      ${p.is_archived ? `<div class="archived-banner mt-16">${ic('archive')} <span>This project is archived. Its team, instruments, milestones, bookings and billing are all kept — it's simply out of the active registry. Use <strong>Restore</strong> to bring it back.</span></div>` : ''}
 
       <!-- Quick Status Lifecycle Bar -->
       <div class="lifecycle-bar mt-16">
@@ -319,7 +327,7 @@
             <div class="person-card">
               <div class="avatar">${esc((r.name || '?')[0])}</div>
               <div class="grow">
-                <div style="font-weight:600">${esc(r.name)} <span class="badge neutral" style="font-size:10.5px">${esc(r.type)}</span></div>
+                <div style="font-weight:600">${esc(global.UI.retiredName(r.name, r.is_retired))} <span class="badge neutral" style="font-size:10.5px">${esc(r.type)}</span></div>
                 <div class="faint small">${r.role ? 'Role: ' + esc(r.role) + ' · ' : ''}${esc(r.email || '')}</div>
               </div>
               <button class="btn btn-ghost btn-sm" data-act="remove-project-person" data-id="${r.id}" title="Remove member">${ic('trash')}</button>
@@ -340,7 +348,7 @@
           ${inst.map((i) => `
             <div class="instrument-box">
               <div class="row">
-                <span class="font-medium grow">${esc(i.name)}</span>
+                <span class="font-medium grow">${esc(global.UI.retiredName(i.name, i.is_retired))}</span>
                 <span class="badge neutral">${esc(i.status)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="remove-project-instrument" data-id="${i.instrument_id}" title="Remove instrument">${ic('trash')}</button>
               </div>
@@ -367,7 +375,7 @@
     <div class="card mb-16">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Project Costs</span></div>
-        <span class="mono font-medium">${esc(costCur)}${mtgs.reduce((s, m) => s + (m.total_cost || 0), 0).toFixed(2)} total</span>
+        <span class="mono font-medium">${esc(costCur)}${mtgs.reduce((s, m) => s + ((m.is_cancelled && !m.billing_retained) ? 0 : (m.total_cost || 0)), 0).toFixed(2)} total</span>
       </div>
       <div class="card-body">
         ${mtgs.length ? `
@@ -375,15 +383,17 @@
           <table class="tbl">
             <thead><tr><th>Booking</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
             <tbody>
-              ${mtgs.map((m) => `
-                <tr>
-                  <td class="font-medium small">${esc(m.title)}</td>
+              ${mtgs.map((m) => {
+                const waived = m.is_cancelled && !m.billing_retained;
+                return `
+                <tr class="${m.is_cancelled ? 'row-retired' : ''}">
+                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled before it started — charge dropped' : 'Cancelled after its start time — charge stands'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>
-                  <td class="mono font-medium" style="text-align:right">${esc(costCur)}${(m.total_cost || 0).toFixed(2)}</td>
+                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(costCur)}${(m.total_cost || 0).toFixed(2)}</span>` : esc(costCur) + (m.total_cost || 0).toFixed(2)}</td>
                   <td style="text-align:right"><button class="btn btn-ghost btn-xs" data-act="edit-booking" data-id="${m.id}" title="View full cost breakdown">${ic('eye')}</button></td>
-                </tr>`).join('')}
+                </tr>`; }).join('')}
             </tbody>
           </table>
         </div>` : emptyState('tag', 'No bookings yet', 'Costs from instrument/staff bookings will appear here once you add one.')}
@@ -423,13 +433,15 @@
         </div>
         <div class="card-body">
           ${mtgs.length ? mtgs.map((m) => `
-            <div class="meeting-box mb-8">
+            <div class="meeting-box mb-8 ${m.is_cancelled ? 'row-retired' : ''}">
               <div class="row">
-                <span class="font-medium grow">${esc(m.title)}</span>
+                <span class="font-medium grow">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email attendees">${ic('mail')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
-                <button class="btn btn-ghost btn-sm" data-act="meeting-del" data-id="${m.id}" title="Delete meeting">${ic('trash')}</button>
+                ${m.is_cancelled
+                  ? `<button class="btn btn-ghost btn-sm" data-act="booking-reinstate" data-id="${m.id}" title="Reinstate — puts it back in the schedule">${ic('rocket')}</button>`
+                  : `<button class="btn btn-ghost btn-sm" data-act="meeting-cancel" data-id="${m.id}" title="Cancel — keeps the record, frees the slot">${ic('archive')}</button>`}
               </div>
               ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
               ${m.note ? `<div class="small muted mt-8 rte-content">${global.UI.noteHtml(m.note)}</div>` : ''}
@@ -447,7 +459,7 @@
     <div class="ms" data-ms-id="${m.id}">
       <div class="rail">
         <div class="node ${m.status === 'done' ? 'done' : isOverdue ? 'overdue' : m.status === 'in-progress' ? 'next' : ''} clickable"
-             data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status"></div>
+             data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status"></div>
         <div class="line"></div>
       </div>
       <div class="body">
@@ -455,7 +467,7 @@
           <span class="ttl">${esc(m.name)}</span>
           <div class="grow"></div>
           <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable"
-                data-act="toggle-ms-status" data-id="${m.id}" title="Click to cycle status">${m.status}</span>
+                data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
           ${isOverdue ? '<span class="badge danger">overdue</span>' : ''}
           <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}" title="Edit milestone">${ic('edit')}</button>
           <button class="btn btn-ghost btn-sm" data-act="ms-del" data-id="${m.id}" title="Delete milestone">${ic('trash')}</button>
@@ -474,7 +486,7 @@
   }
 
   /* ---------------- People ---------------- */
-  let peopleFilter = { query: '', type: '' };
+  let peopleFilter = { query: '', type: '', showRetired: false, staffOnly: false };
   function setPeopleFilter(f) {
     peopleFilter = Object.assign(peopleFilter, f);
     global.App.refresh();
@@ -485,10 +497,16 @@
       SELECT pe.*,
              (SELECT COUNT(*) FROM project_people pp WHERE pp.person_id = pe.id) as proj_count
       FROM people pe
-      ORDER BY pe.type, pe.name`);
+      ORDER BY pe.is_retired, pe.type, pe.name`);
+    const retiredCount = allRows.filter((r) => r.is_retired).length;
+    const staffCount = allRows.filter((r) => r.is_staff).length;
 
     const qLower = (peopleFilter.query || '').trim().toLowerCase();
     const rows = allRows.filter((r) => {
+      // Retired people are kept out of the everyday view but never deleted — the toggle in the
+      // filter bar brings them back into sight (it only appears once there are any).
+      if (r.is_retired && !peopleFilter.showRetired) return false;
+      if (peopleFilter.staffOnly && !r.is_staff) return false;
       if (peopleFilter.type && r.type !== peopleFilter.type) return false;
       if (qLower) {
         const textToSearch = `${r.name} ${r.type} ${r.organization || ''} ${r.department || ''} ${r.email || ''} ${r.note || ''}`.toLowerCase();
@@ -508,6 +526,8 @@
           <option value="">All Roles</option>
           ${C.PERSON_TYPES.map((t) => `<option value="${t}" ${peopleFilter.type === t ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
+        ${retiredCount ? `<label class="retired-toggle" data-tooltip="Retired people stay on every record they were ever part of"><input type="checkbox" id="people-retired-filter" ${peopleFilter.showRetired ? 'checked' : ''} /> Show retired (${retiredCount})</label>` : ''}
+        ${staffCount ? `<label class="retired-toggle" data-tooltip="Billable by the hour on bookings; set on the person's own record"><input type="checkbox" id="people-staff-filter" ${peopleFilter.staffOnly ? 'checked' : ''} /> Facility staff only (${staffCount})</label>` : ''}
         <button class="btn btn-primary" data-act="add-person" data-tooltip="Register a new researcher or staff">${ic('plus')} Add Person</button>
       </div>
     </div>
@@ -521,7 +541,7 @@
         <table class="tbl">
           <colgroup>
             <col style="width:15%"><col style="width:10%"><col style="width:15%"><col style="width:12%">
-            <col style="width:14%"><col style="width:10%"><col style="width:56px"><col style="width:60px">
+            <col style="width:14%"><col style="width:10%"><col style="width:56px"><col style="width:120px">
             <col style="width:78px"><col style="width:78px">
           </colgroup>
           <thead>
@@ -533,26 +553,28 @@
               <th>Email</th>
               <th>Notes</th>
               <th title="Active projects">Proj.</th>
-              <th title="Billable on instrument bookings">Staff</th>
+              <th title="Billable by the hour on bookings; set on the person's own record">Facility Staff</th>
               <th>Rate/hr</th>
               <th style="text-align:right">Actions</th>
             </tr>
           </thead>
           <tbody>
             ${rows.map((r) => `
-              <tr>
-                <td style="font-weight:600">${esc(r.name)}</td>
+              <tr class="${r.is_retired ? 'row-retired' : ''}">
+                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
                 <td><span class="badge neutral">${esc(r.type)}</span></td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td>${r.department ? `<span class="chip-sm" style="font-weight:600">${esc(r.department)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="muted small">${esc(r.email || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td><span class="badge primary" title="${r.proj_count} active project${r.proj_count === 1 ? '' : 's'}">${r.proj_count}</span></td>
-                <td>${r.is_staff ? `<span class="badge success" data-tooltip="Billable core staff">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
+                <td>${r.is_staff ? `<span class="badge success" data-tooltip="Facility Staff — billable by the hour on bookings">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="mono small">${r.is_staff ? esc(r.rate || 0) : '—'}</td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
-                  <button class="btn btn-ghost btn-xs" data-act="delete-person" data-id="${r.id}" title="Delete Person">${ic('trash')}</button>
+                  ${r.is_retired
+                    ? `<button class="btn btn-ghost btn-xs" data-act="restore-person" data-id="${r.id}" title="Restore — make available for new work again">${ic('rocket')}</button>`
+                    : `<button class="btn btn-ghost btn-xs" data-act="retire-person" data-id="${r.id}" title="Retire — keeps every record they appear on">${ic('archive')}</button>`}
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -562,7 +584,7 @@
   }
 
   /* ---------------- Instruments ---------------- */
-  let instrumentFilter = { query: '', status: '', kind: '' };
+  let instrumentFilter = { query: '', status: '', kind: '', showRetired: false };
   function setInstrumentFilter(f) {
     instrumentFilter = Object.assign(instrumentFilter, f);
     global.App.refresh();
@@ -573,10 +595,13 @@
       SELECT i.*,
              (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count
       FROM instruments i
-      ORDER BY i.name`);
+      ORDER BY i.is_retired, i.name`);
+    const retiredCount = allRows.filter((r) => r.is_retired).length;
 
     const qLower = (instrumentFilter.query || '').trim().toLowerCase();
     const rows = allRows.filter((r) => {
+      // Decommissioned instruments stay on every booking that used them; hidden here by default.
+      if (r.is_retired && !instrumentFilter.showRetired) return false;
       if (instrumentFilter.status && r.status !== instrumentFilter.status) return false;
       if (instrumentFilter.kind && r.kind !== instrumentFilter.kind) return false;
       if (qLower) {
@@ -601,6 +626,7 @@
           <option value="">All Modalities</option>
           ${C.MODALITY.map((m) => `<option value="${m}" ${instrumentFilter.kind === m ? 'selected' : ''}>${m}</option>`).join('')}
         </select>
+        ${retiredCount ? `<label class="retired-toggle" data-tooltip="Retired instruments stay on every booking they were used for"><input type="checkbox" id="inst-retired-filter" ${instrumentFilter.showRetired ? 'checked' : ''} /> Show retired (${retiredCount})</label>` : ''}
         <button class="btn btn-primary" data-act="add-instrument">${ic('plus')} Add Instrument</button>
       </div>
     </div>
@@ -619,8 +645,8 @@
           <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
-              <tr>
-                <td style="font-weight:600">${esc(r.name)}</td>
+              <tr class="${r.is_retired ? 'row-retired' : ''}">
+                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new bookings">Retired</span>' : ''}</td>
                 <td class="muted small">${esc(r.kind || '—')}</td>
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
                 <td class="faint small">${esc(r.location || '—')}</td>
@@ -630,7 +656,9 @@
                 <td><span class="badge neutral">${r.proj_count} projects</span></td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
-                  <button class="btn btn-ghost btn-xs" data-act="delete-instrument" data-id="${r.id}" title="Delete Instrument">${ic('trash')}</button>
+                  ${r.is_retired
+                    ? `<button class="btn btn-ghost btn-xs" data-act="restore-instrument" data-id="${r.id}" title="Restore — make available for new bookings again">${ic('rocket')}</button>`
+                    : `<button class="btn btn-ghost btn-xs" data-act="retire-instrument" data-id="${r.id}" title="Retire — keeps every booking it appears on">${ic('archive')}</button>`}
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -661,8 +689,8 @@
     const endDayOfWeek = (end.getDay() + 6) % 7;
     end.setDate(end.getDate() + (6 - endDayOfWeek));
 
-    const startStr = start.toISOString().slice(0, 10);
-    const endStr = end.toISOString().slice(0, 10);
+    const startStr = global.UI.ymd(start);
+    const endStr = global.UI.ymd(end);
 
     const ms = global.DB.rows(`
       SELECT m.id, m.due_date, m.name, m.status, p.id as project_id, p.title as project_title
@@ -692,6 +720,7 @@
         id: mt.id,
         name: mt.title,
         kind: 'mt',
+        cancelled: !!mt.is_cancelled,
         start_time: mt.start_time || '',
         end_time: mt.end_time || '',
         project_id: mt.project_id,
@@ -718,7 +747,12 @@
     const todayStr = today();
 
     while (cur <= end) {
-      const ds = cur.toISOString().slice(0, 10);
+      // Use local ymd(), not toISOString().slice(0,10): `cur` is a local-midnight Date, and at a
+      // UTC+ offset (e.g. Israel) toISOString() re-describes that instant in UTC, which falls on
+      // the PREVIOUS day — so the event lookup key, the "new booking" prefill date, and the
+      // tooltip would all be one day behind the visible day-of-month label. See UI.ymd's own
+      // comment in js/ui.js and GitHub issue #14.
+      const ds = global.UI.ymd(cur);
       const isToday = ds === todayStr;
       const inMonth = cur.getMonth() === sm;
       const evs = byDay[ds] || [];
@@ -732,7 +766,7 @@
         </div>
         <div class="cal-events">
           ${evs.map((e) => `
-            <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''}"
+            <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
                  data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
                  title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
               ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
@@ -765,7 +799,9 @@
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
     const folderStatus = global.App.autoBackupFolderStatus;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
+    const skipSingleInstrumentPrompt = UI.storage.getItem('skip-single-instrument-prompt') === '1';
     const orgs = global.DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization").map((r) => r.organization);
+    const renameOrgs = global.DB.listAllOrgNames(); // includes orgs that only show up in group_discounts/meetings.group_org
 
     return `
     <div class="card mb-16">
@@ -779,6 +815,16 @@
           <label class="row" style="cursor:pointer;gap:8px">
             <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
             <span class="small font-medium">Show on startup</span>
+          </label>
+        </div>
+        <div class="row mb-8">
+          <div class="grow">
+            <div style="font-weight:600">Single-Instrument Booking Prompt</div>
+            <div class="faint small">Ask whether to lock a booking to one instrument the first time you pick one for it. Turned off automatically if you tick "Don't ask me again" on that prompt.</div>
+          </div>
+          <label class="row" style="cursor:pointer;gap:8px">
+            <input type="checkbox" id="pref-single-instrument-prompt" ${!skipSingleInstrumentPrompt ? 'checked' : ''} onchange="UI.storage.setItem('skip-single-instrument-prompt', this.checked ? '0' : '1'); UI.toast('Preference updated');" />
+            <span class="small font-medium">Ask about single-instrument bookings</span>
           </label>
         </div>
       </div>
@@ -892,6 +938,23 @@
             <span class="faint small">%</span>
           </div>`).join('') : '<div class="faint small">No labs/organizations on record yet — add people with a Lab / Group / Company to set discounts for them.</div>'}
         ${orgs.length ? `<button class="btn btn-primary btn-sm mt-8" data-act="save-group-discounts">${ic('check')} Save Group Discounts</button>` : ''}
+        <div class="divider"></div>
+        <div style="font-weight:600" class="mb-8">Rename / Merge Lab</div>
+        <div class="faint small mb-8">Labs are free-text names, so a typo forks a duplicate with its own discount row and Reports line. Rename one everywhere at once — or merge it into an existing name if that name is already in use.</div>
+        ${renameOrgs.length ? `
+        <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="margin:0">
+            <label>Existing name</label>
+            <select class="input" id="rename-org-from" style="min-width:200px">
+              ${renameOrgs.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <label>New name</label>
+            <input class="input" id="rename-org-to" placeholder="e.g. Bio-Photonics Lab" style="min-width:200px" />
+          </div>
+          <button class="btn btn-primary btn-sm" data-act="rename-org">${ic('edit')} Rename</button>
+        </div>` : '<div class="faint small">No labs/organizations on record yet.</div>'}
         ` : ''}
       </div>
     </div>
