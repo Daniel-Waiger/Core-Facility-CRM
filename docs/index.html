@@ -136,9 +136,9 @@
 -->
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow">Release 1.4.0 · 05 Sep 2026</span>
+    <span class="eyebrow">Release 1.5.0 · 06 Sep 2026</span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">A facility's records are its memory: who ran a session, which scope it ran on, who was PI, what was charged. 1.3.8 made deleting those things ask first — but asking first is not the same as being safe, because the answer was still destruction. 1.4.0 changes the answer. People and instruments are <strong>retired</strong>, projects are <strong>archived</strong>, and nothing that has history behind it can be deleted at all. The object leaves the roster; the record of what it did stays.</p>
+    <p class="lede">A facility manager's two standing questions are how much each instrument actually gets used, and where their own time goes. 1.5.0 answers both with a <strong>Reports</strong> screen — instrument hours, facility-staff time per instrument, and spend per project and lab, over any date range. It also fixes a calendar bug that had been quietly showing bookings on the wrong day for everyone east of Greenwich.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="#changelog">Full changelog</a>
@@ -151,15 +151,14 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.4.0.</p>
+    <p class="section-sub">What changed in 1.5.0.</p>
     <div class="cards">
-      <div class="card"><div class="ic">🗄️</div><h3>Retire, don’t delete</h3><p>A person who leaves and an instrument that is decommissioned are retired. Every booking they were on, every milestone they owned, every project they served — all kept, exactly as recorded.</p></div>
-      <div class="card"><div class="ic">📁</div><h3>Projects are archived</h3><p>A project holds the thread between its team, its instruments and its billing. Archiving keeps the title and all of it, and only takes the project out of the active registry.</p></div>
-      <div class="card"><div class="ic">🧾</div><h3>Billing survives intact</h3><p>A cost snapshot is only auditable while the lines behind it exist. Retiring and archiving never touch a booking’s instruments, staff or totals.</p></div>
-      <div class="card"><div class="ic">🏷️</div><h3>Labelled, not hidden</h3><p>Retired and archived records read as <em>(Retired)</em> / <em>Archived</em> everywhere — lists, team cards, milestone assignees, booking badges and every export.</p></div>
-      <div class="card"><div class="ic">↩️</div><h3>Reversible</h3><p>Restore puts a record back on the active roster. Only something nothing references at all — a typo, a duplicate — can still be deleted outright.</p></div>
-      <div class="card"><div class="ic">📅</div><h3>Bookings are cancelled</h3><p>A cancelled session stays logged with its line items and frees its instrument slot. Whether the charge stands depends on whether it had already started.</p></div>
-      <div class="card"><div class="ic">🔴</div><h3>Red is now Cancel</h3><p>On a dialog that exists to prevent an accident, the safe way out gets the colour. The destructive button says exactly what it does — Delete, Retire, Archive — and is styled quietly.</p></div>
+      <div class="card"><div class="ic">📊</div><h3>Instrument utilisation</h3><p>Bookings, booked hours and billed revenue per instrument over any date range, with each instrument&rsquo;s share of total facility hours.</p></div>
+      <div class="card"><div class="ic">⏱️</div><h3>Where staff time goes</h3><p>Hours per facility-staff member, and a staff&nbsp;&times;&nbsp;instrument breakdown &mdash; so &ldquo;am I mostly helping users on one scope?&rdquo; has an answer.</p></div>
+      <div class="card"><div class="ic">🧮</div><h3>Worked hours and billed hours</h3><p>Reported separately, because billing rounds every staff line up to a whole hour. One number is workload, the other is the invoice.</p></div>
+      <div class="card"><div class="ic">🏫</div><h3>Per project and per lab</h3><p>Bookings, hours and cost grouped by project and by lab &mdash; including facility-wide sessions that belong to no project.</p></div>
+      <div class="card"><div class="ic">🗓️</div><h3>The calendar was a day out</h3><p>East of Greenwich, every cell was captioned with one date and filled with the previous day&rsquo;s bookings. Fixed, along with the click-to-book prefill it fed.</p></div>
+      <div class="card"><div class="ic">👥</div><h3>Facility Staff, spelled out</h3><p>One consistent name, and the forms now say what the flag does: tick it and the person becomes bookable, billable staff. Untick it and their past sessions stay intact.</p></div>
     </div>
   </div>
 </section>
@@ -168,6 +167,43 @@
   <div class="wrap">
     <h2>In detail</h2>
     <p class="section-sub">The changes worth a screenshot.</p>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Reports: how much the scopes get used, and where staff time goes <span class="tag">new</span></h3>
+        <p>Every booking already recorded which instrument was held, for how long, and which facility staff worked it. Nothing read that back in aggregate. <strong>Reports &amp; Utilization</strong> does: pick a date range and get booked hours and revenue per instrument, hours per staff member, a staff&nbsp;&times;&nbsp;instrument breakdown, and spend per project and per lab &mdash; exportable to XLSX.</p>
+        <p>Two numbers are deliberately kept apart. <strong>Hours worked</strong> is the real time; <strong>hours billed</strong> applies the 1-hour minimum and rounds up to whole hours, exactly as the booking calculator does. One is workload, the other is the invoice, and a facility needs both.</p>
+        <p>Cancelled bookings are handled the way the rest of the app already handles them: their hours drop out entirely, because a cancellation frees the slot and the instrument was never held &mdash; while their charge counts only if it was retained rather than waived. Both rules are printed under the tables they govern, so a total can always be reconciled against its rows. Retired staff, retired instruments and archived projects still appear; keeping them was the whole point.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/45-reports.png" alt="Reports and Utilization screen showing instrument utilisation, facility staff time, a staff-by-instrument matrix, and per-project and per-lab totals" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <figcaption>Instrument hours, staff time, and per-project spend over a chosen date range.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>The calendar was a day out, east of Greenwich <span class="tag">fixed</span></h3>
+        <p>A booking made on 9&nbsp;September showed up in the cell captioned 9, but opened as 8&nbsp;September. The edit form was right the whole time &mdash; it reads the stored date directly. The calendar was captioning each cell with the local day number while looking that cell&rsquo;s bookings up under a <em>UTC</em> date string, and at a UTC+ offset local midnight falls on the previous UTC day. Replaying the grid under Node, all 35 cells disagreed with their own caption at <code>Asia/Jerusalem</code> and <code>Europe/Paris</code>, and none did at <code>UTC</code> or <code>America/Los_Angeles</code> &mdash; which is why it took a user east of Greenwich to notice.</p>
+        <p>The same wrong date fed click-to-book, so clicking an empty cell opened a booking on the day before. The month&rsquo;s own query bounds were shifted too, quietly leaving the last day of the visible grid out of its results. All of it now goes through one local-date helper, and two further places that shared the bug &mdash; the dashboard&rsquo;s 30-day milestone window and a project&rsquo;s overdue flag &mdash; are fixed with it.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/46-calendar-date.png" alt="Calendar grid with a booking sitting in the cell matching its own date" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <figcaption>A booking now sits in the cell that carries its date.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Facility Staff, spelled out &mdash; and no longer able to vanish <span class="tag">changed</span></h3>
+        <p>A booking has two people fields on purpose: <strong>Assign People</strong> is the researchers the session is for, never billed and scoped to the booking&rsquo;s group; <strong>Assign Facility Staff</strong> is the core staff running it, billed by the hour. What the app never said out loud is how it decides who is which &mdash; a person appears in the staff picker for exactly one reason, the <strong>Facility Staff</strong> box on their own record. Not their role, not their group. Both forms now say so, the wording is consistent throughout (it used to alternate between &ldquo;Core Staff&rdquo; and &ldquo;Facility Staff&rdquo;), and the People list gains a Facility Staff column and filter. No separate staff group is needed to make staff assignable.</p>
+        <p>Writing that down surfaced a real bug. The staff picker only ever listed people <em>currently</em> flagged as staff, and saving a booking rebuilds its staff rows from whatever the form shows &mdash; so un-ticking the box on someone silently deleted them from every booking they had already worked, along with the billing line behind it, on that booking&rsquo;s next save. Reproduced in a browser: a re-save took the staff table from one row to none and a $190 line with it. The picker now keeps anyone already assigned, exactly as it already did for retired staff, while still not offering them for new work.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/47-facility-staff.png" alt="Person form showing the Facility Staff checkbox with help text explaining that it controls the booking staff picker and hourly billing" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <figcaption>The flag now explains itself, on the form where it is set.</figcaption>
+      </figure>
+    </div>
 
     <div class="feature">
       <div class="txt">
@@ -349,7 +385,7 @@
 
 <footer>
   <div class="wrap row">
-    <div>Core Facility Tracker · <span id="footer-version">v1.4.0</span> · Bioimaging Facility</div>
+    <div>Core Facility Tracker · <span id="footer-version">v1.5.0</span> · Bioimaging Facility</div>
     <div><a href="../index.html">Open the app</a> · <a href="#changelog">Changelog</a> · <a href="https://github.com/Daniel-Waiger/Core-Facility-CRM">Source</a></div>
   </div>
 </footer>

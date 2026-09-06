@@ -3,6 +3,29 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-09-06
+
+### Added
+- **A Reports & Utilization screen**, answering the two questions a core facility is actually asked: how much each instrument gets used, and where facility-staff time goes. Pick any date range (or This Month / This Year / All Time) and get four tables:
+  - **Instrument utilisation** — bookings, booked hours, billed revenue and each instrument's share of total facility hours.
+  - **Facility staff time** — sessions, hours actually worked, hours billed, and revenue per staff member. Worked and billed hours are reported separately because billing applies a 1-hour floor and rounds up to whole hours; one number is workload, the other is the invoice.
+  - **Staff × instrument** — for "am I mostly helping users on one scope?". **Sessions** counts bookings unsplit, which is the figure that actually answers the question. **Attributed hours** divides a booking's staff hours evenly across every instrument on it, purely so the column reconciles against the person's true total — multi-instrument bookings are usually parallel sample runs, so that split is a bookkeeping convenience, not a claim about where the time "really" went. Both rules are stated on the card.
+  - **Projects & groups** — bookings, hours and cost per project and per lab. A booking with no project is grouped as "Facility-wide".
+  Two rules are applied consistently and spelled out on screen: booked hours exclude cancelled bookings entirely (a cancellation releases the slot, so the instrument was never held), while revenue follows the same retained-charge rule as Project Costs. Retired people, retired instruments and archived projects still appear — that is the point of keeping them.
+- **XLSX export of the whole report**, including a Notes sheet carrying the date range and both of those rules, so an exported total can be reconciled against its rows. Screen and export are built from the same aggregation functions, so an exported figure cannot drift from the on-screen one.
+- `UI.ymd()` / `UI.todayPlusDays()` for local calendar dates, and `UI.timeToMinutes` / `UI.hoursBetween` / `UI.billableStaffHours` moved into `ui.js` so the Reports screen and the booking cost calculator count hours with one shared implementation rather than two copies.
+- A **"Facility staff only (N)"** filter on the People list, alongside the existing retired toggle.
+
+### Fixed
+- **The calendar showed bookings on the wrong day for anyone east of Greenwich.** A booking created on 9 September appeared in the cell captioned 9 but opened, correctly, as 8 September. The calendar built each day cell as a local-midnight date, then captioned it with the local day number while looking its bookings up under a **UTC** date string — and at a UTC+ offset local midnight falls on the previous UTC day. Replaying the cell loop under Node: at `Asia/Jerusalem` and `Europe/Paris` all 35 cells in the grid disagreed with their own caption; at `UTC` and `America/Los_Angeles` none did, which is why this went unreported for so long. The edit form had been right all along — it reads the stored date directly.
+  - The same wrong date was handed to click-to-book, so clicking an empty cell opened a new booking on the previous day, and the cell's tooltip named the previous day.
+  - The calendar's own query bounds carried the same shift, silently excluding the last day of the visible grid from its results.
+  - Two other places used the same conversion and are fixed with it: the dashboard's 30-day upcoming-milestone window (one day short) and a project's overdue-milestone flag (could fire a day early). `UI.today()` itself returned *yesterday* between local midnight and 02:00/03:00 at UTC+ offsets, affecting every caller.
+- **Un-ticking Facility Staff on a person silently deleted them from bookings they had already worked.** The booking form's staff picker only ever listed people currently flagged as Facility Staff, and saving a booking rebuilds its staff rows from whatever the form shows — so the next save of any booking that person was on destroyed their assignment *and* the billing line behind it. Confirmed end-to-end in a browser before and after the fix: pre-fix, a re-save took `meeting_staff` from one row to none, taking a $190 line with it. The picker now keeps anyone already assigned to the booking, exactly as it already did for retired staff, while still not offering them for new assignments.
+
+### Changed
+- **"Core Staff" is now "Facility Staff" everywhere**, and the forms say what the flag actually does. The person form explains that ticking it puts someone in the "Assign Facility Staff" picker and bills their hourly rate, and that researchers and lab members should be left unticked because they belong in "Assign People". Both booking modals carry a line distinguishing the two pickers and stating that only people ticked as Facility Staff appear in the staff one. The People list's column is labelled "Facility Staff" with a tooltip saying where the flag is set. No stored data changed — this is naming and help text only.
+
 ## [1.4.0] — 2026-09-05
 
 ### Changed

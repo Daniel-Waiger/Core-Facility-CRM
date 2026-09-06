@@ -153,6 +153,50 @@ A cancelled booking stops blocking its slot: `findBookingConflicts` filters on `
 booking starts holding its slot again. Project Costs sums `is_cancelled && !billing_retained`
 rows as 0, and the XLSX/DOCX/PDF exports carry the status so a total reconciles against its rows.
 
+### Dates are local calendar days, never UTC instants
+
+Every date a user picks or sees is a plain `'YYYY-MM-DD'` **local** calendar day, taken verbatim
+from an `<input type="date">` and stored verbatim in TEXT columns (`meetings.date`,
+`milestones.due_date`, …). No column holds a timestamp or an offset.
+
+So **never use `new Date(...).toISOString().slice(0, 10)` to produce one of those strings.** A
+`Date` is a single instant; `toISOString()` re-describes that instant in UTC, and at a UTC+ offset
+local midnight fell on the *previous* UTC day — so the conversion silently returns yesterday. Use
+`UI.ymd(date)` (local calendar fields) or `UI.today()` / `UI.todayPlusDays(n)`, which are built on
+it. Going the other way, `UI.fmtDate` appends `'T00:00:00'` (no `Z`) to force local parsing —
+that's deliberate, don't "simplify" it.
+
+This caused a real bug (issue #14, fixed in 1.5.0): the calendar labelled each cell with
+`cur.getDate()` (local) but keyed its events with `cur.toISOString()` (UTC), so east of Greenwich
+every cell was captioned with one day and filled with the previous day's bookings — while the edit
+form, reading the DB string directly, showed the truth. It was invisible at UTC and UTC−, so
+**test any date change under a UTC+ timezone** (`TZ='Asia/Jerusalem'`), not just locally. Full
+timestamps (`created_at`, backup filenames, `last-auto-backup-at`) are a different thing and
+legitimately use `toISOString()`.
+
+Booking durations are minute arithmetic on `'HH:MM'` strings on a single day — no `Date` objects
+involved. `UI.timeToMinutes`, `UI.hoursBetween` and `UI.billableStaffHours` (the 1-hour floor,
+rounding up) live in `ui.js` precisely so `app.js`'s cost calculator and `reports.js`'s
+aggregations count hours identically. Never fork a second copy: a report that disagrees with the
+booking modal about money is worse than no report.
+
+### Reports: aggregation lives in one place, screen and export both read it
+
+`js/reports.js` (`window.Reports`) owns the Reports & Utilization screen. Its aggregation
+functions are the single source for both the rendered tables and `Exports.exportReportsXlsx`, so an
+exported figure can never drift from the on-screen one. Two rules it encodes, both inherited from
+elsewhere in the app and both worth restating in any new aggregation:
+
+- **Occupancy excludes all cancelled bookings** (`is_cancelled = 1`) — a cancellation frees the
+  slot (see `findBookingConflicts`), so the instrument was never held.
+- **Money follows the Project Costs rule**: a row counts unless `is_cancelled && !billing_retained`.
+
+Two data-model traps: `meeting_staff.start_time = ''` means *the whole booking window*, not zero
+(so a naive `SUM` over those columns reports ~0), and `meetings.project_id` is nullable, so
+anything grouping by project needs a `LEFT JOIN` and a "Facility-wide" label or it silently drops
+rows. Retired people/instruments and archived projects **do** appear in reports — that's the point
+of keeping them — labelled via `UI.retiredName`.
+
 ### Confirmation dialogs: the red button is Cancel
 
 `UI.confirmModal(title, body, { danger, confirmText, cancelText })`. On a `danger` dialog the
@@ -178,5 +222,14 @@ without a hard refresh. This version string is **independent** from `window.APP_
 `js/consts.js`, which drives the "Version:" text shown in the app's own Settings screen — bump
 both, and add a `CHANGELOG.md` entry (this project's convention: one `## [X.Y.Z] — date` section
 per version, with `### Added`/`Changed`/`Fixed` subsections) matching whichever version
-`APP_VERSION` ends up at. `docs/index.html` (the hosted release-notes page) renders
-`CHANGELOG.md` live via `fetch`, so it never needs separate updates.
+`APP_VERSION` ends up at.
+
+`docs/index.html` (the hosted release-notes page) is **half live, half hand-written** — don't
+assume it updates itself. Its `## Full changelog` section and the `#footer-version` string are
+rendered from `CHANGELOG.md` via `fetch` at the bottom of the file, so those do look after
+themselves. But everything from the `<header class="hero">` through the `In detail` section —
+the `Release X.Y.Z · date` eyebrow, the hero lede, the `Highlights` cards and the `In detail`
+feature blocks — is hand-written per release and must be edited manually (there's a comment in
+the file saying so, just before the hero). `In detail` blocks reference `docs/screenshots/*.png`
+with an `onerror` handler that adds a `.pending` class, so a block may be written before its
+screenshot exists and will degrade gracefully until one is added.

@@ -254,7 +254,7 @@
     XLSX.utils.book_append_sheet(wb, ws2, 'Milestones');
 
     // Sheet 3: Team
-    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Core Staff', 'Rate/hr']];
+    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Facility Staff', 'Rate/hr']];
     d.ppl.forEach((pe) => {
       teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
@@ -351,7 +351,7 @@
     if (d.ppl.length) {
       d.ppl.forEach((pe) => {
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Core Staff, ' + (pe.rate || 0) + '/hr' : ''}` }));
+        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}` }));
       });
     } else {
       children.push(new Paragraph({ text: 'No team members assigned.' }));
@@ -511,7 +511,7 @@
       d.ppl.forEach((pe) => {
         checkPage(6);
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Core Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
+        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
         y += 5;
       });
     } else {
@@ -649,7 +649,7 @@
     XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
 
     // Sheet 3: People
-    const peopleRows = [['Name', 'Status', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Core Staff', 'Rate/hr']];
+    const peopleRows = [['Name', 'Status', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Facility Staff', 'Rate/hr']];
     DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate, is_retired FROM people ORDER BY is_retired, name').forEach((pe) => {
       peopleRows.push([pe.name, pe.is_retired ? 'Retired' : 'Active', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
@@ -683,7 +683,7 @@
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
     // computeBookingBOM in app.js at the time the booking was saved).
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Core Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              (SELECT GROUP_CONCAT(i.name, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
@@ -710,6 +710,96 @@
     UI.toast(`Exported ${projects.length} project${projects.length === 1 ? '' : 's'} to XLSX`);
   }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx };
+  /* ---------------- Reports & Utilization XLSX Export ---------------- */
+  /* Every row here comes from js/reports.js's own compute* functions — the exact same
+     aggregation the Reports screen renders from — so this file can never disagree with what the
+     screen shows for the same date range. See js/reports.js's file header for the full
+     cancellation-rule writeup; the short version is repeated in the Notes sheet below so an
+     exported file is self-explanatory without the app open next to it. */
+  function exportReportsXlsx(from, to) {
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    const Reports = global.Reports;
+    if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
+
+    const instr = Reports.computeInstrumentRows(from, to);
+    const staff = Reports.computeStaffRows(from, to);
+    const matrix = Reports.computeStaffInstrumentMatrix(from, to);
+    const proj = Reports.computeProjectRows(from, to);
+
+    const wb = XLSX.utils.book_new();
+    const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
+
+    // Sheet 1: Notes — the date range and both cancellation rules, spelled out, so the numbers
+    // in every other sheet can be reconciled without needing this code open alongside it.
+    const notes = [
+      ['FACILITY REPORTS & UTILIZATION EXPORT'],
+      [''],
+      ['Date range', rangeLabel],
+      ['Exported', new Date().toLocaleString()],
+      [''],
+      ['Occupancy rule (Bookings / Hours / Sessions columns)'],
+      ['A cancelled booking releases its slot — the instrument or staff time was never actually spent — so cancelled bookings are excluded entirely from these columns, regardless of whether the cancellation charge was retained.'],
+      [''],
+      ['Money rule (Revenue / Total Cost columns)'],
+      ["A booking's charge still counts unless it was BOTH cancelled AND the charge was waived. So a cancelled-but-charged booking still contributes revenue even though it contributes zero occupied hours — the facility got paid for a slot nobody used."],
+      [''],
+      ['Staff x Instrument attribution'],
+      ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total.'],
+      [''],
+      ['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']
+    ];
+    const wsNotes = XLSX.utils.aoa_to_sheet(notes);
+    wsNotes['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
+
+    // Sheet 2: Instrument utilisation
+    const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Billed Revenue', 'Share of Total Hours %']];
+    instr.rows.forEach((r) => {
+      instrRows.push([UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), round2(r.sharePct)]);
+    });
+    const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
+    wsInstr['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, wsInstr, 'Instrument Utilisation');
+
+    // Sheet 3: Facility staff time
+    const staffRows = [['Staff Member', 'Sessions', 'Raw Hours', 'Billed Hours', 'Staff Revenue']];
+    staff.rows.forEach((r) => {
+      staffRows.push([UI.retiredName(r.name, r.retired), r.sessions, round2(r.rawHours), round2(r.billHours), round2(r.revenue)]);
+    });
+    const wsStaff = XLSX.utils.aoa_to_sheet(staffRows);
+    wsStaff['!cols'] = [{ wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsStaff, 'Facility Staff Time');
+
+    // Sheet 4: Staff x instrument matrix — one row per non-empty (staff, instrument) pair rather
+    // than a wide grid, so the sheet reads cleanly regardless of how many instruments there are.
+    const matrixRows = [['Staff Member', 'Instrument', 'Sessions', 'Attributed Hours']];
+    const staffById = new Map(matrix.staffList.map((s) => [s.id, s]));
+    const instById = new Map(matrix.instrumentList.map((i) => [i.id, i]));
+    matrix.cells.forEach((cell) => {
+      const s = staffById.get(cell.personId), i = instById.get(cell.instrumentId);
+      matrixRows.push([UI.retiredName(s.name, s.retired), UI.retiredName(i.name, i.retired), cell.sessions, round2(cell.attributedHours)]);
+    });
+    const wsMatrix = XLSX.utils.aoa_to_sheet(matrixRows);
+    wsMatrix['!cols'] = [{ wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsMatrix, 'Staff x Instrument');
+
+    // Sheet 5: Projects & groups
+    const pgRows = [['Scope', 'Name', 'Bookings', 'Hours', 'Total Cost']];
+    proj.projects.forEach((r) => pgRows.push(['Project', r.label, r.bookings, round2(r.hours), round2(r.cost)]));
+    proj.groups.forEach((r) => pgRows.push(['Lab / Group', r.label, r.bookings, round2(r.hours), round2(r.cost)]));
+    const wsPg = XLSX.utils.aoa_to_sheet(pgRows);
+    wsPg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsPg, 'Projects & Groups');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
+    UI.toast('Exported Reports & Utilization to XLSX');
+  }
+  // Two-decimal rounding for exported hour/money figures — avoids floating-point noise (e.g.
+  // 1.9999999999998) showing up in a spreadsheet cell.
+  function round2(n) { return Math.round((n || 0) * 100) / 100; }
+
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, exportReportsXlsx };
 
 })(window);
