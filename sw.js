@@ -4,7 +4,7 @@
 
 // Bump this on any deploy that changes cached files, so clients pick up the new version
 // instead of serving a stale cache forever. Kept in step with the app version.
-const CACHE_VERSION = '1.5.3';
+const CACHE_VERSION = '1.5.4';
 const CACHE_NAME = 'core-facility-tracker-' + CACHE_VERSION;
 
 // Precache the app shell. Paths are relative to this file's own scope, so this works
@@ -22,14 +22,14 @@ const PRECACHE_URLS = [
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './css/app.css?v=1.5.3',
-  './js/consts.js?v=1.5.3',
-  './js/db.js?v=1.5.3',
-  './js/ui.js?v=1.5.3',
-  './js/views.js?v=1.5.3',
-  './js/reports.js?v=1.5.3',
-  './js/exports.js?v=1.5.3',
-  './js/app.js?v=1.5.3',
+  './css/app.css?v=1.5.4',
+  './js/consts.js?v=1.5.4',
+  './js/db.js?v=1.5.4',
+  './js/ui.js?v=1.5.4',
+  './js/views.js?v=1.5.4',
+  './js/reports.js?v=1.5.4',
+  './js/exports.js?v=1.5.4',
+  './js/app.js?v=1.5.4',
   './libs/sql-asm.js',
   './libs/xlsx.full.min.js',
   './libs/jspdf.umd.min.js',
@@ -72,6 +72,17 @@ self.addEventListener('activate', (event) => {
    take the fresh copy when the network is there, fall back to cache only when it isn't. That costs
    one request on load and is what makes an update actually arrive.
 
+   That fresh-copy fetch uses `cache: 'reload'` for the same reason the precache step above does:
+   GitHub Pages serves every page — this app's shell AND every docs/manual/*.html page, since this
+   worker's scope is the whole site — with `Cache-Control: max-age=600`. A plain `fetch(event.request)`
+   still consults the browser's own HTTP cache first and can silently return a response cached
+   before the last deploy, with no network round-trip at all, on anything that isn't an explicit
+   reload (a link click to an already-visited page, reopening a tab, going back/forward) — so
+   "network-first" without `reload` is, for up to 10 minutes after any deploy, actually
+   "cache-first" for exactly the requests this branch exists to keep fresh. This is what let the
+   manual's theme-toggle button vanish on ordinary navigation right after it shipped, reappearing
+   only on a hard refresh (which forces revalidation the way `reload` does here explicitly).
+
    Everything else is cache-first as before. Those URLs carry an explicit ?v=, so a given URL's
    content never changes — a cache hit is always correct, and it is what makes the app load
    instantly and work offline. */
@@ -86,7 +97,7 @@ self.addEventListener('fetch', (event) => {
 
   if (isShellRequest(event.request)) {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'reload' })
         .then((response) => {
           if (response && response.ok) {
             const copy = response.clone();
