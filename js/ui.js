@@ -472,7 +472,47 @@
     const dt = new Date(String(d).slice(0, 10) + 'T00:00:00');
     return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString();
   }
-  function today() { return new Date().toISOString().slice(0, 10); }
+  /* 'YYYY-MM-DD' for a Date's LOCAL calendar day.
+     Why not toISOString().slice(0,10)? A Date is a single instant, and toISOString() re-describes
+     that instant in UTC. Local midnight at a UTC+ offset (Israel is UTC+2/+3) happened while it
+     was still the PREVIOUS day in UTC, so toISOString() reports yesterday's date. Bookings are
+     stored as plain local 'YYYY-MM-DD' strings taken straight from <input type="date">, so every
+     Date -> date-string conversion in this app has to read the local calendar fields instead. */
+  function ymd(d) {
+    const dt = (d instanceof Date) ? d : new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0')
+      + '-' + String(dt.getDate()).padStart(2, '0');
+  }
+  function today() { return ymd(new Date()); }
+  // Today shifted by a whole number of days, as a local 'YYYY-MM-DD' string.
+  function todayPlusDays(n) {
+    const d = new Date();
+    d.setDate(d.getDate() + (Number(n) || 0));
+    return ymd(d);
+  }
+
+  /* ---------------- Booking time maths ----------------
+     Shared by the booking cost calculator (app.js) and the Reports screen (reports.js) so both
+     count hours the same way. Times are stored as plain 'HH:MM' strings on the same calendar day,
+     so this is minute arithmetic — no Date objects and no timezones involved. */
+  // "HH:MM" -> minutes since midnight, or null if not a valid time.
+  function timeToMinutes(hhmm) {
+    const mm = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+    return mm ? Number(mm[1]) * 60 + Number(mm[2]) : null;
+  }
+  // Hours between two "HH:MM" times as a decimal (9:00->11:30 is 2.5). Missing or non-positive
+  // spans count as 0 hours, so a booking with no times contributes nothing.
+  function hoursBetween(start, end) {
+    const a = timeToMinutes(start), b = timeToMinutes(end);
+    if (a == null || b == null || b <= a) return 0;
+    return (b - a) / 60;
+  }
+  // The 1-hour floor: any staff time above zero bills at least 1 hour, and anything past that
+  // rounds UP to the next whole hour. So 10 minutes bills as 1 hour and 65 minutes as 2 hours.
+  function billableStaffHours(rawHours) {
+    return rawHours > 0 ? Math.max(1, Math.ceil(rawHours)) : 0;
+  }
   /* A retired person/instrument keeps its real name in the database — the suffix is added at
      display time only, so historical records still read back exactly as they were entered. */
   function retiredName(name, isRetired) {
@@ -541,7 +581,12 @@
     sanitizeHtml,
     noteHtml,
     fmtDate,
+    ymd,
     today,
+    todayPlusDays,
+    timeToMinutes,
+    hoursBetween,
+    billableStaffHours,
     retiredName,
     isSafeUrl,
     detectOS,
