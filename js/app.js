@@ -231,13 +231,71 @@
     if (collapseBtn) collapseBtn.innerHTML = ic(isCollapsed ? 'expand' : 'collapse');
   }
 
-  /* ---------------- Routing ---------------- */
-  function route(name, id) {
+  /* ---------------- Routing ----------------
+     The URL hash is the single source of truth for "what screen is showing" so Back/forward
+     and reloads work: route() only ever computes a target hash and assigns it to
+     location.hash; a `hashchange` listener (installed once, in initRouting) is the one place
+     that actually parses a hash and renders. If the computed hash equals the current one
+     (e.g. re-clicking the nav item you're already on) assigning it wouldn't fire `hashchange`
+     at all, so route() calls applyRoute directly in that case — this is the only path that
+     renders without going through the listener, and it never touches location.hash. */
+  const HASH_ROUTES = ['dashboard', 'projects', 'people', 'instruments', 'calendar', 'reports', 'settings'];
+
+  function hashFor(name, id) {
+    if (name === 'project' && id) return '#/project/' + Number(id);
+    return HASH_ROUTES.includes(name) ? '#/' + name : '#/dashboard';
+  }
+
+  // Returns { name, id } for a recognized hash, or null if the hash doesn't match anything
+  // routable (empty, garbage, or a malformed project id) — callers fall back to a default.
+  function parseHash(hash) {
+    const parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
+    if (!parts.length) return null;
+    if (parts[0] === 'project') {
+      const id = Number(parts[1]);
+      return id ? { name: 'project', id } : null;
+    }
+    return HASH_ROUTES.includes(parts[0]) ? { name: parts[0], id: null } : null;
+  }
+
+  // `viaReplace`: use location.replace instead of assigning location.hash, so the navigation
+  // doesn't add a history entry — the guided tour passes this for its own step-to-step moves,
+  // since a Back press mid-tour should leave the tour rather than replaying its screens one by one.
+  function route(name, id, viaReplace) {
+    const target = hashFor(name, id);
+    if (location.hash === target) applyRoute(name, id);
+    else if (viaReplace) location.replace(target); // still triggers hashchange -> applyRoute
+    else location.hash = target;
+  }
+
+  function applyRoute(name, id) {
     ctx.route = name;
     ctx.project = id ? Number(id) : null;
     document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('active', n.dataset.nav === name));
     document.getElementById('page-title').innerHTML = TITLES[name] || 'Dashboard';
     renderView();
+  }
+
+  function onHashChange() {
+    const parsed = parseHash(location.hash);
+    if (!parsed) { location.replace('#/dashboard'); return; }
+    if (parsed.name === 'project' && !DB.row('SELECT id FROM projects WHERE id=?', [parsed.id])) {
+      location.replace('#/projects'); // stale/deleted project id — fall back, don't crash
+      return;
+    }
+    applyRoute(parsed.name, parsed.id);
+  }
+
+  // Called once at boot, after the shell/listeners exist. A valid incoming hash (deep link,
+  // reload, restored tab) renders that screen; anything else lands on the normal default.
+  function initRouting() {
+    window.addEventListener('hashchange', onHashChange);
+    const parsed = parseHash(location.hash);
+    if (parsed && (parsed.name !== 'project' || DB.row('SELECT id FROM projects WHERE id=?', [parsed.id]))) {
+      applyRoute(parsed.name, parsed.id);
+    } else {
+      route('dashboard');
+    }
   }
 
   function renderView() {
@@ -753,8 +811,8 @@
 
   async function finishBoot(status) {
     renderShell();
-    route('dashboard');
     wireGlobal();
+    initRouting();
 
     if (!status.persistent) showTemporarySessionBanner();
 

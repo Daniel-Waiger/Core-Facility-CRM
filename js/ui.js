@@ -260,7 +260,7 @@
     closeTourModals();
 
     if (step.route && global.App && global.App.route) {
-      global.App.route(step.route, step.projectId);
+      global.App.route(step.route, step.projectId, true);
       window.scrollTo(0, 0);                 // a fresh view starts at the top, not wherever we were
     }
     if (typeof step.action === 'function') {
