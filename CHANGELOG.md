@@ -3,7 +3,7 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.0] — 2026-09-07
 
 ### Added
 - **Grants table with pickers, costs, and exports (roadmap 2.1).** A new Settings card manages
