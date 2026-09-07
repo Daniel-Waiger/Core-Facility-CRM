@@ -6,6 +6,13 @@ This project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Grants table with pickers, costs, and exports (roadmap 2.1).** A new Settings card manages
+  Grants (name, number, note, an "Allowed Users" token picker backed by `grant_users`), pickable on
+  the Project and Booking modals via a shared `grant_id` selector. Grants are retired rather than
+  deleted once referenced (`DB.countGrantRefs`), and a Settings toggle chooses whether the app
+  displays a grant by name or number everywhere — resolved through one shared `DB.grantLabel`
+  helper (no denormalized grant-name column) so Project Detail, Project Costs, and the XLSX/DOCX/PDF
+  exports can never disagree.
 - **Live conflict feedback in the booking modal.** As instrument/staff selections and the
   date/start/end fields change, the modal now shows an as-you-type conflict advisory (or an
   all-clear line once start/end are set), reusing `findBookingConflicts` verbatim so it can never

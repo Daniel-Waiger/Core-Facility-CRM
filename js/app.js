@@ -927,6 +927,7 @@
       case 'save-cancellation-rules': return saveCancellationRules();
       case 'save-group-discounts': return saveGroupDiscounts();
       case 'rename-org': return renameOrgFromSettings();
+      case 'save-grant-display': return saveGrantDisplay();
       case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
       case 'disable-auto-backup-folder': return disableAutoBackupFolder();
       case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
@@ -964,6 +965,14 @@
       case 'duplicate-project': return duplicateProject(el.dataset.id || ctx.project);
       case 'archive-project': return archiveProject();
       case 'restore-project': return restoreProject(el.dataset.id);
+
+      // Grants CRUD (Settings)
+      case 'add-grant': return addGrant();
+      case 'g-save': return gSave();
+      case 'edit-grant': return editGrant(el.dataset.id);
+      case 'g-edit-save': return gEditSave(el.dataset.id);
+      case 'retire-grant': return retireGrant(el.dataset.id);
+      case 'restore-grant': return restoreGrant(el.dataset.id);
 
       // Clipboard
       case 'copy': return UI.copyToClipboard(el.dataset.copy, el.dataset.copyLabel || 'Copied to clipboard');
@@ -1094,9 +1103,10 @@
         </div>
 
 
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           ${vocabField({ category: 'MODALITY', id: 'np-modality', label: 'Modality / Technique', placeholder: '-- Select Modality --' })}
           ${vocabField({ category: 'FUNDING', id: 'np-funding', label: 'Funding Source', placeholder: '-- Select Funding --' })}
+          ${grantSelectField('np-grant', null)}
         </div>
         <div class="grid cols-2">
           ${vocabField({ category: 'SAMPLE', id: 'np-sample', label: 'Sample Type', placeholder: '-- Select Sample --' })}
@@ -1152,6 +1162,8 @@
     const modality = m.querySelector('#np-modality').value;
     const funding = m.querySelector('#np-funding').value;
     const sample = m.querySelector('#np-sample').value;
+    const grantVal = (m.querySelector('#np-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const flags = [...m.querySelectorAll('[data-flag].on')].map((c) => c.dataset.flag).join(',');
     const start = m.querySelector('#np-start').value || null;
     const end = m.querySelector('#np-end').value || null;
@@ -1160,9 +1172,9 @@
 
     try {
       DB.run(`
-        INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes]
+        INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes]
       );
     } catch (e) {
       UI.toast('Could not create project: ' + (e.message || 'unknown error'), 'error');
@@ -1213,9 +1225,10 @@
           </div>
           ${vocabField({ category: 'MODALITY', id: 'ep-modality', label: 'Modality / Technique', selected: p.modality, placeholder: '-- Select Modality --' })}
         </div>
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           ${vocabField({ category: 'FUNDING', id: 'ep-funding', label: 'Funding Source', selected: p.funding, placeholder: '-- Select Funding --' })}
           ${vocabField({ category: 'SAMPLE', id: 'ep-sample', label: 'Sample Type', selected: p.sample, placeholder: '-- Select Sample --' })}
+          ${grantSelectField('ep-grant', p.grant_id)}
         </div>
         <div class="field">
           <label>Risk / Status Flags</label>
@@ -1256,6 +1269,8 @@
     const modality = m.querySelector('#ep-modality').value;
     const funding = m.querySelector('#ep-funding').value;
     const sample = m.querySelector('#ep-sample').value;
+    const grantVal = (m.querySelector('#ep-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const flags = [...m.querySelectorAll('[data-flag].on')].map((c) => c.dataset.flag).join(',');
     const start = m.querySelector('#ep-start').value || null;
     const end = m.querySelector('#ep-end').value || null;
@@ -1265,9 +1280,9 @@
     try {
       DB.run(`
         UPDATE projects
-        SET title=?, code=?, status=?, priority=?, pi_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
+        SET title=?, code=?, status=?, priority=?, pi_id=?, grant_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
         WHERE id=?`,
-        [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes, id]
+        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes, id]
       );
     } catch (e) {
       UI.toast('Could not save project: ' + (e.message || 'unknown error'), 'error');
@@ -1683,11 +1698,13 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
-      // instrument_staff isn't counted in countPersonRefs (supervision is current assignment, not
-      // history — see db.js), so a person with zero "real" refs can still supervise an instrument.
-      // Cascade would catch this too, but the explicit delete is the belt-and-suspenders convention
-      // every other delete path here follows.
+      // instrument_staff/grant_users aren't counted in countPersonRefs (supervising an instrument
+      // or being an allowed user on a grant is a current assignment, not history — see db.js), so
+      // a person with zero "real" refs can still hold either. Cascade would catch this too, but
+      // the explicit delete is the belt-and-suspenders convention every other delete path here
+      // follows.
       DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
+      DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
       DB.run('DELETE FROM people WHERE id=?', [id]);
       UI.toast('Person deleted');
       refresh();
@@ -2655,7 +2672,7 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" /></div>
         </div>
-        <div class="grid cols-3">
+        <div class="grid cols-4">
           <div class="field">
             <label>Project (optional)</label>
             <select class="input" id="bk-project">
@@ -2663,6 +2680,7 @@
               ${allProjects.map((p) => `<option value="${p.id}" ${pid === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
             </select>
           </div>
+          ${grantSelectField('bk-grant', null)}
           ${groupSelectField('bk-group', '')}
           ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bk-category', label: 'Category', placeholder: '-- Select Category --' })}
         </div>
@@ -2698,6 +2716,8 @@
     const end = m.querySelector('#bk-end').value || '';
     const projectVal = m.querySelector('#bk-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#bk-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const groupOrg = (m.querySelector('#bk-group') || {}).value || '';
     const category = (m.querySelector('#bk-category') || {}).value || '';
     const note = readNote(m, 'bk-note');
@@ -2718,9 +2738,9 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
+    DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [projectId, grantId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
     const inserted = DB.row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
     if (mid) {
@@ -2755,7 +2775,7 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bke-start" value="${esc(mt.start_time || '')}" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bke-end" value="${esc(mt.end_time || '')}" /></div>
         </div>
-        <div class="grid cols-3">
+        <div class="grid cols-4">
           <div class="field">
             <label>Project (optional)</label>
             <select class="input" id="bke-project">
@@ -2763,6 +2783,7 @@
               ${allProjects.map((p) => `<option value="${p.id}" ${mt.project_id === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
             </select>
           </div>
+          ${grantSelectField('bke-grant', mt.grant_id)}
           ${groupSelectField('bke-group', mt.group_org || '')}
           ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bke-category', label: 'Category', selected: mt.category || '', placeholder: '-- Select Category --' })}
         </div>
@@ -2809,6 +2830,8 @@
     const end = m.querySelector('#bke-end').value || '';
     const projectVal = m.querySelector('#bke-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#bke-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const groupOrg = (m.querySelector('#bke-group') || {}).value || '';
     const category = (m.querySelector('#bke-category') || {}).value || '';
     const note = readNote(m, 'bke-note');
@@ -2829,9 +2852,9 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, attendees=?, note=?, actions=?,
+    DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
               discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, id]);
+      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
@@ -3344,6 +3367,185 @@
     if (result.merged) bits.push('discount merged');
     else if (result.discountMoved) bits.push('discount moved');
     UI.toast(`Renamed ${oldName} → ${newName}: ${bits.join(', ')}`);
+    refresh();
+  }
+
+  /* ---------------- Grants CRUD (Settings) ----------------
+     A grant is a name/number pair with an allowed-users join table (grant_users), pickable on
+     bookings and projects for billing reconciliation. Like people/instruments it is retired, not
+     deleted, once anything references it — see retireGrant below and DB.countGrantRefs. There is
+     deliberately no denormalized grant-name column anywhere (the Settings name/number display
+     toggle would make a frozen string wrong by design) — every display goes through DB.grantLabel,
+     the one place that resolves a grant to text, so app.js/views.js/exports.js can never disagree. */
+
+  // Allowed-users picker items: selectable = not retired (grants don't have an is_staff-style
+  // restriction — any active person can be an allowed user of a grant). `assignedIds` (the ids
+  // already in grant_users when editing) are unioned in so a since-retired allowed user still
+  // renders their badge and survives the next save, per CLAUDE.md's picker rule.
+  function grantUserItems(assignedIds) {
+    const extraIds = [...new Set((assignedIds || []).map(Number).filter((n) => Number.isFinite(n)))];
+    const extraClause = extraIds.length ? ` OR id IN (${extraIds.map(() => '?').join(',')})` : '';
+    const rows = DB.rows(
+      `SELECT id, name, type, organization, department, is_retired FROM people WHERE is_retired=0${extraClause} ORDER BY name`,
+      extraIds
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      retired: !!r.is_retired,
+      name: UI.retiredName(r.name, r.is_retired),
+      meta: [r.organization, r.department].filter(Boolean).join(' · ') || r.type || '',
+      tip: r.type || 'Person'
+    }));
+  }
+
+  // Grant <select> options for the plain (non-token) picker on bookings/projects: selectable =
+  // not retired OR already the value on the record being edited (`currentId`) — same rule as
+  // everywhere else, applied to a <select> instead of a token picker since a booking/project has
+  // at most one grant.
+  function grantSelectOptions(currentId) {
+    return DB.rows('SELECT id, name, number, is_retired FROM grants WHERE is_retired=0 OR id=? ORDER BY is_retired, name', [currentId || 0]);
+  }
+  function grantSelectField(id, selected) {
+    const opts = grantSelectOptions(selected);
+    return `<div class="field">
+      <label>Grant</label>
+      <select class="input" id="${id}">
+        <option value="">-- No Grant --</option>
+        ${opts.map((g) => `<option value="${g.id}" ${g.id === selected ? 'selected' : ''}>${esc(UI.retiredName(DB.grantLabel(g), g.is_retired))}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  function addGrant() {
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('tag')} Add Grant</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Grant Name *</label><input class="input" id="g-name" placeholder="e.g. CAR-T Immunology R01" /></div>
+        <div class="field"><label>Grant Number</label><input class="input" id="g-number" placeholder="e.g. NIH R01-AI154920" /></div>
+        <div class="field"><label>Note</label><input class="input" id="g-note" placeholder="Optional note" /></div>
+        ${tokenPickerField('grant-users', 'Allowed Users', '+ Add person…')}
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="g-save">Save Grant</button>
+      </div>`, (m) => {
+      mountTokenPicker(m, 'grant-users', grantUserItems());
+    });
+  }
+
+  function gSave() {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#g-name').value.trim();
+    if (!name) { UI.toast('Grant name required', 'error'); return; }
+    const number = m.querySelector('#g-number').value.trim();
+    const note = m.querySelector('#g-note').value.trim();
+    DB.run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', [name, number, note]);
+    const inserted = DB.row('SELECT last_insert_rowid() as id');
+    const gid = inserted ? inserted.id : null;
+    if (gid) {
+      readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [gid, pid]));
+    }
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Grant added');
+    refresh();
+  }
+
+  function editGrant(id) {
+    const g = DB.row('SELECT * FROM grants WHERE id=?', [id]);
+    if (!g) return;
+    const currentUsers = DB.rows('SELECT person_id FROM grant_users WHERE grant_id=?', [id]).map((r) => r.person_id);
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Grant</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Grant Name *</label><input class="input" id="ge-name" value="${esc(g.name)}" /></div>
+        <div class="field"><label>Grant Number</label><input class="input" id="ge-number" value="${esc(g.number || '')}" /></div>
+        <div class="field"><label>Note</label><input class="input" id="ge-note" value="${esc(g.note || '')}" /></div>
+        ${tokenPickerField('grant-users', 'Allowed Users', '+ Add person…')}
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="g-edit-save" data-id="${g.id}">Save Changes</button>
+      </div>`, (m) => {
+      mountTokenPicker(m, 'grant-users', grantUserItems(currentUsers));
+      m.querySelector('.token-picker[data-kind="grant-users"]')._setSelected(currentUsers);
+    });
+  }
+
+  function gEditSave(id) {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#ge-name').value.trim();
+    if (!name) { UI.toast('Grant name required', 'error'); return; }
+    const number = m.querySelector('#ge-number').value.trim();
+    const note = m.querySelector('#ge-note').value.trim();
+    DB.run('UPDATE grants SET name=?, number=?, note=? WHERE id=?', [name, number, note, id]);
+    // Rebuilt from the picker every save, same as every other join table here — an allowed user
+    // filtered out of the form (retired-but-assigned excepted, see grantUserItems) is dropped.
+    DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
+    readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [id, pid]));
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Grant updated');
+    refresh();
+  }
+
+  /* Same reasoning as retirePerson/retireInstrument above: a grant that billed real projects or
+     bookings must stay on those records for reconciliation, so it's retired rather than deleted
+     once anything references it. Zero references (a mistyped entry, nothing billed against it
+     yet) is the only case a real delete is offered. */
+  async function retireGrant(id) {
+    const g = DB.row('SELECT name FROM grants WHERE id=?', [id]);
+    if (!g) return;
+    const refs = DB.countGrantRefs(id);
+
+    if (!refs.total) {
+      const ok = await UI.confirmModal(
+        'Delete Grant',
+        `"${esc(g.name)}" isn't referenced by any project or booking, so there's no history to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      // Explicit cleanup even though refs.total===0 already implies no meetings/projects point at
+      // this grant — the same belt-and-suspenders convention every delete path here follows (see
+      // CLAUDE.md's cascading-deletes section), and grant_id on both tables carries no REFERENCES
+      // clause (matches the projects.pi_id precedent) so cascade wouldn't null it out anyway.
+      DB.run('UPDATE meetings SET grant_id=NULL WHERE grant_id=?', [id]);
+      DB.run('UPDATE projects SET grant_id=NULL WHERE grant_id=?', [id]);
+      DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
+      DB.run('DELETE FROM grants WHERE id=?', [id]);
+      UI.toast('Grant deleted');
+      refresh();
+      return;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const where = [];
+    if (refs.projects) where.push('billed on ' + plural(refs.projects, 'project'));
+    if (refs.bookings) where.push('billed on ' + plural(refs.bookings, 'booking'));
+
+    const ok = await UI.confirmModal(
+      'Retire Grant',
+      `"${esc(g.name)}" is ${where.join(', ')}. Those records are history and are kept exactly as they are — retiring only labels it "(Retired)" and stops it being offered for new work. Nothing is deleted, and you can restore it at any time.`,
+      { confirmText: 'Retire' }
+    );
+    if (!ok) return;
+    DB.setRetired('grants', id, true);
+    UI.toast(`${g.name} retired`);
+    refresh();
+  }
+
+  function restoreGrant(id) {
+    const g = DB.row('SELECT name FROM grants WHERE id=?', [id]);
+    if (!g) return;
+    DB.setRetired('grants', id, false);
+    UI.toast(`${g.name} restored`);
+    refresh();
+  }
+
+  function saveGrantDisplay() {
+    const el = document.getElementById('cfg-grant-display');
+    if (!el) return;
+    DB.setConfig('grant_display', el.value === 'number' ? 'number' : 'name');
+    UI.toast('Grant display setting saved');
     refresh();
   }
 

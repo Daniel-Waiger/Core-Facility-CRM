@@ -17,6 +17,7 @@
     flags TEXT DEFAULT '',
     tags TEXT DEFAULT '',
     pi_id INTEGER,
+    grant_id INTEGER,
     start_date TEXT,
     end_date TEXT,
     notes TEXT DEFAULT '',
@@ -39,6 +40,20 @@
     is_retired INTEGER DEFAULT 0,
     retired_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    number TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    is_retired INTEGER DEFAULT 0,
+    retired_at TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS grant_users (
+    grant_id INTEGER NOT NULL REFERENCES grants(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    PRIMARY KEY (grant_id, person_id)
   );
   CREATE TABLE IF NOT EXISTS instruments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +107,7 @@
   CREATE TABLE IF NOT EXISTS meetings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    grant_id INTEGER,
     title TEXT NOT NULL,
     date TEXT,
     start_time TEXT DEFAULT '',
@@ -304,6 +320,35 @@
     // Consult-type tag (sync / consult / training / assisted session, extensible via the vocab
     // table like every other dropdown) so Reports can count consults per instrument and period.
     try { db.exec("ALTER TABLE meetings ADD COLUMN category TEXT DEFAULT ''"); } catch (_) {}
+
+    // Grants: a name/number entity, pickable on bookings and projects, with an allowed-users join
+    // table — retired (not deleted) via the same is_retired pattern as people/instruments once
+    // anything references it (see countGrantRefs). meetings.grant_id/projects.grant_id carry NO
+    // REFERENCES clause, matching the projects.pi_id precedent — a nullable "soft" link that any
+    // grant delete path (see retireGrant in app.js) must null out explicitly rather than lean on a
+    // FK cascade. Runs at the end of migrate() — meetings.grant_id in particular must come after
+    // the meetings rebuild above, which copies an explicit (older) column list into a fresh table
+    // and would otherwise silently drop a column added before it ran.
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS grants (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          number TEXT DEFAULT '',
+          note TEXT DEFAULT '',
+          is_retired INTEGER DEFAULT 0,
+          retired_at TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS grant_users (
+          grant_id INTEGER NOT NULL REFERENCES grants(id) ON DELETE CASCADE,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          PRIMARY KEY (grant_id, person_id)
+        );
+      `);
+    } catch (_) {}
+    try { db.exec('ALTER TABLE meetings ADD COLUMN grant_id INTEGER'); } catch (_) {}
+    try { db.exec('ALTER TABLE projects ADD COLUMN grant_id INTEGER'); } catch (_) {}
   }
 
   async function boot() {
@@ -742,6 +787,38 @@
     parts.any = parts.lines + parts.attendees + (parts.total > 0 ? 1 : 0);
     return parts;
   }
+  /* How much of the app a grant touches: projects billed against it and bookings billed against
+     it (both via a nullable, REFERENCES-less grant_id column — see the migrate() comment for why).
+     Zero references means there's nothing to preserve, so retireGrant offers a real delete instead
+     of retirement, same rule as countPersonRefs/countInstrumentRefs/countProjectRefs above. */
+  function countGrantRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM projects WHERE grant_id=?) AS projects,
+      (SELECT COUNT(*) FROM meetings WHERE grant_id=?) AS bookings`, [id, id]) || {};
+    const parts = { projects: r.projects || 0, bookings: r.bookings || 0 };
+    parts.total = parts.projects + parts.bookings;
+    return parts;
+  }
+
+  /* The one place that resolves a grant to display text — honors the Settings name/number toggle
+     so every caller (app.js pickers, views.js's Project Costs card, exports.js's XLSX/DOCX/PDF
+     paths) agrees on what a grant "is called" without forking that logic per file. Accepts either
+     a grant id (looked up fresh) or an already-fetched row/object carrying at least {name, number}
+     — callers that already joined grants into their own query (to avoid an extra round-trip) pass
+     that row straight through. Falls back to whichever of name/number is present if the configured
+     one is blank, so a grant entered with only a number still displays as something. Does NOT
+     append "(Retired)" — that's UI.retiredName's job, same split as every other entity here. */
+  function grantLabel(grantOrId) {
+    if (grantOrId == null) return '';
+    let g = grantOrId;
+    if (typeof g !== 'object') {
+      g = row('SELECT id, name, number FROM grants WHERE id=?', [g]);
+    }
+    if (!g) return '';
+    const mode = getConfig('grant_display', 'name');
+    return mode === 'number' ? (g.number || g.name || '') : (g.name || g.number || '');
+  }
+
   /* retained: does this cancelled booking's cost still count toward Project Costs? A session
      cancelled after its start time was still time the facility held; one cancelled beforehand
      was not. Either way the booking itself stays logged. */
@@ -760,9 +837,9 @@
       run("UPDATE projects SET is_archived=0, archived_at='', updated_at=datetime('now') WHERE id=?", [id]);
     }
   }
-  // table is 'people' or 'instruments' — nothing else is retirable.
+  // table is 'people', 'instruments' or 'grants' — nothing else is retirable.
   function setRetired(table, id, retired) {
-    if (table !== 'people' && table !== 'instruments') return;
+    if (table !== 'people' && table !== 'instruments' && table !== 'grants') return;
     if (retired) {
       run(`UPDATE ${table} SET is_retired=1, retired_at=datetime('now') WHERE id=?`, [id]);
     } else {
@@ -842,6 +919,8 @@
       DELETE FROM meeting_instruments;
       DELETE FROM meeting_staff;
       DELETE FROM meetings;
+      DELETE FROM grant_users;
+      DELETE FROM grants;
       DELETE FROM files;
       DELETE FROM kv;
       DELETE FROM projects;
@@ -852,7 +931,7 @@
       // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
       // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
-      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv')");
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     markDirty();
   }
@@ -870,7 +949,7 @@
        spec.cancelled:   {retained} or omitted/null for a live booking. */
   function seedBooking(spec) {
     const {
-      projectId = null, title, date, start = '', end = '',
+      projectId = null, grantId = null, title, date, start = '', end = '',
       instruments = [], staff = [], peopleIds = [], groupOrg = '',
       note = '', actions = '', cancelled = null, category = ''
     } = spec;
@@ -908,11 +987,11 @@
       : '';
 
     const isCancelled = !!(cancelled && cancelled.cancelled !== false);
-    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions,
+    run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, note, actions,
           discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost,
           is_cancelled, cancelled_at, billing_retained, category)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
-      projectId, title, date, start, end, attendees, note, actions,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      projectId, grantId, title, date, start, end, attendees, note, actions,
       0, groupOrg, groupPct, bom.subtotal, bom.beforeTax, bom.total,
       isCancelled ? 1 : 0,
       // Full timestamp, not a calendar day — toISOString() is the right tool here (see CLAUDE.md).
@@ -981,15 +1060,39 @@
       run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [instrumentId, personId]);
     }
 
+    // 2c. Grants — name/number pairs matching each seed project's own `funding` text (the free-text
+    // field on the project itself), plus an allowed-users list (grant_users) so the grant picker's
+    // token picker has something real to show. Populating BOTH the grant_id references below AND
+    // grant_users here is the same denormalized/join-table drift class CLAUDE.md warns about for
+    // meetings.attendees — a grant with no grant_users would look assigned everywhere but pick
+    // nobody in its own edit modal.
+    const grantsData = [
+      ['CAR-T Immunology R01', 'NIH R01-AI154920', 'Elena Rostova lab — intravital CAR-T imaging'],
+      ['Synaptic Density Brain Grant', 'Brain Research Grant #8410', 'Marcus Thorne lab — STED synaptic screening'],
+      ['Islet Imaging State Grant', 'State Health Initiative #4401', 'Sarah Lin lab — lightsheet islet mapping']
+    ];
+    for (const g of grantsData) {
+      run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', g);
+    }
+    const grantUserPairs = [
+      [1, 1], [1, 4], // CAR-T R01 — Elena Rostova, Alex Chen
+      [2, 2], [2, 5], // Brain Research Grant — Marcus Thorne, Maya Patel
+      [3, 3]          // Islet Imaging State Grant — Sarah Lin
+    ];
+    for (const [grantId, personId] of grantUserPairs) {
+      run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [grantId, personId]);
+    }
+
     // 3. Projects
     // Project 1: Active
-    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       'Intravital Multi-Photon Imaging of CAR-T Cell Infiltration',
       'PRJ-2026-001',
       'Active',
       'High',
       1, // Dr. Elena Rostova
+      1, // CAR-T Immunology R01 (NIH R01-AI154920)
       'Multiphoton',
       'NIH R01-AI154920',
       'Transgenic murine lymph node (in vivo)',
@@ -1001,13 +1104,14 @@
     ]);
 
     // Project 2: Initiated
-    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       'Super-Resolution Mapping of Synaptic Density Compounds',
       'PRJ-2026-002',
       'Initiated',
       'Medium',
       2, // Prof. Marcus Thorne
+      2, // Synaptic Density Brain Grant (Brain Research Grant #8410)
       'Super-Resolution',
       'Brain Research Grant #8410',
       'Primary hippocampal cultures (96-well glass bottom)',
@@ -1019,13 +1123,14 @@
     ]);
 
     // Project 3: Completed
-    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       'Whole-Organ 3D Lightsheet Mapping of Pancreatic Islets',
       'PRJ-2025-088',
       'Completed',
       'Low',
       3, // Dr. Sarah Lin
+      3, // Islet Imaging State Grant (State Health Initiative #4401)
       'Lightsheet',
       'State Health Initiative #4401',
       'CUBIC-cleared murine pancreas',
@@ -1115,6 +1220,7 @@
     // overhead, 8% tax) still has to land on 490 / 546.25 / 589.95.
     seedBooking({
       projectId: 1,
+      grantId: 1, // CAR-T Immunology R01 — matches project 1's own grant
       title: 'Project Kickoff & Laser Alignment Review',
       date: day(-95), start: '09:00', end: '11:00',
       instruments: [{ id: 2 }],
@@ -1151,6 +1257,7 @@
     // split of one staff member's hours across more than one instrument.
     seedBooking({
       projectId: 2,
+      grantId: 2, // Synaptic Density Brain Grant — matches project 2's own grant
       title: 'Parallel Confocal Reference Imaging: STED vs. Standard Resolution Benchmarking',
       date: day(-45), start: '09:00', end: '13:00',
       instruments: [{ id: 1 }, { id: 4 }], // Leica SP8 FALCON + Nikon AX R Resonant, side by side
@@ -1166,6 +1273,7 @@
     // hour, and that per-unit cost is excluded from the discount base (see computeBookingBOM).
     seedBooking({
       projectId: 3,
+      grantId: 3, // Islet Imaging State Grant — matches project 3's own grant
       title: 'Cryo-EM Grid Screening for Islet Ultrastructure Micrographs',
       date: day(-100), start: '09:00', end: '12:00',
       instruments: [{ id: 5, amount: 8 }], // Glacios Cryo-TEM, $45/grid x 8 grids screened
@@ -1305,6 +1413,8 @@
     countPersonRefs,
     countInstrumentRefs,
     countProjectRefs,
+    countGrantRefs,
+    grantLabel,
     setProjectArchived,
     countBookingRefs,
     setBookingCancelled,
