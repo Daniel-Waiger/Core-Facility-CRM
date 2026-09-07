@@ -86,8 +86,12 @@ body {
 .sidebar.collapsed {
   width: 68px;
 }
+/* Stacked, because the logo and the expand toggle side by side don't fit a 68px rail — they
+   overflowed and were clipped by the sidebar's own overflow-x. */
 .sidebar.collapsed .brand {
-  padding: 18px 12px 14px;
+  padding: 14px 8px 12px;
+  flex-direction: column;
+  gap: 8px;
   justify-content: center;
 }
 .sidebar.collapsed .brand .name,
@@ -140,9 +144,10 @@ body {
 .brand .sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-collapse-btn {
   margin-left: auto; cursor: pointer; color: var(--text-muted);
-  border: none; background: transparent; padding: 4px; border-radius: 6px;
-  display: flex; align-items: center;
+  border: none; background: transparent; padding: 6px; border-radius: 6px;
+  display: flex; align-items: center; flex: 0 0 auto;
 }
+.sidebar-collapse-btn svg { width: 18px; height: 18px; }
 .sidebar-collapse-btn:hover { background: var(--surface-2); color: var(--text); }
 .sidebar.collapsed .sidebar-collapse-btn { margin-left: 0; }
 
@@ -235,6 +240,7 @@ body {
   white-space: nowrap;
 }
 .badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+.badge svg { width: 13px; height: 13px; }
 .badge.neutral { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
 .badge.primary { background: var(--primary-soft); color: var(--primary); border-color: transparent; }
 .badge.success { background: var(--success-soft); color: var(--success); border-color: transparent; }
@@ -629,6 +635,20 @@ textarea.input { resize: vertical; min-height: 74px; }
 .file-link-static svg { color: var(--text-muted); }
 .milestone-quick-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .milestone-quick-row:last-child { border-bottom: none; }
+/* The status pill, the date and any button keep their own width; the name/project block takes the
+   rest, and once that would leave it under ~12rem the row wraps and the block gets a line of its
+   own. Without this the row's items each shrank to min-content instead — the name and project
+   wrapped a word per line, and the date was pushed past the card's edge and clipped. */
+.milestone-quick-row { flex-wrap: wrap; }
+.milestone-quick-row > .grow { flex: 1 1 12rem; min-width: 0; }
+.milestone-quick-row > .badge,
+.milestone-quick-row > .btn,
+.milestone-quick-row > .mono { flex: 0 0 auto; }
+.milestone-quick-row > .mono { white-space: nowrap; }
+/* Status pill and date are one unit, so they wrap together and stay trailing rather than the date
+   breaking off onto a line of its own. */
+.ms-quick-meta { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
+.ms-quick-meta .mono { white-space: nowrap; }
 
 /* ---------- Timeline (Milestones) ---------- */
 .ms { display: grid; grid-template-columns: 22px 1fr; gap: 10px; }

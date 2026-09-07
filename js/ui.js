@@ -81,7 +81,10 @@
       if (isSidebar) {
         btn.innerHTML = `${icon(isNextDark ? 'moon' : 'sun')}<span class="lbl">${isNextDark ? 'Dark Mode' : 'Light Mode'}</span>`;
         btn.setAttribute('title', `Switch to ${isNextDark ? 'Dark' : 'Light'} Mode`);
-        btn.setAttribute('data-tooltip', `Switch to ${isNextDark ? 'Dark' : 'Light'} Mode`);
+        // Sidebar controls use the native `title` tooltip only: the styled [data-tooltip] one is
+        // positioned above its element, which in this tightly stacked rail lands on the control
+        // above it. Cleared here because this button's tooltip text is rebuilt on every toggle.
+        btn.removeAttribute('data-tooltip');
       } else {
         btn.innerHTML = `${icon(isNextDark ? 'moon' : 'sun')} ${isNextDark ? 'Dark Mode' : 'Light Mode'}`;
         btn.setAttribute('title', `Switch to ${isNextDark ? 'Dark' : 'Light'} Mode`);
@@ -422,7 +425,7 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     check: '<path d="M20 6L9 17l-5-5"/>',
     'check-circle': '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
-    alert: '<path d="M12 22v-6M12 16V8M5 12h14"/>',
+    alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     x: '<path d="M18 6L6 18M6 6l12 12"/>',
     file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
     'file-plus': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>',
@@ -452,8 +455,13 @@
     archive: '<rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/>',
     book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/>'
   };
+  /* The width/height attributes are a floor, not a design choice: an inline <svg> carrying only a
+     viewBox has no natural size, so in any context without a `… svg { width; height }` CSS rule it
+     lays out at 0×0 and the icon is simply invisible (this is why the sidebar's collapse button
+     looked absent and the People table's "facility staff" ticks were empty pills). Presentation
+     attributes lose to every CSS rule, so each context that sizes its own icons still wins. */
   function icon(name) {
-    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
+    return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
   }
 
   /* ---------------- Autosave indicator ---------------- */
