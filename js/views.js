@@ -43,10 +43,14 @@
         <div class="card-body">
           ${upcoming.length ? upcoming.map((m) => `
             <div class="row milestone-quick-row">
-              <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
-              <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
-              <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
-              <span class="mono small">${fmt(m.due_date)}</span>
+              <div class="grow row-link" data-goto="project" data-id="${m.project_id}">
+                <div class="font-medium">${esc(m.name)}</div>
+                <div class="faint small">${esc(m.project_title)}</div>
+              </div>
+              <span class="ms-quick-meta">
+                <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
+                <span class="mono small">${fmt(m.due_date)}</span>
+              </span>
             </div>`).join('') : emptyState('calendar', 'Nothing due soon', 'No pending milestones in the next 30 days.')}
         </div>
       </div>
@@ -55,10 +59,14 @@
         <div class="card-body">
           ${overdue.length ? overdue.map((m) => `
             <div class="row milestone-quick-row">
-              <span class="grow font-medium row-link" data-goto="project" data-id="${m.project_id}">${esc(m.name)}</span>
-              <span class="faint small row-link" data-goto="project" data-id="${m.project_id}">${esc(m.project_title)}</span>
-              <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">overdue</span>
-              <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
+              <div class="grow row-link" data-goto="project" data-id="${m.project_id}">
+                <div class="font-medium">${esc(m.name)}</div>
+                <div class="faint small">${esc(m.project_title)}</div>
+              </div>
+              <span class="ms-quick-meta">
+                <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">overdue</span>
+                <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
+              </span>
             </div>`).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
         </div>
       </div>

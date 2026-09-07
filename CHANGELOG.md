@@ -3,6 +3,29 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.7] — 2026-09-07
+
+### Fixed
+- **The sidebar's collapse button was invisible on every screen** — the button, its click target
+  and its tooltip were all there, but its icon rendered at 0×0, so there was nothing to see or
+  aim at. An inline `<svg>` carrying only a `viewBox` has no natural size, and this one sat in one
+  of the few places with no `… svg { width; height }` rule of its own. `UI.icon()` now emits a
+  default `width`/`height`, which every context that sizes its own icons still overrides, so no
+  icon can silently render at nothing again. The same bug was hiding the green "facility staff"
+  ticks on the People table — those pills were empty.
+- **Collapsing the sidebar no longer clips the logo and the expand button.** Side by side they
+  don't fit a 68px rail, and the overflow was cut off by the sidebar itself; they're now stacked.
+- **The dashboard's milestone feeds no longer wrap a word per line or push the due date outside
+  the card.** The name, project, status pill and date were four flex items sharing one line, each
+  squeezed to its narrowest, and the date was clipped by the card's edge (the row needed 315px in
+  a 274px card). The name and project now stack as a title and subtitle, the pill and date stay
+  together as a unit, and the row wraps rather than squeezing.
+- **"Overdue milestones" showed a `+` icon.** The `alert` icon's path drew a vertical line and a
+  horizontal line — a plus sign. It's now a warning triangle.
+- **Sidebar footer tooltips no longer render on top of the button above them** (the last of the
+  overlap fixed for the nav items in 1.5.4): "Switch to Light Mode" appeared over *Tour*. The
+  footer controls now use the same native tooltips the nav items were moved to.
+
 ## [1.5.6] — 2026-09-07
 
 ### Fixed
