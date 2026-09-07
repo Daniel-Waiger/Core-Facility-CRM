@@ -604,17 +604,21 @@
     UI.toast('Exported formatted PDF report');
   }
 
-  /* ---------------- Facility-wide XLSX Export (all projects) ---------------- */
-  function exportAllXlsx() {
+  /* ---------------- Facility-wide XLSX Export (all projects) ----------------
+     buildAllXlsxBlob() does the actual workbook construction and returns the Blob; exportAllXlsx()
+     is the user-initiated entry point (build + prompt-download). The silent periodic auto-backup
+     (app.js's performBackupDownload) calls buildAllXlsxBlob() directly so it never fires an
+     unprompted browser download. */
+  function buildAllXlsxBlob() {
     const XLSX = global.XLSX;
-    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    if (!XLSX) return null;
 
     const projects = DB.rows(`
       SELECT p.*, pe.name as pi_name, pe.email as pi_email
       FROM projects p LEFT JOIN people pe ON pe.id = p.pi_id
       ORDER BY p.updated_at DESC`);
 
-    if (!projects.length) { UI.toast('No projects to export', 'error'); return; }
+    if (!projects.length) return null;
 
     const wb = XLSX.utils.book_new();
 
@@ -713,8 +717,15 @@
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);
-    UI.toast(`Exported ${projects.length} project${projects.length === 1 ? '' : 's'} to XLSX`);
+    return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
+  }
+
+  function exportAllXlsx() {
+    if (!global.XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    const built = buildAllXlsxBlob();
+    if (!built) { UI.toast('No projects to export', 'error'); return; }
+    blobDownload(built.blob, `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    UI.toast(`Exported ${built.count} project${built.count === 1 ? '' : 's'} to XLSX`);
   }
 
   /* ---------------- Reports & Utilization XLSX Export ---------------- */
@@ -819,6 +830,6 @@
   // 1.9999999999998) showing up in a spreadsheet cell.
   function round2(n) { return Math.round((n || 0) * 100) / 100; }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, exportReportsXlsx };
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx };
 
 })(window);

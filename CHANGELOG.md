@@ -26,6 +26,12 @@ This project uses [Semantic Versioning](https://semver.org/).
   Utilization gains a "Consults" card breaking down category = "consult" bookings by instrument
   and by calendar month, backed by `Reports.computeConsultRows` and mirrored in the Reports XLSX
   export so the two can never disagree.
+- **Periodic local exports into the silent backup folder (roadmap 3.7).** When an automatic backup
+  writes silently into the configured backup folder, it now also drops a companion facility-wide
+  XLSX export (projects, milestones, people, instruments, bookings & costs) into the same folder,
+  reusing `Exports.buildAllXlsxBlob` so the XLSX content can never drift from the manual "Export
+  All" report. Purely additive — any failure building or writing the XLSX is swallowed and never
+  falls back to an unprompted browser download; only the JSON backup is load-bearing.
 
 ## [1.5.7] — 2026-09-07
 

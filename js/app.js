@@ -538,8 +538,9 @@
 
   // Writes into the previously-granted "backups" subfolder with no dialog. Returns false
   // (never throws) if no folder is configured, permission has lapsed, or the write fails for
-  // any reason — callers should fall back to a normal download in that case.
-  async function tryWriteSilentBackup(filename, json) {
+  // any reason — callers should fall back to a normal download in that case. `contents` may be
+  // a string (the JSON backup) or a Blob (the XLSX export) — writable.write() accepts either.
+  async function tryWriteSilentBackup(filename, contents) {
     if (!supportsSilentBackupFolder()) return false;
     try {
       const stored = await DB.getAutoBackupDirHandle();
@@ -548,7 +549,7 @@
       if (perm !== 'granted') return false; // re-granting requires a user gesture; don't prompt silently
       const fileHandle = await stored.dirHandle.getFileHandle(filename, { create: true });
       const writable = await fileHandle.createWritable();
-      await writable.write(json);
+      await writable.write(contents);
       await writable.close();
       return true;
     } catch (e) {
@@ -593,12 +594,21 @@
     const data = await DB.buildBackup();
     const json = JSON.stringify(data);
     const namePart = kind === 'auto' ? 'autobackup' : kind === 'pre-restore' ? 'pre-restore-backup' : 'backup';
-    const filename = `core-facility-${namePart}-${new Date().toISOString().slice(0, 10)}.json`;
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const filename = `core-facility-${namePart}-${dateStamp}.json`;
 
     if (kind === 'auto') {
       const wroteSilently = await tryWriteSilentBackup(filename, json);
       UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
       if (wroteSilently) {
+        // The JSON backup landed silently — also drop a companion XLSX export into the same
+        // folder. This is purely additive: if it fails for any reason (library not loaded, no
+        // projects yet, write error) we still return here and never fall through to an
+        // unprompted browser download — only the JSON backup is load-bearing.
+        try {
+          const built = Exports && Exports.buildAllXlsxBlob ? Exports.buildAllXlsxBlob() : null;
+          if (built) await tryWriteSilentBackup(`core-facility-export-${dateStamp}.xlsx`, built.blob);
+        } catch (e) { console.error('silent auto XLSX export failed', e); }
         UI.toast('Automatic backup saved silently');
         return;
       }

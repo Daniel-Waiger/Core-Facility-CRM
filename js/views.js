@@ -891,10 +891,10 @@
               !folderStatus.supported
                 ? "Not supported in this browser (Chrome/Edge only). Without it, automatic backups use your browser's normal file download — if that shows a save dialog every time, disable \"Ask where to save each file before downloading\" in your browser's download settings for a fully silent experience."
                 : folderStatus.name && folderStatus.granted
-                ? `Automatic backups write silently into <strong>${esc(folderStatus.name)}</strong> — no download prompts.`
+                ? `Automatic backups write silently into <strong>${esc(folderStatus.name)}</strong> — a full JSON backup plus an XLSX export of every project, milestone, person, instrument and booking — no download prompts.`
                 : folderStatus.name && !folderStatus.granted
                 ? `Backup folder "${esc(folderStatus.name)}" was configured but needs permission again (this can happen after a browser restart).`
-                : 'Not set up. Pick the folder where this app is saved (or any folder) — a "backups" subfolder will be created inside it automatically, and every automatic backup writes there silently with no download dialog.'
+                : 'Not set up. Pick the folder where this app is saved (or any folder) — a "backups" subfolder will be created inside it automatically, and every automatic backup writes a JSON backup and an XLSX export there silently with no download dialog.'
             }</div>
           </div>
           <div class="row" style="gap:8px;flex-wrap:wrap">
