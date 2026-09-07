@@ -16,6 +16,10 @@ This project uses [Semantic Versioning](https://semver.org/).
   behavior (before = dropped, after = kept) so existing data behaves unchanged until configured.
   `cancelBooking`'s confirm-dialog copy is driven by the same settings so the rule described can
   never drift from the rule applied.
+- **Instrument → supervising staff mapping.** Instruments can now list one or more Facility Staff
+  as "Supervising Staff" via a token picker on the Add/Edit Instrument modals, backed by a new
+  many-to-many `instrument_staff` join table. Supervisors show on the Instruments table, are
+  searchable there, and appear in the XLSX instrument export.
 
 ## [1.5.7] — 2026-09-07
 

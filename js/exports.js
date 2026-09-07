@@ -658,12 +658,17 @@
     XLSX.utils.book_append_sheet(wb, wsPe, 'People');
 
     // Sheet 4: Instruments
-    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Cost', 'Unit']];
-    DB.rows('SELECT name, kind, status, location, note, cost, cost_unit, is_retired FROM instruments ORDER BY is_retired, name').forEach((i) => {
-      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.cost || 0, i.cost_unit || 'time']);
+    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Supervisor(s)', 'Cost', 'Unit']];
+    DB.rows(`
+      SELECT i.name, i.kind, i.status, i.location, i.note, i.cost, i.cost_unit, i.is_retired,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
+                WHERE ist.instrument_id = i.id) as supervisors
+      FROM instruments i ORDER BY i.is_retired, i.name`).forEach((i) => {
+      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.supervisors || '—', i.cost || 0, i.cost_unit || 'time']);
     });
     const wsI = XLSX.utils.aoa_to_sheet(instRows);
-    wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
+    wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 24 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)

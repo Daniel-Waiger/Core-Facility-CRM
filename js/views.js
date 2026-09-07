@@ -601,7 +601,10 @@
   function instruments() {
     const allRows = global.DB.rows(`
       SELECT i.*,
-             (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count
+             (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
+                WHERE ist.instrument_id = i.id) as supervisors
       FROM instruments i
       ORDER BY i.is_retired, i.name`);
     const retiredCount = allRows.filter((r) => r.is_retired).length;
@@ -613,7 +616,7 @@
       if (instrumentFilter.status && r.status !== instrumentFilter.status) return false;
       if (instrumentFilter.kind && r.kind !== instrumentFilter.kind) return false;
       if (qLower) {
-        const textToSearch = `${r.name} ${r.kind || ''} ${r.status || ''} ${r.location || ''} ${r.note || ''}`.toLowerCase();
+        const textToSearch = `${r.name} ${r.kind || ''} ${r.status || ''} ${r.location || ''} ${r.note || ''} ${r.supervisors || ''}`.toLowerCase();
         if (!textToSearch.includes(qLower)) return false;
       }
       return true;
@@ -647,10 +650,10 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:16%"><col style="width:12%"><col style="width:8%"><col style="width:10%">
-            <col style="width:17%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:78px">
+            <col style="width:14%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
+            <col style="width:13%"><col style="width:13%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
           </colgroup>
-          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
@@ -659,6 +662,7 @@
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
                 <td class="faint small">${esc(r.location || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
+                <td class="faint small">${esc(r.supervisors || '—')}</td>
                 <td class="mono small">${esc(r.cost || 0)}</td>
                 <td class="muted small">${esc(r.cost_unit || 'time')}</td>
                 <td><span class="badge neutral">${r.proj_count} projects</span></td>

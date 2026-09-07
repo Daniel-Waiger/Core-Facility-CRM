@@ -64,6 +64,11 @@
     instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
     PRIMARY KEY (project_id, instrument_id)
   );
+  CREATE TABLE IF NOT EXISTS instrument_staff (
+    instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    PRIMARY KEY (instrument_id, person_id)
+  );
   CREATE TABLE IF NOT EXISTS milestones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -241,6 +246,11 @@
         CREATE TABLE IF NOT EXISTS group_discounts (
           org TEXT PRIMARY KEY,
           percent REAL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS instrument_staff (
+          instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          PRIMARY KEY (instrument_id, person_id)
         );
       `);
     } catch (_) {}
@@ -658,6 +668,9 @@
      countPersonRefs/countInstrumentRefs report how much history a record carries. Zero
      references means there is nothing to preserve, so a genuine delete is safe and offered
      instead of retirement (otherwise a mistyped entry could never be tidied away). */
+  // Also deliberately excludes instrument_staff for the same reason as countInstrumentRefs below:
+  // supervising an instrument is a current assignment, not history. retirePerson's zero-ref
+  // delete branch cleans up instrument_staff rows explicitly before deleting the person.
   function countPersonRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_people WHERE person_id=?) AS projects,
@@ -672,6 +685,11 @@
     parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.pi;
     return parts;
   }
+  // Deliberately excludes instrument_staff: a supervisor assignment is current-state ("who looks
+  // after this instrument today"), not the historical fact this gate protects (a booking/milestone/
+  // project that actually used the instrument). retireInstrument's zero-ref delete branch still
+  // cleans up instrument_staff rows explicitly before deleting, so a supervised-but-otherwise-
+  // unused instrument can still be deleted without leaving an orphaned join row.
   function countInstrumentRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_instruments WHERE instrument_id=?) AS projects,
@@ -812,6 +830,7 @@
     db.exec(`
       DELETE FROM project_people;
       DELETE FROM project_instruments;
+      DELETE FROM instrument_staff;
       DELETE FROM milestone_owners;
       DELETE FROM milestone_instruments;
       DELETE FROM milestones;
@@ -942,6 +961,19 @@
     ];
     for (const i of instData) {
       run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)', i);
+    }
+
+    // 2b. Instrument supervisors (instrument_staff): David Kim (6) covers the four optical
+    // scopes (1-4), Priya Anand (7) is the Cryo-EM specialist supervising the Glacios (5), and
+    // Tom Alvarez (8) co-supervises the two highest-throughput/analysis-heavy scopes alongside
+    // David Kim — a real many-to-many (an instrument can have more than one supervisor).
+    const supervisorPairs = [
+      [1, 6], [2, 6], [3, 6], [4, 6], // David Kim — Leica SP8, Olympus FV3000, Zeiss Lightsheet, Nikon AX R
+      [5, 7],                         // Priya Anand — Glacios Cryo-TEM
+      [2, 8], [4, 8]                  // Tom Alvarez — Olympus FV3000 & Nikon AX R (analysis-heavy pipelines)
+    ];
+    for (const [instrumentId, personId] of supervisorPairs) {
+      run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [instrumentId, personId]);
     }
 
     // 3. Projects

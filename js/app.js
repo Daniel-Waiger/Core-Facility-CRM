@@ -1673,6 +1673,11 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
+      // instrument_staff isn't counted in countPersonRefs (supervision is current assignment, not
+      // history — see db.js), so a person with zero "real" refs can still supervise an instrument.
+      // Cascade would catch this too, but the explicit delete is the belt-and-suspenders convention
+      // every other delete path here follows.
+      DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
       DB.run('DELETE FROM people WHERE id=?', [id]);
       UI.toast('Person deleted');
       refresh();
@@ -1722,11 +1727,14 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="i-cost" placeholder="0" /></div>
           ${vocabField({ category: 'UNIT', id: 'i-cost-unit', label: 'Billed per', selected: 'time', placeholder: '-- Select Unit --' })}
         </div>
+        ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="i-save">Save Instrument</button>
-      </div>`);
+      </div>`, (m) => {
+      mountTokenPicker(m, 'supervisor', instSupervisorItems());
+    });
   }
 
   function iSave() {
@@ -1736,6 +1744,8 @@
     DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)',
       [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
        Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time']);
+    const iid = DB.q1('SELECT last_insert_rowid()')[0];
+    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument added');
     refresh();
@@ -1744,6 +1754,7 @@
   function editInstrument(id) {
     const inst = DB.row('SELECT * FROM instruments WHERE id=?', [id]);
     if (!inst) return;
+    const currentSupervisors = DB.rows('SELECT person_id FROM instrument_staff WHERE instrument_id=?', [id]).map((r) => r.person_id);
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Instrument</span></div>
@@ -1759,11 +1770,15 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="ie-cost" value="${inst.cost || 0}" /></div>
           ${vocabField({ category: 'UNIT', id: 'ie-cost-unit', label: 'Billed per', selected: inst.cost_unit || 'time', placeholder: '-- Select Unit --' })}
         </div>
+        ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="i-edit-save" data-id="${inst.id}">Save Changes</button>
-      </div>`);
+      </div>`, (m) => {
+      mountTokenPicker(m, 'supervisor', instSupervisorItems(currentSupervisors));
+      m.querySelector('.token-picker[data-kind="supervisor"]')._setSelected(currentSupervisors);
+    });
   }
 
   function iEditSave(id) {
@@ -1773,6 +1788,8 @@
     DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=? WHERE id=?',
       [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
        Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time', id]);
+    DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
     refresh();
@@ -1792,6 +1809,11 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
+      // instrument_staff isn't counted in countInstrumentRefs (supervision is current assignment,
+      // not history — see db.js), so an instrument with zero "real" refs can still have a
+      // supervisor. Cascade would catch this too, but the explicit delete is the
+      // belt-and-suspenders convention every other delete path here follows.
+      DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
       DB.run('DELETE FROM instruments WHERE id=?', [id]);
       UI.toast('Instrument deleted');
       refresh();
@@ -1975,6 +1997,27 @@
       org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
       meta: [r.organization, r.department].filter(Boolean).join(' · '),
       tip: (r.is_staff ? 'Facility Staff — ' : 'No longer Facility Staff — ') + fmtMoney(r.rate || 0) + '/hr'
+    }));
+  }
+
+  // Same shape/rule as bkStaffItems above, for the instrument "Supervising Staff" picker:
+  // selectable = Facility Staff OR already assigned as a supervisor here. A supervisor who has
+  // since retired (or been unticked as Facility Staff) keeps their badge on this instrument's
+  // picker but drops out of the "add new" dropdown — iEditSave rebuilds instrument_staff from
+  // whatever the picker renders, so losing the badge here would silently un-supervise them.
+  function instSupervisorItems(assignedIds) {
+    const extraIds = [...new Set((assignedIds || []).map(Number).filter((n) => Number.isFinite(n)))];
+    const extraClause = extraIds.length ? ` OR id IN (${extraIds.map(() => '?').join(',')})` : '';
+    const rows = DB.rows(
+      `SELECT id, name, organization, department, is_retired, is_staff FROM people WHERE is_staff=1${extraClause} ORDER BY name`,
+      extraIds
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      retired: !!r.is_retired || !r.is_staff,
+      name: UI.retiredName(r.name, r.is_retired),
+      meta: [r.organization, r.department].filter(Boolean).join(' · '),
+      tip: r.is_staff ? 'Facility Staff' : 'No longer Facility Staff'
     }));
   }
 
