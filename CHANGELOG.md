@@ -3,6 +3,26 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.5.6] — 2026-09-07
+
+### Fixed
+- **Tables now scroll sideways when they don't fit, instead of squeezing their columns until the
+  text breaks apart.** 1.5.5 fixed the narrow-screen switch but not the reason the switch didn't
+  help: every cell carried `overflow-wrap: anywhere`, which lets a word break at *any* character
+  and so drops each cell's *minimum* width to one character. A table whose minimum is one
+  character per column always fits its container, so it never overflowed and never scrolled — it
+  just shredded each heading into a vertical stack of letters (`R`/`A`/`T`/`E`/`H`/`R` where
+  "Rate/hr" belongs). Cells now use `overflow-wrap: break-word`, which still breaks a word too
+  long for its column as a last resort but leaves the minimum at the longest word, so a table
+  that can't fit overflows and its wrapper scrolls.
+- **Registry tables no longer force columns to a fixed share of the width regardless of what's in
+  them.** `table-layout: fixed` sized columns purely from the `<col>` percentages and ignored
+  content, so a column whose share was too small for its own text had nowhere to put it — the
+  Instruments Status column's 8% would have needed a 1600px-wide table to fit the word
+  "Maintenance", which is why that badge broke apart even on a full-width desktop window. The
+  `<col>` percentages are now hints that the browser honours where the content fits and widens
+  where it doesn't.
+
 ## [1.5.5] — 2026-09-06
 
 ### Fixed

@@ -113,17 +113,21 @@ body {
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; width: 100%; max-width: 100%; overflow-x: hidden; }
 .main-inner { max-width: 1440px; width: 100%; margin: 0 auto; padding: 24px 28px 64px; box-sizing: border-box; }
-/* Tables lay out within the available width (no side-scroll on desktop); the wrapper only
-   scrolls as a last resort on genuinely narrow screens. The narrow-screen check has to be a
-   container query, not a viewport media query: the sidebar eats a fixed chunk of the viewport
-   regardless of window width, so the space actually available to the table can be small even
-   when the window itself is well above any reasonable "mobile" breakpoint. */
-.tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; container-type: inline-size; }
-.tbl:has(> colgroup) { table-layout: fixed; }
-.tbl th, .tbl td { overflow-wrap: anywhere; word-break: break-word; }
+/* A table narrower than its content scrolls sideways in its wrapper rather than squeezing its
+   columns. Two rules make that work, and both are load-bearing:
+   - No `table-layout: fixed`. Fixed layout sizes columns purely from the `<col>` widths and
+     ignores content, so a column narrower than its own text has nowhere to put it. The `<col>`
+     percentages stay on as hints, which auto layout honours where the content fits and widens
+     where it doesn't.
+   - `overflow-wrap: break-word`, never `anywhere`/`word-break: break-word`. Only `break-word`
+     leaves a cell's *minimum* width at its longest word; `anywhere` lets a word break at any
+     character, which drops every cell's minimum to one character wide. A table whose minimum is
+     one character per column always "fits", so it never overflows and never scrolls — it just
+     shreds each heading into a vertical column of letters. */
+.tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tbl th, .tbl td { overflow-wrap: break-word; }
 .tbl td:last-child, .tbl th:last-child { white-space: nowrap; }
 .tbl td .badge, .tbl td .chip-sm { white-space: normal; }
-@container (max-width: 820px) { .tbl:has(> colgroup) { table-layout: auto; min-width: 720px; } }
 
 /* ---------- Sidebar Items ---------- */
 .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
