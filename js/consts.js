@@ -16,4 +16,7 @@ window.CONST = {
   // How an instrument's cost is priced: 'time' = price per hour (drives off booking start/end);
   // anything else = price per amount the user types in on the booking (e.g. per sample, per gram).
   UNIT: ['time', 'unit', 'weight', 'other'],
+  // Consult-type tag on a booking/meeting, so Reports can count consults per instrument/period.
+  // Facilities can add their own via the "+ Add New" vocab flow, same as every other list here.
+  BOOKING_CATEGORY: ['sync', 'consult', 'training', 'assisted session'],
 };

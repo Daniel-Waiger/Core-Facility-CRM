@@ -2645,7 +2645,7 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" /></div>
         </div>
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           <div class="field">
             <label>Project (optional)</label>
             <select class="input" id="bk-project">
@@ -2654,6 +2654,7 @@
             </select>
           </div>
           ${groupSelectField('bk-group', '')}
+          ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bk-category', label: 'Category', placeholder: '-- Select Category --' })}
         </div>
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
@@ -2688,6 +2689,7 @@
     const projectVal = m.querySelector('#bk-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
     const groupOrg = (m.querySelector('#bk-group') || {}).value || '';
+    const category = (m.querySelector('#bk-category') || {}).value || '';
     const note = readNote(m, 'bk-note');
     const actions = m.querySelector('#bk-act').value.trim();
 
@@ -2706,9 +2708,9 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total]);
+    DB.run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [projectId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
     const inserted = DB.row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
     if (mid) {
@@ -2743,7 +2745,7 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bke-start" value="${esc(mt.start_time || '')}" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bke-end" value="${esc(mt.end_time || '')}" /></div>
         </div>
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           <div class="field">
             <label>Project (optional)</label>
             <select class="input" id="bke-project">
@@ -2752,6 +2754,7 @@
             </select>
           </div>
           ${groupSelectField('bke-group', mt.group_org || '')}
+          ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bke-category', label: 'Category', selected: mt.category || '', placeholder: '-- Select Category --' })}
         </div>
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
@@ -2797,6 +2800,7 @@
     const projectVal = m.querySelector('#bke-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
     const groupOrg = (m.querySelector('#bke-group') || {}).value || '';
+    const category = (m.querySelector('#bke-category') || {}).value || '';
     const note = readNote(m, 'bke-note');
     const actions = m.querySelector('#bke-act').value.trim();
 
@@ -2816,8 +2820,8 @@
     const bom = m._bom.last;
 
     DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, attendees=?, note=?, actions=?,
-              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, id]);
+              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);

@@ -85,7 +85,7 @@
   function loadMeetingsInRange(from, to) {
     return DB.rows(`
       SELECT mt.id, mt.project_id, mt.date, mt.start_time, mt.end_time, mt.group_org,
-             mt.total_cost, mt.is_cancelled, mt.billing_retained,
+             mt.total_cost, mt.is_cancelled, mt.billing_retained, mt.category,
              p.code AS project_code, p.title AS project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       WHERE ${RANGE_SQL}
@@ -290,6 +290,46 @@
     return { projects, groups };
   }
 
+  /* ================================================================================
+     Card 5 — Consult-type breakdown (ROADMAP 3.1)
+     Counts meetings/bookings tagged category === 'consult', per instrument they touched and
+     per period (calendar month, from the meeting's own local 'YYYY-MM-DD' date string — no
+     Date object involved, so no UTC-shift risk). Mirrors the occupancy rule: a cancelled
+     consult never happened, so it's excluded regardless of whether its charge was retained.
+     A consult with no instrument line (a pure conversation) still counts toward the period
+     total but contributes no instrument row — nothing to attribute it to there. */
+  function computeConsultRows(from, to) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    const allMeetings = loadMeetingsInRange(from, to);
+    const consults = allMeetings.filter((m) => m.category === 'consult' && !m.is_cancelled);
+    const consultIds = new Set(consults.map((m) => m.id));
+
+    const byInstrument = new Map(); // instrument_id -> { id, name, retired, count }
+    if (consultIds.size) {
+      loadInstrumentLines(from, to).forEach((ln) => {
+        if (!consultIds.has(ln.meeting_id)) return;
+        let row = byInstrument.get(ln.instrument_id);
+        if (!row) {
+          row = { id: ln.instrument_id, name: ln.instrument_name, retired: !!ln.instrument_retired, count: 0 };
+          byInstrument.set(ln.instrument_id, row);
+        }
+        row.count += 1;
+      });
+    }
+    const instrumentRows = Array.from(byInstrument.values()).sort((a, b) => b.count - a.count);
+
+    const byPeriod = new Map(); // 'YYYY-MM' -> count
+    consults.forEach((m) => {
+      const period = (m.date || '').slice(0, 7) || 'Unknown';
+      byPeriod.set(period, (byPeriod.get(period) || 0) + 1);
+    });
+    const periodRows = Array.from(byPeriod.entries())
+      .map(([period, count]) => ({ period, count }))
+      .sort((a, b) => a.period.localeCompare(b.period));
+
+    return { instrumentRows, periodRows, totalConsults: consults.length };
+  }
+
   /* ---------------- Small render helpers ---------------- */
   function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
   // Same configured symbol the booking modal and Project Costs use (Settings -> Billing Rates);
@@ -310,6 +350,7 @@
     const staff = computeStaffRows(from, to);
     const matrix = computeStaffInstrumentMatrix(from, to);
     const proj = computeProjectRows(from, to);
+    const consult = computeConsultRows(from, to);
 
     return `
     <div class="card mb-16">
@@ -431,6 +472,45 @@
         </div>
       </div>
       <div class="faint small mt-8">Bookings/hours exclude cancelled bookings; Total Cost follows the same retained-charge rule as the cards above. A meeting with no project is grouped as "Facility-wide"; a meeting with no lab/group on file is omitted from the By Lab/Group table.</div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('tag')} Consults</span></div><span class="faint small mono">${consult.totalConsults} total</span></div>
+      <div class="grid cols-2">
+        <div>
+          <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">By Instrument</div>
+          ${!consult.instrumentRows.length ? global.Views.emptyState('cpu', 'No consults in this range', 'Tag a booking\'s Category as "consult" for it to show up here.') : `
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Instrument</th><th>Consults</th></tr></thead>
+              <tbody>
+                ${consult.instrumentRows.map((r) => `
+                  <tr class="${r.retired ? 'row-retired' : ''}">
+                    <td style="font-weight:600">${nameCell(r.name, r.retired)}</td>
+                    <td class="mono small">${r.count}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`}
+        </div>
+        <div>
+          <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">By Period</div>
+          ${!consult.periodRows.length ? global.Views.emptyState('calendar', 'No consults in this range', '') : `
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Month</th><th>Consults</th></tr></thead>
+              <tbody>
+                ${consult.periodRows.map((r) => `
+                  <tr>
+                    <td style="font-weight:600">${esc(r.period)}</td>
+                    <td class="mono small">${r.count}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`}
+        </div>
+      </div>
+      <div class="faint small mt-8">Counts bookings tagged Category = "consult", excluding cancelled bookings (a cancelled consult never happened). A consult with no instrument assigned counts toward the period total but has nothing to attribute an instrument row to.</div>
     </div>`;
   }
 
@@ -445,7 +525,8 @@
     computeInstrumentRows,
     computeStaffRows,
     computeStaffInstrumentMatrix,
-    computeProjectRows
+    computeProjectRows,
+    computeConsultRows
   };
 
 })(window);

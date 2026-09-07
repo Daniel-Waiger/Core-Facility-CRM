@@ -20,6 +20,12 @@ This project uses [Semantic Versioning](https://semver.org/).
   as "Supervising Staff" via a token picker on the Add/Edit Instrument modals, backed by a new
   many-to-many `instrument_staff` join table. Supervisors show on the Instruments table, are
   searchable there, and appear in the XLSX instrument export.
+- **Consult type tag on meetings (roadmap 3.1).** Bookings can now be tagged with a Category
+  (sync, consult, training, assisted session — extensible via the usual "+ Add New" vocab flow),
+  shown as a badge on the meeting list and included in the XLSX/DOCX/PDF exports. Reports &
+  Utilization gains a "Consults" card breaking down category = "consult" bookings by instrument
+  and by calendar month, backed by `Reports.computeConsultRows` and mirrored in the Reports XLSX
+  export so the two can never disagree.
 
 ## [1.5.7] — 2026-09-07
 

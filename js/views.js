@@ -443,7 +443,7 @@
           ${mtgs.length ? mtgs.map((m) => `
             <div class="meeting-box mb-8 ${m.is_cancelled ? 'row-retired' : ''}">
               <div class="row">
-                <span class="font-medium grow">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
+                <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email attendees">${ic('mail')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>

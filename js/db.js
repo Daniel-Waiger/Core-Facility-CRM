@@ -98,6 +98,7 @@
     end_time TEXT DEFAULT '',
     attendees TEXT DEFAULT '',
     link TEXT DEFAULT '',
+    category TEXT DEFAULT '',
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
     discount_pct REAL DEFAULT 0,
@@ -300,6 +301,9 @@
     try { db.exec("ALTER TABLE meetings ADD COLUMN is_cancelled INTEGER DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN cancelled_at TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN billing_retained INTEGER DEFAULT 0"); } catch (_) {}
+    // Consult-type tag (sync / consult / training / assisted session, extensible via the vocab
+    // table like every other dropdown) so Reports can count consults per instrument and period.
+    try { db.exec("ALTER TABLE meetings ADD COLUMN category TEXT DEFAULT ''"); } catch (_) {}
   }
 
   async function boot() {
@@ -868,7 +872,7 @@
     const {
       projectId = null, title, date, start = '', end = '',
       instruments = [], staff = [], peopleIds = [], groupOrg = '',
-      note = '', actions = '', cancelled = null
+      note = '', actions = '', cancelled = null, category = ''
     } = spec;
 
     const instRows = instruments.length
@@ -906,14 +910,15 @@
     const isCancelled = !!(cancelled && cancelled.cancelled !== false);
     run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions,
           discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost,
-          is_cancelled, cancelled_at, billing_retained)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+          is_cancelled, cancelled_at, billing_retained, category)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       projectId, title, date, start, end, attendees, note, actions,
       0, groupOrg, groupPct, bom.subtotal, bom.beforeTax, bom.total,
       isCancelled ? 1 : 0,
       // Full timestamp, not a calendar day — toISOString() is the right tool here (see CLAUDE.md).
       isCancelled ? new Date().toISOString() : '',
-      isCancelled && cancelled.retained ? 1 : 0
+      isCancelled && cancelled.retained ? 1 : 0,
+      category
     ]);
     const inserted = row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
@@ -1117,7 +1122,8 @@
       peopleIds: [1, 4, 6], // Elena Rostova, Alex Chen, David Kim
       groupOrg: 'Bio-Photonics Lab',
       note: 'Reviewed intravital laser power levels and live-animal heating stage protocol.',
-      actions: 'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.'
+      actions: 'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.',
+      category: 'sync'
     });
 
     // #2/#3 — realistic no-line-item consultations: plenty of bookings are just a conversation,
@@ -1128,7 +1134,8 @@
       date: day(-80), start: '13:00', end: '14:30',
       peopleIds: [4, 6], // Alex Chen, David Kim
       note: 'Observed minor fluorophore quenching in red channel. Switched to resonant line accumulation.',
-      actions: 'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.'
+      actions: 'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.',
+      category: 'consult'
     });
     seedBooking({
       projectId: 2,
@@ -1136,7 +1143,8 @@
       date: day(-70), start: '10:00', end: '11:30',
       peopleIds: [2, 5, 6], // Marcus Thorne, Maya Patel, David Kim
       note: 'Discussed depletion laser doughnut alignment and immersion oil selection for 96-well glass plates.',
-      actions: 'Maya to prepare test 24-well plate for PSF and resolution calibration next week.'
+      actions: 'Maya to prepare test 24-well plate for PSF and resolution calibration next week.',
+      category: 'consult'
     });
 
     // #4 — multi-instrument (parallel sample runs): the only booking exercising Reports' even
@@ -1150,7 +1158,8 @@
       peopleIds: [2, 5, 6], // Marcus Thorne, Maya Patel, David Kim
       groupOrg: 'Neural Dynamics Institute', // no standing discount — see setGroupDiscount above
       note: 'Ran matched fields on the Leica SP8 FALCON and Nikon AX R Resonant in parallel to benchmark STED resolution gains against confocal and resonant-scan baselines on the same synaptic marker set.',
-      actions: 'Maya to tabulate FWHM measurements across both systems for the STED validation section of the grant renewal.'
+      actions: 'Maya to tabulate FWHM measurements across both systems for the STED validation section of the grant renewal.',
+      category: 'assisted session'
     });
 
     // #5 — per-unit (non-'time') instrument charge: Glacios Cryo-TEM bills per grid, not per
@@ -1164,7 +1173,8 @@
       peopleIds: [3, 7], // Sarah Lin, Priya Anand
       groupOrg: 'Therapeutics & Onco-Therapy', // no standing discount
       note: 'Screened 8 vitrified grids from the CUBIC-cleared islet prep for ice thickness and particle distribution ahead of high-resolution acquisition.',
-      actions: 'Proceed to full data collection on the 3 grids with the most uniform ice; discard grids 4 and 6 for crystalline contamination.'
+      actions: 'Proceed to full data collection on the 3 grids with the most uniform ice; discard grids 4 and 6 for crystalline contamination.',
+      category: 'assisted session'
     });
 
     // #6 — facility-wide (project_id NULL) booking, and also the partial-staff-window example:
@@ -1177,7 +1187,8 @@
       staff: [{ id: 8, start: '10:00', end: '10:40' }], // Tom Alvarez, image analysis specialist
       peopleIds: [4, 5, 8], // Alex Chen, Maya Patel, Tom Alvarez
       note: 'General walk-in session covering Imaris surface reconstruction and STED deconvolution workflows for whichever project needed help that week.',
-      actions: 'Circulate the shared Imaris batch-processing macro to both labs.'
+      actions: 'Circulate the shared Imaris batch-processing macro to both labs.',
+      category: 'assisted session'
     });
 
     // #7 — cancelled BEFORE its start time: nothing was held, so the charge is dropped
@@ -1192,7 +1203,8 @@
       groupOrg: 'Neural Dynamics Institute',
       note: 'Requested to add a second resonant-confocal acquisition block for a backup screening plate batch.',
       actions: '',
-      cancelled: { cancelled: true, retained: false } // plate batch delayed in fixation; cancelled while the slot was still ahead of us
+      cancelled: { cancelled: true, retained: false }, // plate batch delayed in fixation; cancelled while the slot was still ahead of us
+      category: 'assisted session'
     });
 
     // #8 — cancelled AFTER its start time: the slot was held, so the charge stands
@@ -1207,7 +1219,8 @@
       groupOrg: 'Neural Dynamics Institute',
       note: 'Booked to redo the 775nm depletion doughnut alignment after an immersion oil swap introduced spherical aberration.',
       actions: '',
-      cancelled: { cancelled: true, retained: true } // failed a safety interlock check after the session had already started; facility held the slot so the charge stands
+      cancelled: { cancelled: true, retained: true }, // failed a safety interlock check after the session had already started; facility held the slot so the charge stands
+      category: 'assisted session'
     });
 
     // #9 — completes instrument coverage (Zeiss Lightsheet Z.1) and gives project 3 a second,
@@ -1221,7 +1234,8 @@
       peopleIds: [3, 6, 8], // Sarah Lin, David Kim, Tom Alvarez
       groupOrg: 'Therapeutics & Onco-Therapy',
       note: 'Re-ran two z-stacks that showed stitching artifacts and handed the corrected volumes to segmentation QC.',
-      actions: 'Tom to re-run the islet counting macro on the corrected volumes before the final report is regenerated.'
+      actions: 'Tom to re-run the islet counting macro on the corrected volumes before the final report is regenerated.',
+      category: 'assisted session'
     });
 
     // #10 — instrument-only booking (no staff line item): plenty of sessions are unstaffed
@@ -1234,7 +1248,8 @@
       peopleIds: [4], // Alex Chen
       groupOrg: 'Bio-Photonics Lab',
       note: 'Re-ran the multipoint time-lapse unattended overnight after last week’s run was cut short by a stage collision.',
-      actions: ''
+      actions: '',
+      category: 'assisted session'
     });
 
     // 9. Custom KV Metadata

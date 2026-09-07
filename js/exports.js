@@ -272,16 +272,16 @@
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
-    const mtRows = [['Meeting Title', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
+    const mtRows = [['Meeting Title', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
 
     // Sheet 6: Files
@@ -372,7 +372,8 @@
     if (d.mtgs.length) {
       d.mtgs.forEach((m) => {
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
+        const catStr = m.category ? ` [${m.category}]` : '';
+        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
@@ -543,7 +544,8 @@
         checkPage(14);
         pdf.setFont('helvetica', 'bold');
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}${bookingStatusSuffix(m)}`, margin, y);
+        const catStr = m.category ? ` [${m.category}]` : '';
+        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (m.attendees) {
@@ -672,17 +674,17 @@
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
-    const mtRows = [['Project Code', 'Project', 'Meeting', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title,
+      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.category || '—',
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
-    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings');
 
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
@@ -731,6 +733,7 @@
     const staff = Reports.computeStaffRows(from, to);
     const matrix = Reports.computeStaffInstrumentMatrix(from, to);
     const proj = Reports.computeProjectRows(from, to);
+    const consult = Reports.computeConsultRows(from, to);
 
     const wb = XLSX.utils.book_new();
     const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
@@ -796,6 +799,17 @@
     const wsPg = XLSX.utils.aoa_to_sheet(pgRows);
     wsPg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, wsPg, 'Projects & Groups');
+
+    // Sheet 6: Consults — bookings tagged Category = "consult", counted per instrument and per
+    // calendar-month period. Fed from the exact same Reports.computeConsultRows the screen
+    // renders from, so this sheet can never disagree with what's on screen.
+    const consultRows = [['Breakdown', 'Instrument / Month', 'Consults']];
+    consultRows.push(['Total', 'All', consult.totalConsults]);
+    consult.instrumentRows.forEach((r) => consultRows.push(['By Instrument', UI.retiredName(r.name, r.retired), r.count]));
+    consult.periodRows.forEach((r) => consultRows.push(['By Period', r.period, r.count]));
+    const wsConsult = XLSX.utils.aoa_to_sheet(consultRows);
+    wsConsult['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, wsConsult, 'Consults');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
