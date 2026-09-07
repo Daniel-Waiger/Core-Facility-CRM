@@ -39,13 +39,21 @@ to money, which is the wrong headline metric for a core facility — the product
 science, not revenue. Sporadic-but-sustained contributors, and staff on cheap-but-critical
 pipelines, disappear in a single $ cell.
 
+Design principle: **metrics are scoped on instruments, not on people.** The primary question is
+"does this instrument justify holding it?", and the staff member is only a proxy via an
+instrument→supervisor mapping — wider conclusions about a person come from connecting the dots
+(e.g. most instruments under their supervision are under-utilized), never from a per-person
+score. This also avoids a chilling effect on researchers: a per-person consulting log reads as
+"every word is logged" and discourages people from approaching core staff.
+
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
-| 3.1 | **Ad-hoc consulting log** — quick-entry record: staff, person/lab, topic, ~minutes, optional project link. Makes corridor/"btw" advisory work countable without making it billable. | S–M | Prerequisite for 3.2 and 3.3; the biggest invisible-work gap today. |
-| 3.2 | **Per-staff contribution profile** — a multi-facet scorecard per staff member: projects by role, milestones delivered, trainings given, consults logged, assisted instrument-hours, distinct labs served. Deliberately **not** collapsed into one composite number. | M | Rendered from the single `js/reports.js` aggregation engine so screen and export can never disagree. |
-| 3.3 | **Funnel analysis** — consult → project created → active (first booking) → milestones progressing → completed → research output. Conversion and time-in-stage per period; staff involvement per stage. | L | Front of the funnel needs 3.1; the exit needs an "outputs" record (publication/acknowledgement) on projects; middle stages derive from existing timestamps. |
-| 3.4 | **Breadth & time-mix views** — distinct labs/people served and new labs onboarded per period; staff time split by category (assisted operation, training, consulting, maintenance) as a stacked view | M | Training category needs Tier 4; consulting needs 3.1. |
-| 3.5 | **Charts on the Reports screen** — utilization, funnel, time-mix | M | Client-side rendering only. |
+| 3.1 | **Instrument-scoped consult record** — quick entry: date, instrument (or "general/none" for cross-instrument work like image analysis and experimental design), and a short topic — *what was discussed*. **No time logging**: ad-hoc consults are mostly not billable; the record exists to reflect contribution, not to meter it — counting entries and topics is enough. Researcher/lab identity is optional and **off by default**; no conversation content beyond the topic line. | S–M | The "general" bucket is the one thin per-staff slice, kept deliberately minimal. |
+| 3.2 | **Instrument stewardship scorecard** — per-instrument justification view: utilization, distinct + new users, trained-user pool trend, projects served, consults, downtime share. Designed to show *why* utilization is what it is, not one percentage — under-utilized ≠ unjustified (niche capability, backup unit, demand shift). A derived view groups scorecards by supervising staff member; explicitly dot-connecting, never a composite staff score. | M | Rendered from the single `js/reports.js` aggregation engine so screen and export can never disagree. Needs 3.6a. |
+| 3.3 | **Funnel analysis** — consult → project created → active (first booking) → milestones progressing → completed → research output. Conversion and time-in-stage per period. | L | Front of the funnel reads from 3.1; the exit needs an "outputs" record (publication/acknowledgement) on projects; middle stages derive from existing timestamps. |
+| 3.4 | **Breadth & activity-mix views** — distinct labs/people served and new labs onboarded per period, per instrument; facility activity split by category (assisted operation, training, consulting, maintenance) as a stacked view. Per-lab consult attribution is **opt-in**, not a default report column. | M | Training category needs Tier 4; consulting needs 3.1. |
+| 3.5 | **Charts on the Reports screen** — utilization, funnel, activity-mix | M | Client-side rendering only. |
+| 3.6a | **Instrument → supervising staff mapping** — who is responsible for each instrument (one or more staff). Prerequisite for the derived staff view in 3.2. | S | Join table or column on `instruments`; picker follows the existing "selectable = not retired OR already selected" rule. |
 | 3.6 | **Custom report generator** — pick entity + columns + date range, rendered from the existing aggregation engine, exported via the existing XLSX path. Design goal stays "fewer, better reports", not a canned-report catalog. | L | |
 | 3.7 | **Periodic local exports** — extend the existing auto-backup mechanism to also drop XLSX/JSON exports into the silent backup folder | S | Local reinterpretation of "scheduled exports". |
 
@@ -55,7 +63,7 @@ pipelines, disappear in a single $ cell.
 |---|------|--------|-------|
 | 4.1 | **Downtime records** — one class with a `type` field (maintenance / repair / calibration / other), not separate downtime vs. maintenance concepts. Instrument, date range, type, notes; blocks new bookings in the range (extends `findBookingConflicts`); shows on the calendar. | M | |
 | 4.2 | **Maintenance/service log per instrument, with file attachments** — vendor service reports are often paper; scanned PDFs/photos attach to log entries. A closed downtime record can link to a log entry. | M | Reuse the existing project-attachments pattern. |
-| 4.3 | **Training/qualification records** — person × instrument with trainer, date, expiry. No auth exists locally, so this is **staff-facing signals, not enforcement** — which matches the early-adopter reality that core staff operate the app: booking-form warnings ("X's training on Y expired"), plus a **"training status unknown" flag** when a person with no training record on an instrument is added to a booking — covering the "did another staff member already train them?" gap, since all staff records live in the same facility database. | M | Feeds 3.2 (trainings given) and 3.4 (qualified-user pool per instrument). |
+| 4.3 | **Training/qualification records** — person × instrument with trainer, date, expiry. No auth exists locally, so this is **staff-facing signals, not enforcement** — which matches the early-adopter reality that core staff operate the app: booking-form warnings ("X's training on Y expired"), plus a **"training status unknown" flag** when a person with no training record on an instrument is added to a booking — covering the "did another staff member already train them?" gap, since all staff records live in the same facility database. | M | Feeds 3.2 (trained-user pool trend per instrument) and 3.4. |
 
 ## Milestone — Migration/import tool (important, not now)
 
