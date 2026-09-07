@@ -923,6 +923,30 @@
     </div>
 
     <div class="card mb-16">
+      <div class="card-title">${ic('clock')} Cancellation Billing Rules</div>
+      <div class="card-body">
+        <div class="faint small mb-8">Controls whether a booking's cost still counts toward Project Costs when it's cancelled, based on whether the cancellation happens before or after the booking's scheduled start time. Admin Mode can still override this per booking for after-start cancellations.</div>
+        <div class="grid cols-2">
+          <div class="field">
+            <label>Cancelling Before Start Time</label>
+            <select class="input" id="cfg-cancel-before-charge">
+              <option value="0" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? '' : 'selected'}>Charge dropped</option>
+              <option value="1" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? 'selected' : ''}>Charge kept</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Cancelling After Start Time</label>
+            <select class="input" id="cfg-cancel-after-charge">
+              <option value="0" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? '' : 'selected'}>Charge dropped</option>
+              <option value="1" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? 'selected' : ''}>Charge kept</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm mt-8" data-act="save-cancellation-rules">${ic('check')} Save Cancellation Rules</button>
+      </div>
+    </div>
+
+    <div class="card mb-16">
       <div class="card-title">${ic('settings')} Admin Mode</div>
       <div class="card-body">
         <div class="row mb-8">

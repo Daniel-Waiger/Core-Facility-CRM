@@ -10,6 +10,12 @@ This project uses [Semantic Versioning](https://semver.org/).
   date/start/end fields change, the modal now shows an as-you-type conflict advisory (or an
   all-clear line once start/end are set), reusing `findBookingConflicts` verbatim so it can never
   drift from the hard-block check `bookingSave`/`bookingEditSave` still run at save time.
+- **Configurable cancellation billing rules in Settings.** A new "Cancellation Billing Rules" card
+  lets each facility choose, independently for before- and after-start cancellations, whether a
+  booking's charge still counts toward Project Costs — defaulting to the app's original hard-coded
+  behavior (before = dropped, after = kept) so existing data behaves unchanged until configured.
+  `cancelBooking`'s confirm-dialog copy is driven by the same settings so the rule described can
+  never drift from the rule applied.
 
 ## [1.5.7] — 2026-09-07
 

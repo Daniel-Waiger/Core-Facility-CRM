@@ -914,6 +914,7 @@
       case 'restore': return doRestore();
       case 'toggle-admin-mode': return toggleAdminMode();
       case 'save-billing-rates': return saveBillingRates();
+      case 'save-cancellation-rules': return saveCancellationRules();
       case 'save-group-discounts': return saveGroupDiscounts();
       case 'rename-org': return renameOrgFromSettings();
       case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
@@ -2866,6 +2867,12 @@
     const started = bookingHasStarted(mt);
     const total = mt.total_cost || 0;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
+    // Configurable in Settings → Cancellation Billing Rules; these defaults (before=dropped,
+    // after=kept) reproduce the app's original hard-coded behavior for any database with no
+    // config rows set.
+    const beforeCharge = DB.getConfigNum('cancel_before_start_charge', 0) === 1;
+    const afterCharge = DB.getConfigNum('cancel_after_start_charge', 1) === 1;
+    const ruleRetain = started ? afterCharge : beforeCharge;
     let retained;
 
     if (started && adminOn && total > 0) {
@@ -2875,10 +2882,14 @@
     } else {
       const line = started
         ? (total > 0
-          ? `Its start time has passed, so the slot was held and its ${esc(fmtMoney(total))} charge still counts toward Project Costs.${adminOn ? '' : ' Only Admin Mode can waive it.'}`
+          ? (afterCharge
+            ? `Its start time has passed, so the slot was held and its ${esc(fmtMoney(total))} charge still counts toward Project Costs.${adminOn ? '' : ' Only Admin Mode can waive it.'}`
+            : `Its start time has passed, but this facility's cancellation rule drops the charge for after-start cancellations, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`)
           : 'Its start time has passed, so it stays on the record as a late cancellation.')
         : (total > 0
-          ? `It hasn't started yet, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`
+          ? (beforeCharge
+            ? `It hasn't started yet, but this facility's cancellation rule keeps the charge for before-start cancellations, so its ${esc(fmtMoney(total))} charge still counts toward Project Costs.`
+            : `It hasn't started yet, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`)
           : "It hasn't started yet, so nothing is charged.");
       const ok = await UI.confirmModal(
         'Cancel Booking',
@@ -2886,7 +2897,7 @@
         { confirmText: 'Cancel Booking', cancelText: 'Keep Booking' }
       );
       if (!ok) return;
-      retained = started && total > 0;
+      retained = total > 0 && ruleRetain;
     }
 
     DB.setBookingCancelled(id, true, retained);
@@ -3197,6 +3208,21 @@
     DB.setConfig('tax_pct', Number(taxEl.value) || 0);
     DB.setConfig('currency', curEl.value.trim() || '$');
     UI.toast('Billing rates saved');
+    refresh();
+  }
+
+  // Whether a cancelled booking's charge still counts toward Project Costs, split by whether the
+  // cancellation happens before or after the booking's scheduled start time. Read by cancelBooking
+  // (and mirrored in its confirm-dialog copy) so the rule applied and the rule described can never
+  // drift apart. Defaults (before=dropped, after=kept) reproduce the app's original hard-coded
+  // behavior exactly, so a database with no config rows behaves identically to before this feature.
+  function saveCancellationRules() {
+    const beforeEl = document.getElementById('cfg-cancel-before-charge');
+    const afterEl = document.getElementById('cfg-cancel-after-charge');
+    if (!beforeEl || !afterEl) return;
+    DB.setConfig('cancel_before_start_charge', Number(beforeEl.value) === 1 ? 1 : 0);
+    DB.setConfig('cancel_after_start_charge', Number(afterEl.value) === 1 ? 1 : 0);
+    UI.toast('Cancellation rules saved');
     refresh();
   }
 
