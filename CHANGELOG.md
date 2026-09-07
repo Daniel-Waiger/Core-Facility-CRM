@@ -3,6 +3,14 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Live conflict feedback in the booking modal.** As instrument/staff selections and the
+  date/start/end fields change, the modal now shows an as-you-type conflict advisory (or an
+  all-clear line once start/end are set), reusing `findBookingConflicts` verbatim so it can never
+  drift from the hard-block check `bookingSave`/`bookingEditSave` still run at save time.
+
 ## [1.5.7] — 2026-09-07
 
 ### Fixed

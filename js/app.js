@@ -2475,12 +2475,39 @@
     }
   }
 
+  // Live, as-you-type conflict advisory — reuses findBookingConflicts VERBATIM so this can never
+  // drift from the hard-block check bookingSave/bookingEditSave run at save time; this is purely
+  // informational and never blocks typing or saving. findBookingConflicts itself returns [] both
+  // when start/end aren't set yet AND when they are set with genuinely no conflicts, so callers
+  // have to tell those two apart themselves: render nothing in the first case (an empty "no
+  // conflicts" box before the user's even picked times is just noise), a subtle all-clear line in
+  // the second.
+  function renderBookingConflicts(m, ids) {
+    const host = m.querySelector('#' + ids.prefix + '-conflicts');
+    if (!host) return;
+    const date = ids.date ? (m.querySelector('#' + ids.date) || {}).value || '' : '';
+    const start = (m.querySelector('#' + ids.start) || {}).value || '';
+    const end = (m.querySelector('#' + ids.end) || {}).value || '';
+    if (!start || !end) { host.innerHTML = ''; return; }
+    const instIds = readTokenIds(m, 'inst');
+    const staffIds = readTokenIds(m, 'staff');
+    const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds });
+    if (!conflicts.length) {
+      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>`;
+      return;
+    }
+    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>`;
+  }
+
   function wireBomInputs(m, ids) {
     const recalc = () => recomputeBomTotals(m, ids);
+    const recalcConflicts = () => renderBookingConflicts(m, ids);
     const startEl = m.querySelector('#' + ids.start);
     const endEl = m.querySelector('#' + ids.end);
-    if (startEl) startEl.addEventListener('input', recalc);
-    if (endEl) endEl.addEventListener('input', recalc);
+    if (startEl) startEl.addEventListener('input', () => { recalc(); recalcConflicts(); });
+    if (endEl) endEl.addEventListener('input', () => { recalc(); recalcConflicts(); });
+    const dateEl = ids.date ? m.querySelector('#' + ids.date) : null;
+    if (dateEl) dateEl.addEventListener('input', recalcConflicts);
     const projectEl = m.querySelector('#' + ids.project);
     if (projectEl) projectEl.addEventListener('change', () => applyProjectDrivenGroup(m, ids));
     const groupEl = m.querySelector('#' + ids.group);
@@ -2509,7 +2536,7 @@
     (opts.instrumentDetails || []).forEach((row) => { m._bom.instrAmounts[row.instrument_id] = row.amount || 0; });
     (opts.staffDetails || []).forEach((row) => { m._bom.staffWindows[row.person_id] = { start: row.start_time || '', end: row.end_time || '' }; });
 
-    const refreshBom = () => { renderBomRows(m, ids); recomputeBomTotals(m, ids); };
+    const refreshBom = () => { renderBomRows(m, ids); recomputeBomTotals(m, ids); renderBookingConflicts(m, ids); };
 
     mountTokenPicker(m, 'owner', bkPeopleItems());
     mountTokenPicker(m, 'inst', bkInstItems(), refreshBom);
@@ -2593,6 +2620,7 @@
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
         ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
+        <div id="bk-conflicts"></div>
 
         ${bomSectionHtml('bk', adminOn)}
 
@@ -2602,7 +2630,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
   }
 
   function bookingSave() {
@@ -2690,6 +2718,7 @@
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
         ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
+        <div id="bke-conflicts"></div>
 
         ${bomSectionHtml('bke', adminOn)}
 
@@ -2709,7 +2738,7 @@
         instrumentDetails: currentInstDetails, staffDetails: currentStaffDetails,
         discountPct: mt.discount_pct || 0, note: mt.note,
         groupOrg: mt.group_org || '', groupPct: mt.group_discount_pct || 0,
-        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group', allLabs: 'bke-all-labs' }
+        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', date: 'bke-date', project: 'bke-project', group: 'bke-group', allLabs: 'bke-all-labs', excludeId: mt.id }
       }));
   }
 
