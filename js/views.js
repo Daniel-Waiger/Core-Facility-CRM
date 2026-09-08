@@ -928,7 +928,7 @@
       // that can trip a 60-minute min-duration constraint before the user has touched anything.
       const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '';
       out += `
-        <div class="cal-hour-slot clickable" style="height:${px}px"
+        <div class="cal-hour-slot clickable" role="button" tabindex="0" style="height:${px}px"
              data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}
              data-tooltip="Click to add a booking at ${startHH} on ${ds}"></div>`;
     }
@@ -946,7 +946,7 @@
       // Same rule as calHourSlotsHtml: no 23:59 end prefill on the last slot.
       const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '';
       out += `
-        <div class="cal-tl-hour-slot clickable" style="width:${CAL_TL_HOUR_PCT}%"
+        <div class="cal-tl-hour-slot clickable" role="button" tabindex="0" style="width:${CAL_TL_HOUR_PCT}%"
              data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}${instId ? ` data-inst="${instId}"` : ''}
              data-tooltip="Click to add a booking at ${startHH} on ${ds}${instId ? ' for this instrument' : ''}"></div>`;
     }

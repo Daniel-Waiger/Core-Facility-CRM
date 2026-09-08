@@ -868,6 +868,17 @@
 
   /* ---------------- Global Event Delegation ---------------- */
   function wireGlobal() {
+    // Keyboard parity for non-native data-act controls (e.g. the calendar hour slots, which are
+    // divs with role="button" tabindex="0"): Enter/Space activates them by re-dispatching a click
+    // into the delegated handler below. Native buttons/links fire click on Enter themselves and
+    // are skipped so they don't activate twice.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const el = e.target.closest('[role="button"][data-act]');
+      if (!el || el.matches('button, a, input, select, textarea')) return;
+      e.preventDefault();
+      el.click();
+    });
     document.addEventListener('click', (e) => {
       const goto = e.target.closest('[data-goto]');
       if (goto && !e.target.closest('[data-act]')) {
@@ -2771,6 +2782,13 @@
   // other starts.
   function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds, skipNotice }) {
     if (!start || !end) return [];
+    // An inverted or zero-length window would sail through every check below — the overlap SQL's
+    // NOT(end <= ? OR start >= ?) can't match against it and hoursBetween() reports 0 — so it has
+    // to be rejected here, where the advisory, both save gates, and reinstate all inherit it.
+    if (UI.timeToMinutes(end) != null && UI.timeToMinutes(start) != null &&
+        UI.timeToMinutes(end) <= UI.timeToMinutes(start)) {
+      return ['End time must be after the start time'];
+    }
     // is_cancelled=0: a cancelled booking has given its slot back, so it never blocks a new one.
     const overlapSql = `m.date = ? AND m.id != ? AND m.is_cancelled = 0 AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
     const conflicts = [];

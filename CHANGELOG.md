@@ -60,6 +60,11 @@ This project uses [Semantic Versioning](https://semver.org/).
 - **The 23:00 calendar slot no longer prefills a 59-minute booking.** The last hour slot in the
   week view and timeline leaves the end time blank instead of forcing 23:59, which could trip a
   60-minute minimum-duration constraint before the user touched anything.
+- **Zero-length or inverted booking windows are rejected.** An end time at or before the start
+  slipped past every conflict and constraint check (nothing could overlap an empty window); the
+  live advisory and the save gate now flag it.
+- **Calendar hour slots are keyboard-accessible.** Week-view and timeline click-to-book slots take
+  focus and respond to Enter/Space, not just the mouse.
 
 ## [1.6.0] — 2026-09-07
 
