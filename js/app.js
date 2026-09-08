@@ -928,6 +928,14 @@
       case 'save-group-discounts': return saveGroupDiscounts();
       case 'rename-org': return renameOrgFromSettings();
       case 'save-grant-display': return saveGrantDisplay();
+
+      // Pricing Tiers CRUD (Settings)
+      case 'add-tier': return addPricingTier();
+      case 'pt-save': return ptSave();
+      case 'edit-tier': return editPricingTier(el.dataset.id);
+      case 'pt-edit-save': return ptEditSave(el.dataset.id);
+      case 'retire-tier': return retirePricingTier(el.dataset.id);
+      case 'restore-tier': return restorePricingTier(el.dataset.id);
       case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
       case 'disable-auto-backup-folder': return disableAutoBackupFolder();
       case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
@@ -1789,10 +1797,37 @@
     refresh();
   }
 
+  // Admin-gated per-tier rate override table (roadmap 2.2), same admin-mode gate as the Group
+  // Discounts editor and the booking modal's manual discount override. "selectable" here isn't a
+  // picker rule (there's no join row to silently drop) — but a tier this instrument already has an
+  // override for stays listed even if it's since been retired, same union-with-current reasoning,
+  // so a retired tier's saved rate is still visible (and still an explicit blank-to-clear away from
+  // reverting to the plain Cost above) rather than just vanishing from the form.
+  function instrumentTierRatesHtml(inst) {
+    const overrides = DB.listInstrumentTierRates(inst.id);
+    const overrideMap = {};
+    overrides.forEach((o) => { overrideMap[o.tier_id] = o.cost; });
+    const overrideIds = Object.keys(overrideMap).map(Number);
+    const extraClause = overrideIds.length ? ` OR id IN (${overrideIds.map(() => '?').join(',')})` : '';
+    const tiers = DB.rows(`SELECT id, name, is_retired FROM pricing_tiers WHERE is_retired=0${extraClause} ORDER BY is_retired, name`, overrideIds);
+    if (!tiers.length) return '';
+    return `
+    <div class="field mt-8">
+      <label>Per-Tier Rate Overrides <span class="faint">(admin — blank uses the Cost above for that tier)</span></label>
+      ${tiers.map((t) => `
+        <div class="row mb-8" style="gap:8px;align-items:center">
+          <span class="grow small">${esc(UI.retiredName(t.name, t.is_retired))}</span>
+          <input type="number" min="0" step="any" class="input tier-rate-input" data-tier-id="${t.id}"
+            value="${overrideMap[t.id] != null ? overrideMap[t.id] : ''}" placeholder="Default: ${inst.cost || 0}" style="width:130px" />
+        </div>`).join('')}
+    </div>`;
+  }
+
   function editInstrument(id) {
     const inst = DB.row('SELECT * FROM instruments WHERE id=?', [id]);
     if (!inst) return;
     const currentSupervisors = DB.rows('SELECT person_id FROM instrument_staff WHERE instrument_id=?', [id]).map((r) => r.person_id);
+    const adminOn = UI.storage.getItem('admin-mode') === '1';
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Instrument</span></div>
@@ -1817,6 +1852,7 @@
           </div>
         </div>
         ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
+        ${adminOn ? instrumentTierRatesHtml(inst) : ''}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1838,6 +1874,16 @@
        Number(m.querySelector('#ie-min-gap').value) || 0, Number(m.querySelector('#ie-min-notice').value) || 0, id]);
     DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
     readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
+    // Per-tier rate overrides — admin-gated, so these inputs simply don't exist in the DOM when
+    // admin mode is off, and this loop is then a no-op that leaves any existing overrides alone
+    // (unlike the supervisor picker above, this is NOT rebuilt-from-form on every save: a form
+    // that never shows the override rows to a non-admin editor must not be read as "no overrides").
+    m.querySelectorAll('.tier-rate-input').forEach((inp) => {
+      const tierId = Number(inp.dataset.tierId);
+      const v = inp.value.trim();
+      if (v === '') DB.deleteInstrumentTierRate(id, tierId);
+      else DB.setInstrumentTierRate(id, tierId, Number(v) || 0);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
     refresh();
@@ -1857,11 +1903,13 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
-      // instrument_staff isn't counted in countInstrumentRefs (supervision is current assignment,
-      // not history — see db.js), so an instrument with zero "real" refs can still have a
-      // supervisor. Cascade would catch this too, but the explicit delete is the
-      // belt-and-suspenders convention every other delete path here follows.
+      // instrument_staff and instrument_tier_rates aren't counted in countInstrumentRefs
+      // (supervision and per-tier rate overrides are current configuration, not history — see
+      // db.js), so an instrument with zero "real" refs can still have either. Cascade would catch
+      // this too, but the explicit delete is the belt-and-suspenders convention every other delete
+      // path here follows.
       DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+      DB.run('DELETE FROM instrument_tier_rates WHERE instrument_id=?', [id]);
       DB.run('DELETE FROM instruments WHERE id=?', [id]);
       UI.toast('Instrument deleted');
       refresh();
@@ -2375,6 +2423,10 @@
     filterOwnerPickerByGroup(m, org, ids);
     m._bom.groupOrg = org || '';
     m._bom.groupPct = DB.getGroupDiscount(org);
+    // The group's pricing tier can override an assigned instrument's displayed per-unit rate
+    // (renderBomRows), not just the computed total (recomputeBomTotals) — re-render the rows so
+    // both agree whenever the group (and with it, the resolved tier) changes.
+    renderBomRows(m, ids);
     recomputeBomTotals(m, ids);
   }
 
@@ -2388,6 +2440,10 @@
     filterOwnerPickerByGroup(m, org, ids);
     m._bom.groupOrg = org || '';
     m._bom.groupPct = pct || 0;
+    // Same reasoning as offerGroupDiscount above: the initial refreshBom() ran before the group
+    // (and its tier, if any) was known, so the instrument rows still need to pick up any per-tier
+    // rate override before their displayed per-unit cost matches what recomputeBomTotals bills.
+    renderBomRows(m, ids);
     recomputeBomTotals(m, ids);
   }
 
@@ -2446,6 +2502,11 @@
     const staffIds = readTokenIds(m, 'staff');
     const instItems = instIds.length ? DB.rows(`SELECT id, name, cost, cost_unit FROM instruments WHERE id IN (${instIds.map(() => '?').join(',')})`, instIds) : [];
     const staffItems = staffIds.length ? DB.rows(`SELECT id, name, rate FROM people WHERE id IN (${staffIds.map(() => '?').join(',')})`, staffIds) : [];
+    // A per-tier instrument rate override (instrument_tier_rates), when the current group/lab is
+    // assigned a tier, replaces the instrument's own cost — same resolution recomputeBomTotals
+    // and seedBooking apply, so the displayed rate always matches what the line actually bills at.
+    const tierForCost = DB.getTierForOrg(m._bom.groupOrg);
+    if (tierForCost) instItems.forEach((it) => { it.cost = DB.resolveInstrumentCost(it.id, it.cost, tierForCost.tier_id); });
 
     // Drop stashed values for ids that are no longer selected (their row is gone); keep the
     // rest so amounts/partial-times typed for still-selected items survive this rebuild.
@@ -2493,21 +2554,31 @@
     const start = (m.querySelector('#' + ids.start) || {}).value || '';
     const end = (m.querySelector('#' + ids.end) || {}).value || '';
 
-    const instrumentsForCalc = instItems.map((it) => Object.assign({}, it, { amount: m._bom.instrAmounts[it.id] || 0 }));
+    // Resolve the ONE overhead percent that applies — the group/lab's assigned pricing tier, or
+    // (no tier assigned) the legacy Internal+External overhead sum — in this one caller, per
+    // CLAUDE.md/roadmap 2.2: computeBookingBOM itself just does arithmetic on whatever it's handed.
+    const resolvedOverhead = DB.resolveOverheadForOrg(m._bom.groupOrg);
+    const instrumentsForCalc = instItems.map((it) => Object.assign({}, it, {
+      amount: m._bom.instrAmounts[it.id] || 0,
+      cost: DB.resolveInstrumentCost(it.id, it.cost, resolvedOverhead.tierId)
+    }));
     const staffForCalc = staffItems.map((p) => {
       const win = m._bom.staffWindows[p.id] || {};
       return Object.assign({}, p, { start: win.start || '', end: win.end || '' });
     });
 
     const rates = {
-      ohInternal: DB.getConfigNum('overhead_internal', 0),
-      ohExternal: DB.getConfigNum('overhead_external', 0),
+      overheadPct: resolvedOverhead.overheadPct,
       taxPct: DB.getConfigNum('tax_pct', 0)
     };
     const bom = UI.computeBookingBOM({
       start, end, instruments: instrumentsForCalc, staff: staffForCalc,
       groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates
     });
+    // Snapshot columns bookingSave/bookingEditSave/insertBookingRow write onto the meetings row
+    // alongside the money — null/null together means this booking priced via the legacy fallback.
+    bom.tierId = resolvedOverhead.tierId;
+    bom.tierOverheadPct = resolvedOverhead.tierOverheadPct;
     m._bom.last = bom; // read back at save time so the stored total matches what's on screen
 
     bom.instrumentLines.forEach((line) => {
@@ -2556,11 +2627,17 @@
         <span class="row" style="gap:8px;align-items:center">${groupControl}<span class="mono">−${fmtMoney(groupAmt)}</span></span>
       </div>`;
 
+      // Named tier when the group/lab has one assigned; otherwise this is the legacy
+      // Internal+External fallback sum, with nothing further to name.
+      const overheadLabel = bom.tierId
+        ? `Overhead (${esc(DB.tierLabel(bom.tierId))} tier, ${bom.overheadPct}%)`
+        : `Overhead (${bom.overheadPct}%)`;
+
       summaryEl.innerHTML =
         row('Subtotal', fmtMoney(bom.subtotal)) +
         groupRow +
         (bom.manualPct ? row(`Manual discount (${bom.manualPct}%)`, '−' + fmtMoney(manualAmt)) : '') +
-        row(`Overhead (${bom.ohInternal + bom.ohExternal}%)`, '+' + fmtMoney(bom.overheadAmt)) +
+        row(overheadLabel, '+' + fmtMoney(bom.overheadAmt)) +
         row('Before tax', fmtMoney(bom.beforeTax), { strong: true }) +
         row(`Tax (${bom.taxPct}%)`, '+' + fmtMoney(bom.taxAmt)) +
         row('Total', fmtMoney(bom.total), { strong: true, big: true });
@@ -2892,9 +2969,9 @@
     // Same BOM snapshot (rates read once, at save time) for every occurrence — deliberate:
     // identical recurring sessions are priced at today's rates, not recomputed per occurrence.
     function insertBookingRow(dateStr) {
-      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
+      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct]);
       const inserted = DB.row('SELECT last_insert_rowid() as id');
       const mid = inserted ? inserted.id : null;
       if (mid) {
@@ -3017,8 +3094,9 @@
     const bom = m._bom.last;
 
     DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
-              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, id]);
+              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
+              tier_id=?, tier_overhead_pct=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
@@ -3441,14 +3519,15 @@
     refresh();
   }
 
+  // Overhead is no longer set here (roadmap 2.2 replaced the flat Internal/External pair with
+  // named Pricing Tiers, below) — this now only writes the two rates every booking still applies
+  // the same way regardless of tier: tax and the currency symbol. The legacy overhead_internal/
+  // overhead_external app_config keys are left exactly as migrate() found or seeded them; they're
+  // still read by DB.resolveOverheadForOrg as the fallback for any lab with no tier assigned.
   function saveBillingRates() {
-    const internalEl = document.getElementById('cfg-overhead-internal');
-    const externalEl = document.getElementById('cfg-overhead-external');
     const taxEl = document.getElementById('cfg-tax');
     const curEl = document.getElementById('cfg-currency');
-    if (!internalEl) return;
-    DB.setConfig('overhead_internal', Number(internalEl.value) || 0);
-    DB.setConfig('overhead_external', Number(externalEl.value) || 0);
+    if (!taxEl) return;
     DB.setConfig('tax_pct', Number(taxEl.value) || 0);
     DB.setConfig('currency', curEl.value.trim() || '$');
     UI.toast('Billing rates saved');
@@ -3470,11 +3549,18 @@
     refresh();
   }
 
+  // Saves both the standing discount inputs AND the per-org pricing-tier <select>s the Settings
+  // Group Discounts editor renders side by side (one button, one save, same as before this
+  // feature) — a blank tier selection clears the org's assignment (DB.setGroupTier deletes the
+  // row rather than storing a null, so it falls back to the legacy overhead sum, see db.js).
   function saveGroupDiscounts() {
     document.querySelectorAll('.group-discount-input').forEach((inp) => {
       DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0);
     });
-    UI.toast('Group discounts saved');
+    document.querySelectorAll('.group-tier-select').forEach((sel) => {
+      DB.setGroupTier(sel.dataset.org, sel.value ? Number(sel.value) : null);
+    });
+    UI.toast('Group discounts & tiers saved');
     refresh();
   }
 
@@ -3491,6 +3577,11 @@
         parts.push(targetExists
           ? `its discount row will be dropped — <strong>${esc(newName)}</strong> already has its own standing discount, which is kept`
           : `its standing discount row moves to <strong>${esc(newName)}</strong>`);
+      }
+      if (refs.hasTier) {
+        parts.push(targetExists
+          ? `its pricing tier assignment will be dropped — <strong>${esc(newName)}</strong> already has its own tier, which is kept`
+          : `its pricing tier assignment moves to <strong>${esc(newName)}</strong>`);
       }
       const m = UI.openModal(`
         <div class="head"><span class="t" style="font-weight:600">${targetExists ? 'Merge' : 'Rename'} Lab / Group?</span></div>
@@ -3530,6 +3621,8 @@
     const bits = [`${result.peopleCount} ${result.peopleCount === 1 ? 'person' : 'people'}`, `${result.bookingsCount} booking${result.bookingsCount === 1 ? '' : 's'}`];
     if (result.merged) bits.push('discount merged');
     else if (result.discountMoved) bits.push('discount moved');
+    if (result.tierMerged) bits.push('tier merged');
+    else if (result.tierMoved) bits.push('tier moved');
     UI.toast(`Renamed ${oldName} → ${newName}: ${bits.join(', ')}`);
     refresh();
   }
@@ -3710,6 +3803,114 @@
     if (!el) return;
     DB.setConfig('grant_display', el.value === 'number' ? 'number' : 'name');
     UI.toast('Grant display setting saved');
+    refresh();
+  }
+
+  /* ---------------- Pricing Tiers CRUD (Settings) ----------------
+     A pricing tier is a named overhead percent (roadmap 2.2), replacing the old flat Internal/
+     External pair — a group/lab is assigned at most one (see the Group Discounts editor's tier
+     <select>, and saveGroupDiscounts above), and an instrument's rate can be overridden per tier
+     (see instrumentTierRatesHtml above). Like grants/people/instruments it is retired, not deleted,
+     once anything references it — see retirePricingTier below and DB.countTierRefs. */
+  function addPricingTier() {
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('tag')} Add Pricing Tier</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Tier Name *</label><input class="input" id="pt-name" placeholder="e.g. Internal" /></div>
+        <div class="field"><label>Overhead %</label><input type="number" min="0" step="any" class="input" id="pt-pct" value="0" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="pt-save">Save Tier</button>
+      </div>`);
+  }
+
+  function ptSave() {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#pt-name').value.trim();
+    if (!name) { UI.toast('Tier name required', 'error'); return; }
+    const pct = Number(m.querySelector('#pt-pct').value) || 0;
+    DB.run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', [name, pct]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Pricing tier added');
+    refresh();
+  }
+
+  function editPricingTier(id) {
+    const t = DB.row('SELECT * FROM pricing_tiers WHERE id=?', [id]);
+    if (!t) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Pricing Tier</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Tier Name *</label><input class="input" id="pte-name" value="${esc(t.name)}" /></div>
+        <div class="field"><label>Overhead %</label><input type="number" min="0" step="any" class="input" id="pte-pct" value="${t.overhead_pct || 0}" /></div>
+        <div class="faint small">Renaming or re-percenting a tier does not touch bookings already billed under it — those keep the overhead percent snapshotted at save time (see a booking's Cost &amp; Time Breakdown).</div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="pt-edit-save" data-id="${t.id}">Save Changes</button>
+      </div>`);
+  }
+
+  function ptEditSave(id) {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#pte-name').value.trim();
+    if (!name) { UI.toast('Tier name required', 'error'); return; }
+    const pct = Number(m.querySelector('#pte-pct').value) || 0;
+    DB.run('UPDATE pricing_tiers SET name=?, overhead_pct=? WHERE id=?', [name, pct, id]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Pricing tier updated');
+    refresh();
+  }
+
+  /* Same reasoning as retireGrant above: a tier billed on real bookings, or still assigned to a
+     lab, must stay on those records — bookings keep their snapshotted tier_overhead_pct regardless
+     — so it's retired rather than deleted once anything references it. Zero references (a mistyped
+     entry, never assigned or billed) is the only case a real delete is offered. */
+  async function retirePricingTier(id) {
+    const t = DB.row('SELECT name FROM pricing_tiers WHERE id=?', [id]);
+    if (!t) return;
+    const refs = DB.countTierRefs(id);
+
+    if (!refs.total) {
+      const ok = await UI.confirmModal(
+        'Delete Pricing Tier',
+        `"${esc(t.name)}" isn't assigned to any lab or billed on any booking, so there's no history to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      // Explicit cleanup even though refs.total===0 already implies no group/booking points at
+      // this tier — instrument_tier_rates isn't counted in countTierRefs (a rate override is
+      // current pricing config, not history — same reasoning instrument_staff is excluded from
+      // countInstrumentRefs), so a rate-overridden-but-otherwise-unused tier can still have rows.
+      DB.run('DELETE FROM instrument_tier_rates WHERE tier_id=?', [id]);
+      DB.run('DELETE FROM pricing_tiers WHERE id=?', [id]);
+      UI.toast('Pricing tier deleted');
+      refresh();
+      return;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const where = [];
+    if (refs.groups) where.push('assigned to ' + plural(refs.groups, 'lab/group'));
+    if (refs.bookings) where.push('billed on ' + plural(refs.bookings, 'booking'));
+
+    const ok = await UI.confirmModal(
+      'Retire Pricing Tier',
+      `"${esc(t.name)}" is ${where.join(', ')}. Those bookings keep the overhead percent they were billed at exactly as saved — retiring only labels it "(Retired)" and stops it being offered for new group assignments. Nothing is deleted, and you can restore it at any time.`,
+      { confirmText: 'Retire' }
+    );
+    if (!ok) return;
+    DB.setRetired('pricing_tiers', id, true);
+    UI.toast(`${t.name} retired`);
+    refresh();
+  }
+
+  function restorePricingTier(id) {
+    const t = DB.row('SELECT name FROM pricing_tiers WHERE id=?', [id]);
+    if (!t) return;
+    DB.setRetired('pricing_tiers', id, false);
+    UI.toast(`${t.name} restored`);
     refresh();
   }
 

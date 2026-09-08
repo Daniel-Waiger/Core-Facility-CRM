@@ -130,6 +130,8 @@
     is_cancelled INTEGER DEFAULT 0,
     cancelled_at TEXT DEFAULT '',
     billing_retained INTEGER DEFAULT 0,
+    tier_id INTEGER,
+    tier_overhead_pct REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -180,6 +182,24 @@
   CREATE TABLE IF NOT EXISTS group_discounts (
     org TEXT PRIMARY KEY,
     percent REAL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS pricing_tiers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    overhead_pct REAL DEFAULT 0,
+    is_retired INTEGER DEFAULT 0,
+    retired_at TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS group_tiers (
+    org TEXT PRIMARY KEY,
+    tier_id INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS instrument_tier_rates (
+    instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+    tier_id INTEGER NOT NULL,
+    cost REAL DEFAULT 0,
+    PRIMARY KEY(instrument_id, tier_id)
   );
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
@@ -362,6 +382,58 @@
     try { db.exec('ALTER TABLE instruments ADD COLUMN max_duration_mins INTEGER DEFAULT 0'); } catch (_) {}
     try { db.exec('ALTER TABLE instruments ADD COLUMN min_gap_mins INTEGER DEFAULT 0'); } catch (_) {}
     try { db.exec('ALTER TABLE instruments ADD COLUMN min_notice_hours REAL DEFAULT 0'); } catch (_) {}
+
+    // Pricing tiers (roadmap 2.2): named overhead tiers replacing the binary internal/external
+    // overhead pair. A group/lab is assigned a tier (group_tiers, soft link like grant_id — org is
+    // already the PK precedent from group_discounts); an instrument's rate can be overridden per
+    // tier (instrument_tier_rates, absent row => instruments.cost applies). Runs at the very end of
+    // migrate() — meetings.tier_id/tier_overhead_pct in particular must come after the meetings
+    // rebuild earlier in this function, which copies an explicit (older) column list into a fresh
+    // table and would otherwise silently drop a column added before it ran.
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS pricing_tiers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          overhead_pct REAL DEFAULT 0,
+          is_retired INTEGER DEFAULT 0,
+          retired_at TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS group_tiers (
+          org TEXT PRIMARY KEY,
+          tier_id INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS instrument_tier_rates (
+          instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+          tier_id INTEGER NOT NULL,
+          cost REAL DEFAULT 0,
+          PRIMARY KEY(instrument_id, tier_id)
+        );
+      `);
+    } catch (_) {}
+    try { db.exec('ALTER TABLE meetings ADD COLUMN tier_id INTEGER'); } catch (_) {}
+    try { db.exec('ALTER TABLE meetings ADD COLUMN tier_overhead_pct REAL'); } catch (_) {}
+
+    // One-time migration of the legacy overhead_internal/overhead_external app_config pair into
+    // two default tiers, so an existing facility sees its old rates as named, editable tiers
+    // instead of losing them. Only runs once (pricing_tiers starts empty) and only when there was
+    // actually a legacy rate configured — a brand-new database with no app_config rows yet gets no
+    // tiers either, same as it would get no group_discounts rows. LEGACY FALLBACK STAYS IN FORCE
+    // regardless: any org with no group_tiers row keeps pricing at the (unedited-from-here-on)
+    // overhead_internal + overhead_external sum — see resolveOverheadForOrg — so an untouched
+    // facility (or a group nobody ever assigns a tier to) behaves exactly as before this feature.
+    try {
+      const already = row('SELECT COUNT(*) as c FROM pricing_tiers') || { c: 0 };
+      if (!already.c) {
+        const hasInternal = getConfig('overhead_internal', null);
+        const hasExternal = getConfig('overhead_external', null);
+        if (hasInternal != null || hasExternal != null) {
+          run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['Internal', getConfigNum('overhead_internal', 0)]);
+          run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['External', getConfigNum('overhead_external', 0)]);
+        }
+      }
+    } catch (_) {}
   }
 
   async function boot() {
@@ -719,6 +791,122 @@
     return rows('SELECT org, percent FROM group_discounts ORDER BY org');
   }
 
+  /* ---------------- Pricing tiers (named overhead, replacing the internal/external pair) ----------------
+     A pricing tier is just {name, overhead_pct}, retired (not deleted) once anything references it —
+     same is_retired/retired_at pattern as people/instruments/grants (see setRetired below, which
+     accepts 'pricing_tiers' as a table). A group/lab is assigned AT MOST one tier via group_tiers
+     (org TEXT PRIMARY KEY, same precedent as group_discounts — a soft link, no REFERENCES clause,
+     matching projects.pi_id/meetings.grant_id). An org with no group_tiers row has no tier, and
+     resolveOverheadForOrg falls back to the legacy overhead_internal+overhead_external sum for it —
+     that fallback is mandatory, not a migration nicety: it's what keeps every booking under a lab
+     nobody has re-assigned pricing identical to before this feature existed. */
+  function getTierForOrg(org) {
+    if (!org) return null;
+    const gt = row('SELECT tier_id FROM group_tiers WHERE org=?', [org]);
+    if (!gt || gt.tier_id == null) return null;
+    const t = row('SELECT id, overhead_pct FROM pricing_tiers WHERE id=?', [gt.tier_id]);
+    if (!t) return null; // orphaned link (shouldn't happen — tiers retire, never delete, once referenced)
+    return { tier_id: t.id, overhead_pct: Number(t.overhead_pct) || 0 };
+  }
+  // The one place a booking's overhead percent is resolved, so app.js's live modal math
+  // (recomputeBomTotals) and this file's own seedBooking can never compute it two different ways.
+  // Returns the resolved percent PLUS the {tier_id, tier_overhead_pct} pair callers snapshot onto
+  // the booking row at save time (both null together ⇒ this booking priced via the legacy fallback).
+  function resolveOverheadForOrg(org) {
+    const tier = getTierForOrg(org);
+    if (tier) return { overheadPct: tier.overhead_pct, tierId: tier.tier_id, tierOverheadPct: tier.overhead_pct };
+    const legacyPct = getConfigNum('overhead_internal', 0) + getConfigNum('overhead_external', 0);
+    return { overheadPct: legacyPct, tierId: null, tierOverheadPct: null };
+  }
+  function getGroupTierId(org) {
+    if (!org) return null;
+    const r = row('SELECT tier_id FROM group_tiers WHERE org=?', [org]);
+    return r && r.tier_id != null ? r.tier_id : null;
+  }
+  // tierId falsy clears the assignment (row deleted, not nulled) — same "absent row" convention
+  // instrument_tier_rates uses, so getTierForOrg/getGroupTierId never have to distinguish "no row"
+  // from "row present but null".
+  function setGroupTier(org, tierId) {
+    if (!org) return;
+    if (!tierId) { run('DELETE FROM group_tiers WHERE org=?', [org]); return; }
+    run('INSERT INTO group_tiers (org, tier_id) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET tier_id=excluded.tier_id', [org, Number(tierId)]);
+  }
+  function listGroupTiers() {
+    return rows('SELECT org, tier_id FROM group_tiers ORDER BY org');
+  }
+  // Seed-only idempotent upsert by name (pricing_tiers.name is not itself a key — id is a real
+  // surrogate key, unlike group_discounts/group_tiers' org PK — so this does a plain check-then-
+  // write instead of group_discounts' ON CONFLICT one-liner). Lets seedSampleData re-run without
+  // duplicating its 'Internal'/'External' tiers, matching setConfig/setGroupDiscount's re-seed-safe
+  // pattern above.
+  function upsertPricingTierByName(name, pct) {
+    const existing = row('SELECT id FROM pricing_tiers WHERE name=?', [name]);
+    if (existing) {
+      run("UPDATE pricing_tiers SET overhead_pct=?, is_retired=0, retired_at='' WHERE id=?", [Number(pct) || 0, existing.id]);
+      return existing.id;
+    }
+    run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', [name, Number(pct) || 0]);
+    const inserted = row('SELECT last_insert_rowid() as id');
+    return inserted ? inserted.id : null;
+  }
+  /* How much of the app a pricing tier touches, for the retire-vs-delete gate: labs assigned to it
+     (group_tiers) and bookings billed with it (meetings.tier_id, a snapshot column). Deliberately
+     excludes instrument_tier_rates — a per-tier rate override is current pricing configuration, not
+     a historical fact to protect, same reasoning countInstrumentRefs gives for excluding
+     instrument_staff. retirePricingTier's zero-ref delete branch still cleans those rows up
+     explicitly before deleting, so a rate-overridden-but-otherwise-unused tier can still be deleted
+     without leaving orphaned rows. */
+  function countTierRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM group_tiers WHERE tier_id=?) AS groups,
+      (SELECT COUNT(*) FROM meetings WHERE tier_id=?) AS bookings`, [id, id]) || {};
+    const parts = { groups: r.groups || 0, bookings: r.bookings || 0 };
+    parts.total = parts.groups + parts.bookings;
+    return parts;
+  }
+  /* The one place that resolves a STORED tier_id to display text (grantLabel's pattern) — every
+     caller (the booking modal's summary, views.js's Project Costs card, exports.js's XLSX/DOCX/PDF
+     paths) reads this instead of re-deriving "what tier was this" on its own. Unlike grantLabel,
+     the "(Retired)" suffix is folded in here rather than left to the caller: every call site only
+     has the bare tier_id (a booking snapshot column, not a joined row), so there's no separate
+     is_retired flag for a caller to wrap with UI.retiredName itself. '—' covers both a genuinely
+     legacy booking (tier_id NULL) and an orphaned id. */
+  function tierLabel(tierId) {
+    if (tierId == null) return '—';
+    const t = row('SELECT name, is_retired FROM pricing_tiers WHERE id=?', [tierId]);
+    if (!t) return '—';
+    return global.UI.retiredName(t.name, t.is_retired);
+  }
+
+  /* ---------------- Per-tier instrument rate overrides ----------------
+     instrument_tier_rates has no REFERENCES to pricing_tiers (tiers retire, never delete while
+     referenced, so a dangling tier_id here would only happen if a tier were force-deleted at zero
+     refs — see retirePricingTier, which cleans these rows up explicitly in that branch). Absent
+     row for a given (instrument, tier) pair ⇒ the instrument's own `cost` column applies, exactly
+     as if no tiers existed. */
+  function getInstrumentTierRate(instrumentId, tierId) {
+    if (!tierId) return null;
+    const r = row('SELECT cost FROM instrument_tier_rates WHERE instrument_id=? AND tier_id=?', [instrumentId, tierId]);
+    return r ? (Number(r.cost) || 0) : null;
+  }
+  // The one place a booking's per-instrument cost is resolved against a tier override — shared by
+  // app.js's live modal (renderBomRows/recomputeBomTotals) and this file's seedBooking, same
+  // reasoning as resolveOverheadForOrg above.
+  function resolveInstrumentCost(instrumentId, baseCost, tierId) {
+    const override = getInstrumentTierRate(instrumentId, tierId);
+    return override != null ? override : baseCost;
+  }
+  function setInstrumentTierRate(instrumentId, tierId, cost) {
+    run('INSERT INTO instrument_tier_rates (instrument_id, tier_id, cost) VALUES (?,?,?) ON CONFLICT(instrument_id, tier_id) DO UPDATE SET cost=excluded.cost',
+      [instrumentId, tierId, Number(cost) || 0]);
+  }
+  function deleteInstrumentTierRate(instrumentId, tierId) {
+    run('DELETE FROM instrument_tier_rates WHERE instrument_id=? AND tier_id=?', [instrumentId, tierId]);
+  }
+  function listInstrumentTierRates(instrumentId) {
+    return rows('SELECT tier_id, cost FROM instrument_tier_rates WHERE instrument_id=?', [instrumentId]);
+  }
+
   /* ---------------- Retirement (people & instruments) ----------------
      A person who leaves the facility, or an instrument that is decommissioned, must never be
      deleted while anything references them: who actually attended a booking and which
@@ -850,9 +1038,9 @@
       run("UPDATE projects SET is_archived=0, archived_at='', updated_at=datetime('now') WHERE id=?", [id]);
     }
   }
-  // table is 'people', 'instruments' or 'grants' — nothing else is retirable.
+  // table is 'people', 'instruments', 'grants' or 'pricing_tiers' — nothing else is retirable.
   function setRetired(table, id, retired) {
-    if (table !== 'people' && table !== 'instruments' && table !== 'grants') return;
+    if (table !== 'people' && table !== 'instruments' && table !== 'grants' && table !== 'pricing_tiers') return;
     if (retired) {
       run(`UPDATE ${table} SET is_retired=1, retired_at=datetime('now') WHERE id=?`, [id]);
     } else {
@@ -867,18 +1055,20 @@
     const set = new Set();
     rows("SELECT DISTINCT organization as org FROM people WHERE organization IS NOT NULL AND TRIM(organization) != ''").forEach((r) => set.add(r.org));
     rows("SELECT DISTINCT org FROM group_discounts WHERE org IS NOT NULL AND TRIM(org) != ''").forEach((r) => set.add(r.org));
+    rows("SELECT DISTINCT org FROM group_tiers WHERE org IS NOT NULL AND TRIM(org) != ''").forEach((r) => set.add(r.org));
     rows("SELECT DISTINCT group_org as org FROM meetings WHERE group_org IS NOT NULL AND TRIM(group_org) != ''").forEach((r) => set.add(r.org));
     return [...set].sort((a, b) => a.localeCompare(b));
   }
 
   // How much of the app a lab name touches, for the rename/merge confirm dialog: people rows
   // that would be relabeled, bookings whose saved group snapshot would be relabeled, and whether
-  // it carries a standing discount row.
+  // it carries a standing discount row or a pricing tier assignment.
   function countOrgRefs(org) {
     const peopleCount = (row('SELECT COUNT(*) as c FROM people WHERE organization=?', [org]) || {}).c || 0;
     const bookingsCount = (row('SELECT COUNT(*) as c FROM meetings WHERE group_org=?', [org]) || {}).c || 0;
     const hasDiscount = !!row('SELECT 1 as x FROM group_discounts WHERE org=?', [org]);
-    return { peopleCount, bookingsCount, hasDiscount };
+    const hasTier = !!row('SELECT 1 as x FROM group_tiers WHERE org=?', [org]);
+    return { peopleCount, bookingsCount, hasDiscount, hasTier };
   }
 
   // Renames (or merges) a lab/organization name across the app. `people.organization` and every
@@ -900,6 +1090,10 @@
     const oldDiscount = row('SELECT percent FROM group_discounts WHERE org=?', [oldName]);
     const targetHadDiscount = !!row('SELECT 1 as x FROM group_discounts WHERE org=?', [newName]);
     const merged = !!(oldDiscount && targetHadDiscount);
+    // Same PK-collision-as-merge reasoning as group_discounts just below, applied to group_tiers.
+    const oldTier = row('SELECT tier_id FROM group_tiers WHERE org=?', [oldName]);
+    const targetHadTier = !!row('SELECT 1 as x FROM group_tiers WHERE org=?', [newName]);
+    const tierMerged = !!(oldTier && targetHadTier);
 
     if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
     if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
@@ -916,7 +1110,22 @@
       }
     }
 
-    return { peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount };
+    let tierMoved = false;
+    if (oldTier) {
+      if (targetHadTier) {
+        // Merge: the destination's own tier assignment wins; drop the source row rather than
+        // fight it for the org primary key.
+        run('DELETE FROM group_tiers WHERE org=?', [oldName]);
+      } else {
+        run('UPDATE group_tiers SET org=? WHERE org=?', [newName, oldName]);
+        tierMoved = true;
+      }
+    }
+
+    return {
+      peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount,
+      tierMoved, tierMerged, hadTier: !!oldTier
+    };
   }
 
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
@@ -925,6 +1134,7 @@
       DELETE FROM project_people;
       DELETE FROM project_instruments;
       DELETE FROM instrument_staff;
+      DELETE FROM instrument_tier_rates;
       DELETE FROM milestone_owners;
       DELETE FROM milestone_instruments;
       DELETE FROM milestones;
@@ -967,12 +1177,19 @@
       note = '', actions = '', cancelled = null, category = ''
     } = spec;
 
+    // resolveOverheadForOrg reads group_tiers (falling back to the legacy overhead_internal/
+    // overhead_external sum) — same one place app.js's recomputeBomTotals resolves it, so a
+    // seeded booking can never price differently than the live modal would for the same group.
+    const resolvedOverhead = resolveOverheadForOrg(groupOrg);
+
     const instRows = instruments.length
       ? rows(`SELECT id, cost, cost_unit FROM instruments WHERE id IN (${instruments.map(() => '?').join(',')})`, instruments.map((i) => i.id))
       : [];
     const instrumentsForCalc = instRows.map((r) => {
       const s = instruments.find((i) => i.id === r.id) || {};
-      return { id: r.id, cost: r.cost, cost_unit: r.cost_unit, amount: s.amount || 0 };
+      // A tier's per-instrument rate override (instrument_tier_rates), when present, replaces the
+      // instrument's own cost — same resolution renderBomRows/recomputeBomTotals apply live.
+      return { id: r.id, cost: resolveInstrumentCost(r.id, r.cost, resolvedOverhead.tierId), cost_unit: r.cost_unit, amount: s.amount || 0 };
     });
 
     const staffRows = staff.length
@@ -984,13 +1201,12 @@
     });
 
     // getGroupDiscount/getConfigNum read the app_config/group_discounts rows the real Settings
-    // screen reads — which is exactly why those are seeded BEFORE any seedBooking() call below;
-    // reading them from an empty table here would silently compute every booking at 0% discount
-    // and 0% overhead/tax.
+    // screen reads — which is exactly why those (and the pricing tiers resolveOverheadForOrg reads)
+    // are seeded BEFORE any seedBooking() call below; reading them from empty tables here would
+    // silently compute every booking at 0% discount and 0% overhead/tax.
     const groupPct = getGroupDiscount(groupOrg);
     const rates = {
-      ohInternal: getConfigNum('overhead_internal', 0),
-      ohExternal: getConfigNum('overhead_external', 0),
+      overheadPct: resolvedOverhead.overheadPct,
       taxPct: getConfigNum('tax_pct', 0)
     };
     const bom = global.UI.computeBookingBOM({ start, end, instruments: instrumentsForCalc, staff: staffForCalc, groupPct, manualPct: 0, rates });
@@ -1002,15 +1218,15 @@
     const isCancelled = !!(cancelled && cancelled.cancelled !== false);
     run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, note, actions,
           discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost,
-          is_cancelled, cancelled_at, billing_retained, category)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+          is_cancelled, cancelled_at, billing_retained, category, tier_id, tier_overhead_pct)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       projectId, grantId, title, date, start, end, attendees, note, actions,
       0, groupOrg, groupPct, bom.subtotal, bom.beforeTax, bom.total,
       isCancelled ? 1 : 0,
       // Full timestamp, not a calendar day — toISOString() is the right tool here (see CLAUDE.md).
       isCancelled ? new Date().toISOString() : '',
       isCancelled && cancelled.retained ? 1 : 0,
-      category
+      category, resolvedOverhead.tierId, resolvedOverhead.tierOverheadPct
     ]);
     const inserted = row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
@@ -1220,6 +1436,21 @@
     setGroupDiscount('Bio-Photonics Lab', 5); // only lab with a standing discount, on purpose —
     // Neural Dynamics Institute and Therapeutics & Onco-Therapy deliberately have none, so
     // Reports' By Lab/Group table shows a real contrast, not three identical discounted rows.
+
+    // 7b. Pricing tiers (roadmap 2.2) — upsertPricingTierByName so re-running Load Sample Data
+    // doesn't duplicate these (pricing_tiers, like app_config/group_discounts above, is facility
+    // settings clearAllData deliberately leaves alone). 'Internal'/10 and 'External'/5 mirror the
+    // legacy overhead_internal/overhead_external values above so the tier system starts from
+    // exactly the same numbers the old binary pair used.
+    // Bio-Photonics Lab is deliberately LEFT UNASSIGNED here — booking #1 below depends on it
+    // still pricing via the legacy overhead_internal+overhead_external fallback (10%+5%=15%) for
+    // the documented 490 / 546.25 / 589.95 regression triple to keep holding. Neural Dynamics
+    // Institute is assigned the 'Internal' tier instead, so Reports/Settings show one lab actually
+    // using the new tier system (flat 10%) alongside two still on the legacy fallback (15%) —
+    // real contrast, not three identical rows, same reasoning as the group-discount comment above.
+    const internalTierId = upsertPricingTierByName('Internal', 10);
+    upsertPricingTierByName('External', 5);
+    setGroupTier('Neural Dynamics Institute', internalTierId);
 
     // 8. Meetings (start_time/end_time drive calendar display + instrument/staff conflict checks;
     // every booking below goes through seedBooking(), which calls the exact same
@@ -1444,6 +1675,19 @@
     getGroupDiscount,
     setGroupDiscount,
     listGroupDiscounts,
+    getTierForOrg,
+    resolveOverheadForOrg,
+    getGroupTierId,
+    setGroupTier,
+    listGroupTiers,
+    upsertPricingTierByName,
+    countTierRefs,
+    tierLabel,
+    getInstrumentTierRate,
+    resolveInstrumentCost,
+    setInstrumentTierRate,
+    deleteInstrumentTierRate,
+    listInstrumentTierRates,
     countPersonRefs,
     countInstrumentRefs,
     countProjectRefs,

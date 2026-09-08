@@ -298,16 +298,16 @@
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
-    const mtRows = [['Meeting Title', 'Grant', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
+    const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, grantLabelFor(m), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
 
     // Sheet 6: Files
@@ -405,7 +405,10 @@
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
-        if (m.total_cost) children.push(new Paragraph({ text: `Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, bold: true }));
+        if (m.total_cost) {
+          if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id)}`, italics: true }));
+          children.push(new Paragraph({ text: `Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, bold: true }));
+        }
       });
     } else {
       children.push(new Paragraph({ text: 'No meetings logged.' }));
@@ -608,6 +611,15 @@
           y += 5;
         }
         if (m.total_cost) {
+          if (m.tier_id) {
+            checkPage(5);
+            pdf.setFontSize(8);
+            pdf.setTextColor(100, 116, 139);
+            pdf.text(`Tier: ${DB.tierLabel(m.tier_id)}`, margin + 4, y);
+            pdf.setTextColor(20, 20, 20);
+            pdf.setFontSize(9);
+            y += 4;
+          }
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
           pdf.text(`Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, margin + 4, y);
@@ -738,7 +750,7 @@
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
     // computeBookingBOM in app.js at the time the booking was saved).
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
@@ -752,7 +764,7 @@
       // the facility actually bills; the Status column says why.
       const counts = !(m.is_cancelled && !m.billing_retained);
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m),
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
@@ -760,7 +772,7 @@
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });

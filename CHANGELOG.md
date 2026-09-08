@@ -30,6 +30,14 @@ This project uses [Semantic Versioning](https://semver.org/).
   week(s) until" field; saving generates one occurrence per date (same BOM/pricing snapshot for
   all), checking every date's conflicts up front so the save is all-or-nothing, with a 52-occurrence
   sanity cap on the schedule length.
+- **Configurable pricing tiers (roadmap 2.2).** Named pricing tiers (e.g. Internal / Academia /
+  Industry) replace the binary internal/external overhead pair: each is a named overhead percent,
+  assignable per group/lab from the Group Discounts editor, with optional per-instrument rate
+  overrides. The booking cost calculator resolves a group's assigned tier (falling back to the
+  legacy Internal+External overhead sum when none is assigned, so untouched facilities are
+  unaffected) and snapshots the resolved tier and percent onto the booking at save time so past
+  costs never recompute. Existing `overhead_internal`/`overhead_external` settings migrate once
+  into two default tiers.
 
 ## [1.6.0] — 2026-09-07
 

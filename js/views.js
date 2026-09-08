@@ -406,17 +406,21 @@
         ${mtgs.length ? `
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>Booking</th><th>Grant</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
+            <thead><tr><th>Booking</th><th>Grant</th><th>Tier</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
             <tbody>
               ${mtgs.map((m) => {
                 const waived = m.is_cancelled && !m.billing_retained;
                 const bookingGrantStr = m.grant_id
                   ? global.UI.retiredName(global.DB.grantLabel({ name: m.grant_name, number: m.grant_number }), m.grant_is_retired)
                   : '';
+                // Resolved fresh from the STORED tier_id (a snapshot column, like grant_id) —
+                // null/legacy bookings (priced via the Internal+External fallback) show '—'.
+                const tierStr = global.DB.tierLabel(m.tier_id);
                 return `
                 <tr class="${m.is_cancelled ? 'row-retired' : ''}">
                   <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
                   <td class="small">${bookingGrantStr ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
+                  <td class="small">${tierStr === '—' ? '<span class="faint">—</span>' : esc(tierStr)}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>
@@ -1169,6 +1173,10 @@
       SELECT g.*, (SELECT COUNT(*) FROM grant_users gu WHERE gu.grant_id = g.id) as user_count
       FROM grants g ORDER BY g.is_retired ASC, g.name ASC`);
     const grantDisplay = global.DB.getConfig('grant_display', 'name');
+    const tiers = global.DB.rows(`
+      SELECT t.*, (SELECT COUNT(*) FROM group_tiers gt WHERE gt.tier_id = t.id) as group_count,
+             (SELECT COUNT(*) FROM meetings m WHERE m.tier_id = t.id) as booking_count
+      FROM pricing_tiers t ORDER BY t.is_retired ASC, t.name ASC`);
 
     return `
     <div class="card mb-16">
@@ -1270,14 +1278,43 @@
     <div class="card mb-16">
       <div class="card-title">${ic('tag')} Billing Rates</div>
       <div class="card-body">
-        <div class="faint small mb-8">These apply to every booking's cost breakdown: both overhead percentages are added together, then tax is applied on top of that. See a booking's "Cost &amp; Time Breakdown" for the full walkthrough.</div>
-        <div class="grid cols-4">
-          <div class="field"><label>Internal Overhead %</label><input type="number" min="0" step="any" class="input" id="cfg-overhead-internal" value="${esc(global.DB.getConfigNum('overhead_internal', 0))}" /></div>
-          <div class="field"><label>External Overhead %</label><input type="number" min="0" step="any" class="input" id="cfg-overhead-external" value="${esc(global.DB.getConfigNum('overhead_external', 0))}" /></div>
+        <div class="faint small mb-8">Tax is applied on top of a booking's after-overhead total. Overhead itself is set per Pricing Tier below — a lab/group with no tier assigned (Admin Mode &gt; Group Discounts) prices at the legacy Internal + External overhead sum this app used before named tiers existed. See a booking's "Cost &amp; Time Breakdown" for the full walkthrough.</div>
+        <div class="grid cols-2">
           <div class="field"><label>Tax %</label><input type="number" min="0" step="any" class="input" id="cfg-tax" value="${esc(global.DB.getConfigNum('tax_pct', 0))}" /></div>
           <div class="field"><label>Currency Symbol</label><input class="input" id="cfg-currency" value="${esc(global.DB.getConfig('currency', '$'))}" maxlength="4" /></div>
         </div>
         <button class="btn btn-primary btn-sm mt-8" data-act="save-billing-rates">${ic('check')} Save Rates</button>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('tag')} Pricing Tiers</span></div>
+        <button class="btn btn-primary btn-sm" data-act="add-tier">${ic('plus')} Add Tier</button>
+      </div>
+      <div class="card-body">
+        <div class="faint small mb-8">Named overhead tiers a lab/group can be assigned to (see the Group Discounts editor under Admin Mode below), replacing the old flat Internal/External overhead split. An instrument's own rate can also be overridden per tier from its Edit Instrument screen (Admin Mode).</div>
+        ${tiers.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Name</th><th>Overhead %</th><th title="Labs/groups assigned this tier">Groups</th><th title="Bookings billed under this tier">Bookings</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${tiers.map((t) => `
+                <tr class="${t.is_retired ? 'row-retired' : ''}">
+                  <td style="font-weight:600">${esc(global.UI.retiredName(t.name, t.is_retired))}</td>
+                  <td class="mono small">${esc(t.overhead_pct)}%</td>
+                  <td><span class="badge neutral">${t.group_count}</span></td>
+                  <td><span class="badge neutral">${t.booking_count}</span></td>
+                  <td style="text-align:right;white-space:nowrap">
+                    <button class="btn btn-ghost btn-xs" data-act="edit-tier" data-id="${t.id}" title="Edit Tier">${ic('edit')}</button>
+                    ${t.is_retired
+                      ? `<button class="btn btn-ghost btn-xs" data-act="restore-tier" data-id="${t.id}" title="Restore — make available for new group assignments again">${ic('rocket')}</button>`
+                      : `<button class="btn btn-ghost btn-xs" data-act="retire-tier" data-id="${t.id}" title="Retire — keeps every group/booking billed under it">${ic('archive')}</button>`}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('tag', 'No pricing tiers yet', 'Add a tier to assign labs a named overhead rate instead of the legacy Internal/External split.')}
       </div>
     </div>
 
@@ -1361,18 +1398,25 @@
         </div>
         ${adminOn ? `
         <div class="divider"></div>
-        <div style="font-weight:600" class="mb-8">Group (Lab / Organization) Discounts</div>
-        <div class="faint small mb-8">A standing discount percent per lab, auto-applied on a booking whose project's PI belongs to that lab (see the booking's Cost &amp; Time Breakdown). Applies to time-billed instrument cost only.</div>
-        ${orgs.length ? orgs.map((org) => `
-          <div class="row mb-8" style="gap:8px;align-items:center">
+        <div style="font-weight:600" class="mb-8">Group (Lab / Organization) Discounts &amp; Pricing Tiers</div>
+        <div class="faint small mb-8">A standing discount percent per lab, auto-applied on a booking whose project's PI belongs to that lab (see the booking's Cost &amp; Time Breakdown) — applies to time-billed instrument cost only. The tier picks which overhead percent that same booking uses; "No tier (legacy)" keeps pricing at the Internal + External overhead sum from Billing Rates above.</div>
+        ${orgs.length ? orgs.map((org) => {
+          const currentTierId = global.DB.getGroupTierId(org);
+          const tierOpts = global.DB.rows('SELECT id, name, is_retired FROM pricing_tiers WHERE is_retired=0 OR id=? ORDER BY is_retired, name', [currentTierId || 0]);
+          return `
+          <div class="row mb-8" style="gap:8px;align-items:center;flex-wrap:wrap">
             <span class="grow small">${esc(org)}</span>
-            <input type="number" min="0" max="100" step="1" class="input group-discount-input" data-org="${esc(org)}" value="${esc(global.DB.getGroupDiscount(org))}" style="width:90px" />
-            <span class="faint small">%</span>
-          </div>`).join('') : '<div class="faint small">No labs/organizations on record yet — add people with a Lab / Group / Company to set discounts for them.</div>'}
-        ${orgs.length ? `<button class="btn btn-primary btn-sm mt-8" data-act="save-group-discounts">${ic('check')} Save Group Discounts</button>` : ''}
+            <select class="input group-tier-select" data-org="${esc(org)}" style="width:170px" data-tooltip="Pricing tier — decides this lab's overhead percent">
+              <option value="">-- No tier (legacy) --</option>
+              ${tierOpts.map((t) => `<option value="${t.id}" ${t.id === currentTierId ? 'selected' : ''}>${esc(global.UI.retiredName(t.name, t.is_retired))}</option>`).join('')}
+            </select>
+            <input type="number" min="0" max="100" step="1" class="input group-discount-input" data-org="${esc(org)}" value="${esc(global.DB.getGroupDiscount(org))}" style="width:80px" data-tooltip="Standing discount %" />
+            <span class="faint small">% disc</span>
+          </div>`; }).join('') : '<div class="faint small">No labs/organizations on record yet — add people with a Lab / Group / Company to set discounts and tiers for them.</div>'}
+        ${orgs.length ? `<button class="btn btn-primary btn-sm mt-8" data-act="save-group-discounts">${ic('check')} Save Group Discounts &amp; Tiers</button>` : ''}
         <div class="divider"></div>
         <div style="font-weight:600" class="mb-8">Rename / Merge Lab</div>
-        <div class="faint small mb-8">Labs are free-text names, so a typo forks a duplicate with its own discount row and Reports line. Rename one everywhere at once — or merge it into an existing name if that name is already in use.</div>
+        <div class="faint small mb-8">Labs are free-text names, so a typo forks a duplicate with its own discount row, pricing tier assignment and Reports line. Rename one everywhere at once — or merge it into an existing name if that name is already in use.</div>
         ${renameOrgs.length ? `
         <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
           <div class="field" style="margin:0">
