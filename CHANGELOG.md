@@ -3,6 +3,39 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-09-08
+
+### Added
+- **Search filter in token pickers.** Token pickers (People/Instruments/Staff/etc.) gain a
+  type-to-filter search box above the dropdown, narrowing the available options without ever
+  hiding an already-picked badge.
+- **Per-category staff billing policy and staff requirement (roadmap item B).** A new Settings
+  card lets a facility set what percent of a Facility Staff member's normal rate each booking
+  category bills (e.g. discounted for training), and whether that category requires a facility
+  staff assignee before it can be saved; the booking modal shows a live advisory and price note,
+  and enforcement applies only to new/edited bookings so legacy history is untouched.
+
+### Changed
+- **Category "Add New" button alignment; notes toolbar simplified to bullets only.** The
+  label+Add-New header on vocab/category fields (and the PI "New Member" field) now uses a
+  fixed-height flex row instead of an absolute-positioned button, so the button can no longer
+  overlap the label on narrow columns. The meeting notes rich-text toolbar drops Bold/Italic and
+  the font-size picker, keeping only the bullet-list button; existing notes with that formatting
+  still render and export unchanged.
+
+### Fixed
+- **Training's disabled Staff % no longer masquerades as the applied rate.** While "Same as
+  assisted session" is on, the Category Billing row shows a live hint with the assisted-session
+  percent that actually bills, updating as that value is edited.
+- **Typing in a picker's search box no longer recomputes the booking cost per keystroke.** The
+  cost breakdown and conflict advisory now refresh only when the actual selection changes; the
+  search input also carries an accessible label.
+- **Category staff percentages can't go negative.** The policy is clamped to zero at save and at
+  read, so a stray minus sign can't produce negative staff lines or booking totals.
+- **The requires-staff advisory honors the legacy-edit bypass.** Editing an old booking that was
+  saved with a requires-staff category and no staff no longer shows a warning the save gate
+  itself waives for notes-only edits.
+
 ## [1.7.0] — 2026-09-08
 
 ### Added

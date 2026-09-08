@@ -16,6 +16,7 @@
     get autoBackupFolderStatus() { return autoBackupFolderStatus; },
     onSaving() { UI.setSavedState('pending'); },
     onSaved() { UI.setSavedState('saved'); },
+    syncCategoryBillingHints: syncCategoryBillingHints,
   };
 
   const TITLES = {
@@ -62,9 +63,9 @@
     if (selected && selected !== 'Other' && !opts.includes(selected)) opts.push(selected);
     return `
     <div class="field">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;row-gap:4px">
-        <label style="margin-bottom:0">${esc(label)}${required ? ' *' : ''}</label>
-        <button type="button" class="btn btn-secondary btn-sm" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
+      <div class="field-vocab-head">
+        <label>${esc(label)}${required ? ' *' : ''}</label>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add New</button>
       </div>
       <select class="input vocab-select" id="${id}" data-cat="${category}" data-label="${esc(label)}" data-prev="${esc(selected)}">
         <option value="">${placeholder}</option>
@@ -86,9 +87,9 @@
     if (selected && !opts.includes(selected)) opts.push(selected);
     return `
     <div class="field">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;row-gap:4px">
-        <label style="margin-bottom:0">${esc(label)}</label>
-        <button type="button" class="btn btn-secondary btn-sm" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
+      <div class="field-vocab-head">
+        <label>${esc(label)}</label>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add New</button>
       </div>
       <select class="input" id="${id}">
         <option value="">— None —</option>
@@ -937,6 +938,7 @@
       case 'save-billing-rates': return saveBillingRates();
       case 'save-cancellation-rules': return saveCancellationRules();
       case 'save-group-discounts': return saveGroupDiscounts();
+      case 'save-category-policies': return saveCategoryPolicies();
       case 'rename-org': return renameOrgFromSettings();
       case 'save-grant-display': return saveGrantDisplay();
 
@@ -1240,11 +1242,9 @@
         
         <div class="grid cols-2">
           <div class="field">
-            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px">
-              <label style="margin-bottom:0">Principal Investigator (PI)</label>
-              <button type="button" class="btn btn-secondary btn-sm" data-act="ep-add-person" data-project-id="${p.id}" data-tooltip="Register new researcher or PI" style="padding:2px 7px;font-size:11px">
-                ${ic('plus')} New Member
-              </button>
+            <div class="field-vocab-head">
+              <label>Principal Investigator (PI)</label>
+              <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="ep-add-person" data-project-id="${p.id}" data-tooltip="Register new researcher or PI">${ic('plus')} New Member</button>
             </div>
             <select class="input" id="ep-pi">
               <option value="">-- Select or None --</option>
@@ -2162,6 +2162,7 @@
     return `<div class="field"><label>${label}</label>
       <div class="token-picker" data-kind="${kind}" data-add="${esc(addLabel)}">
         <div class="token-list"></div>
+        <input type="text" class="input token-search" placeholder="Type to filter…" aria-label="Filter the ${esc(label)} list by name or lab" autocomplete="off" hidden />
         <select class="input token-select"></select>
       </div></div>`;
   }
@@ -2169,16 +2170,7 @@
     return `<div class="field"><label>Notes</label>
       <div class="rte">
         <div class="rte-toolbar">
-          <button type="button" class="rte-btn" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
-          <button type="button" class="rte-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
           <button type="button" class="rte-btn" data-cmd="insertUnorderedList" title="Bullet list">&bull;</button>
-          <select class="rte-size" title="Font size">
-            <option value="">Size</option>
-            <option value="0.85em">Small</option>
-            <option value="1em">Normal</option>
-            <option value="1.25em">Large</option>
-            <option value="1.6em">Huge</option>
-          </select>
         </div>
         <div class="rte-editor input" id="${id}" contenteditable="true" data-placeholder="Short notes, bullet points, action context…"></div>
       </div></div>`;
@@ -2247,12 +2239,20 @@
     if (!wrap) return;
     const list = wrap.querySelector('.token-list');
     const sel = wrap.querySelector('.token-select');
+    const search = wrap.querySelector('.token-search');
     const addLabel = wrap.dataset.add || '+ Add…';
     const byId = new Map(items.map((it) => [String(it.id), it]));
     const selected = new Set();
     let locked = false, lockMsg = '';
     let filterFn = null; // narrows the dropdown only — an already-picked badge never disappears
     let singleInstrumentLock = false; // 'inst' picker only — set once the user confirms one instrument is enough
+    let searchTerm = ''; // type-to-search text, ANDed with filterFn — narrows the dropdown only
+    let lastNotifiedSelection = null; // last selection signature onChange fired for (null ⇒ fire on first render)
+    // Always shown: the box is harmless even on a short list (a few extra pixels), and any
+    // fixed item-count threshold ends up hiding it on real data — the shipped demo dataset's
+    // own People/Instruments/Staff pickers all sit at or under 8 items, which a `> 8` gate
+    // would hide entirely. Simpler and correct: no gating.
+    if (search) search.hidden = false;
 
     function render() {
       list.innerHTML = [...selected].map((id) => {
@@ -2265,17 +2265,41 @@
       // survives the next save) but are never offered for a new assignment.
       let avail = items.filter((it) => !selected.has(String(it.id)) && !it.retired);
       if (filterFn) avail = avail.filter(filterFn);
+      if (searchTerm) {
+        const t = searchTerm.toLowerCase();
+        avail = avail.filter((it) => (it.name || '').toLowerCase().includes(t) || (it.meta || '').toLowerCase().includes(t));
+      }
       sel.innerHTML = `<option value="">${esc(singleInstrumentLock ? 'Remove the instrument above to add another' : addLabel)}</option>` +
         avail.map((it) => `<option value="${it.id}">${esc(it.name)}${it.meta ? ' — ' + esc(it.meta) : ''}</option>`).join('');
       sel.value = '';
       sel.disabled = singleInstrumentLock;
       // Cost-relevant pickers (instruments/staff) pass this so the BOM re-renders whenever the
-      // selection itself changes; the attendees picker doesn't bother — it isn't billed.
-      if (onChange) onChange();
+      // SELECTION itself changes — not on every render: search typing re-renders the dropdown
+      // many times a second, and recomputing the BOM + conflict check per keystroke would lag on
+      // larger datasets. The signature check keeps the first render firing (mount-time init)
+      // and any _setSelected/add/remove, while pure dropdown refreshes stay silent.
+      const selSig = [...selected].join(',');
+      if (onChange && selSig !== lastNotifiedSelection) { lastNotifiedSelection = selSig; onChange(); }
+    }
+    if (search) {
+      search.addEventListener('input', () => { searchTerm = search.value || ''; render(); });
+      // Esc inside a non-empty search box clears it first, and stops the keydown from also
+      // reaching ui.js's global document-level handler (which would otherwise close the whole
+      // modal on the same keypress). An empty box has nothing local to do, so that Esc is left
+      // to bubble and closes the modal as usual — one Esc to clear, one more to leave.
+      search.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (!search.value) return; // let it bubble — closes the modal
+        e.stopPropagation();
+        search.value = '';
+        searchTerm = '';
+        render();
+      });
     }
     sel.addEventListener('change', () => {
       if (!sel.value) return;
       selected.add(sel.value);
+      if (search && search.value) { search.value = ''; searchTerm = ''; } // fresh search after a pick
       render();
       // Ask only the first time an instrument is picked by hand (not when an edit modal seeds
       // existing badges via _setSelected) — and only while it's the sole instrument selected.
@@ -2351,7 +2375,12 @@
   }
 
   /* Minimal rich-text editor for meeting notes. Uses execCommand (deprecated but universally
-     supported, fine for a local offline app); output is whitelisted by UI.sanitizeHtml on save. */
+     supported, fine for a local offline app); output is whitelisted by UI.sanitizeHtml on save.
+     The toolbar only offers bullets + normal text — bold/italic/underline and the font-size
+     picker were removed per the owner's request. This is a toolbar-only change: existing notes
+     saved with that legacy formatting still render and export exactly as before (sanitize's
+     allowed tags and the exports' rich-text walkers are untouched), and paste already strips
+     incoming HTML down to plain text below, so nothing new can smuggle that formatting back in. */
   function mountRichText(m, id) {
     const editor = m.querySelector('#' + id);
     if (!editor) return;
@@ -2360,35 +2389,17 @@
       b.addEventListener('mousedown', (e) => e.preventDefault());     // keep the selection
       b.addEventListener('click', () => { editor.focus(); document.execCommand(b.dataset.cmd, false, null); });
     });
-    const sizeSel = bar.querySelector('.rte-size');
-    sizeSel.addEventListener('change', () => {
-      const v = sizeSel.value;
-      sizeSel.value = '';
-      if (!v) return;
-      editor.focus();
-      applyFontSize(editor, v);
-    });
-    editor.addEventListener('keydown', (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'b') { e.preventDefault(); document.execCommand('bold'); }
-      else if (k === 'i') { e.preventDefault(); document.execCommand('italic'); }
-    });
     editor.addEventListener('paste', (e) => {
       e.preventDefault();
       const t = (e.clipboardData || window.clipboardData).getData('text/plain');
       document.execCommand('insertText', false, t);
     });
-  }
-  function applyFontSize(editor, value) {
-    const s = window.getSelection();
-    if (!s || s.isCollapsed || !s.rangeCount) return;
-    document.execCommand('fontSize', false, '7');
-    editor.querySelectorAll('font[size="7"]').forEach((f) => {
-      const span = document.createElement('span');
-      span.style.fontSize = value;
-      while (f.firstChild) span.appendChild(f.firstChild);
-      f.replaceWith(span);
+    // The bold/italic/underline toolbar buttons are gone, but contenteditable still answers to
+    // the browser's native Ctrl/Cmd+B/I/U shortcuts on its own — block those explicitly so the
+    // removed formatting can't come back through the keyboard.
+    editor.addEventListener('keydown', (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
     });
   }
   function readNote(m, id) {
@@ -2573,7 +2584,7 @@
           <span class="mono small faint" style="width:70px">${fmtMoney(p.rate)}/hr</span>
           <input type="time" class="input bom-staff-start" data-id="${p.id}" value="${esc(win.start || '')}" placeholder="full booking" style="width:105px" data-tooltip="Leave blank to bill this person for the entire booking window" />
           <input type="time" class="input bom-staff-end" data-id="${p.id}" value="${esc(win.end || '')}" placeholder="full booking" style="width:105px" />
-          <span class="mono small faint bom-billhours" data-id="${p.id}" style="width:110px">0 hrs</span>
+          <span class="mono small faint bom-billhours" data-id="${p.id}" style="width:150px">0 hrs</span>
           <span class="mono font-medium bom-line" data-id="${p.id}" style="width:90px;text-align:right">${fmtMoney(0)}</span>
         </div>`;
       }).join('');
@@ -2606,14 +2617,24 @@
       overheadPct: resolvedOverhead.overheadPct,
       taxPct: DB.getConfigNum('tax_pct', 0)
     };
+    // Category billing policy (roadmap item B) — resolved here, the one live-modal caller, per the
+    // same "callers resolve, computeBookingBOM just does arithmetic" division of labor as overhead/
+    // instrument-tier resolution above. Reads whatever the Category select currently shows, so
+    // switching categories mid-form re-prices staff lines immediately (wireBomInputs wires that
+    // select's change event to recalc, or the on-screen total would drift from what gets saved).
+    const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
+    const category = categoryEl ? categoryEl.value || '' : '';
+    const catPolicy = DB.categoryPolicy(category);
+    const staffPctFactor = (Number(catPolicy.staff_pct) || 0) / 100;
     const bom = UI.computeBookingBOM({
       start, end, instruments: instrumentsForCalc, staff: staffForCalc,
-      groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates
+      groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates, staffPctFactor
     });
     // Snapshot columns bookingSave/bookingEditSave/insertBookingRow write onto the meetings row
     // alongside the money — null/null together means this booking priced via the legacy fallback.
     bom.tierId = resolvedOverhead.tierId;
     bom.tierOverheadPct = resolvedOverhead.tierOverheadPct;
+    bom.categoryStaffPct = catPolicy.staff_pct;
     m._bom.last = bom; // read back at save time so the stored total matches what's on screen
 
     bom.instrumentLines.forEach((line) => {
@@ -2624,7 +2645,10 @@
     });
     bom.staffLines.forEach((line) => {
       const bhEl = m.querySelector(`.bom-billhours[data-id="${line.id}"]`);
-      if (bhEl) bhEl.textContent = line.billHours + (line.billHours === 1 ? ' hr' : ' hrs') + (line.rawHours > 0 && line.rawHours < 1 ? ' (1hr floor)' : '');
+      // The applied category percent only merits a mention when it actually changes something —
+      // stays silent at the (overwhelmingly common) 100% default.
+      const pctNote = bom.staffPctFactor !== 1 ? ` <span class="faint">(× ${catPolicy.staff_pct}%)</span>` : '';
+      if (bhEl) bhEl.innerHTML = line.billHours + (line.billHours === 1 ? ' hr' : ' hrs') + (line.rawHours > 0 && line.rawHours < 1 ? ' (1hr floor)' : '') + pctNote;
       const lineEl = m.querySelector(`.bom-line[data-id="${line.id}"]`);
       if (lineEl) lineEl.textContent = fmtMoney(line.line);
     });
@@ -2668,6 +2692,13 @@
         ? `Overhead (${esc(DB.tierLabel(bom.tierId))} tier, ${bom.overheadPct}%)`
         : `Overhead (${bom.overheadPct}%)`;
 
+      // A subtle note only when this category's policy actually changes something — silent at the
+      // (overwhelmingly common) 100%/no-requirement default, same "don't mention it unless it
+      // matters" rule as the staff-line pctNote above.
+      const categoryNote = (bom.staffPctFactor !== 1 || catPolicy.requires_staff)
+        ? `<div class="faint small mt-8">${ic('tag')} Category Billing: staff time bills at ${catPolicy.staff_pct}%${catPolicy.requires_staff ? ' · requires a facility staff member' : ''}</div>`
+        : '';
+
       summaryEl.innerHTML =
         row('Subtotal', fmtMoney(bom.subtotal)) +
         groupRow +
@@ -2675,7 +2706,8 @@
         row(overheadLabel, '+' + fmtMoney(bom.overheadAmt)) +
         row('Before tax', fmtMoney(bom.beforeTax), { strong: true }) +
         row(`Tax (${bom.taxPct}%)`, '+' + fmtMoney(bom.taxAmt)) +
-        row('Total', fmtMoney(bom.total), { strong: true, big: true });
+        row('Total', fmtMoney(bom.total), { strong: true, big: true }) +
+        categoryNote;
     }
   }
 
@@ -2686,6 +2718,17 @@
   // have to tell those two apart themselves: render nothing in the first case (an empty "no
   // conflicts" box before the user's even picked times is just noise), a subtle all-clear line in
   // the second.
+  // Category billing policy advisory — deliberately a SEPARATE call from findBookingConflicts, not
+  // folded into its returned array: "no staff assignee yet" isn't a scheduling conflict (nothing's
+  // double-booked, no constraint is violated), it's a billing-policy hint that's trivially fixed by
+  // picking one, so it doesn't belong in the same semantic bucket as an overlap or a min-notice
+  // violation. Cheap enough to just recompute on every render rather than caching it.
+  function categoryStaffAdvisory(category, staffIds) {
+    return DB.categoryPolicy(category).requires_staff && !(staffIds && staffIds.length)
+      ? `"${category}" bookings require a facility staff member`
+      : '';
+  }
+
   function renderBookingConflicts(m, ids) {
     const host = m.querySelector('#' + ids.prefix + '-conflicts');
     if (!host) return;
@@ -2697,9 +2740,28 @@
     if (!date && ids.dateDefault === 'today') date = UI.today();
     const start = (m.querySelector('#' + ids.start) || {}).value || '';
     const end = (m.querySelector('#' + ids.end) || {}).value || '';
-    if (!start || !end) { host.innerHTML = ''; return; }
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
+
+    // Independent of start/end being set — a booking can be missing a required staff assignee
+    // before it has times at all, so this renders (or stays silent) regardless of the early
+    // return just below.
+    const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
+    const currentCategory = categoryEl ? categoryEl.value || '' : '';
+    // Mirror bookingEditSave's skipRequiresStaffCheck exactly: a legacy booking saved with this
+    // same category and no staff, still with no staff selected, saves fine (notes-only edits of
+    // history must not be bricked) — so the advisory must not warn about it either, or it drifts
+    // from the gate it exists to preview.
+    let suppressStaffAdvisory = false;
+    if (ids.excludeId && staffIds.length === 0) {
+      const storedCat = DB.row('SELECT category FROM meetings WHERE id=?', [ids.excludeId]);
+      const storedStaff = DB.row('SELECT COUNT(*) AS n FROM meeting_staff WHERE meeting_id=?', [ids.excludeId]);
+      suppressStaffAdvisory = !!storedCat && (storedCat.category || '') === currentCategory && !!storedStaff && storedStaff.n === 0;
+    }
+    const advisory = suppressStaffAdvisory ? '' : categoryStaffAdvisory(currentCategory, staffIds);
+    const advisoryHtml = advisory ? `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} ${esc(advisory)}</span></div>` : '';
+
+    if (!start || !end) { host.innerHTML = advisoryHtml; return; }
     // Mirror bookingEditSave's skipNotice exactly: a notes-only edit (date/start unchanged from
     // what's stored) shouldn't show a notice-advisory warning that bookingEditSave itself won't
     // enforce at save time either, or the advisory would drift from the hard gate.
@@ -2710,10 +2772,10 @@
     }
     const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds, skipNotice });
     if (!conflicts.length) {
-      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>`;
+      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>` + advisoryHtml;
       return;
     }
-    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>`;
+    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>` + advisoryHtml;
   }
 
   function wireBomInputs(m, ids) {
@@ -2731,6 +2793,11 @@
     if (groupEl) groupEl.addEventListener('change', () => offerGroupDiscount(m, ids, groupEl.value));
     const allLabsEl = ids.allLabs ? m.querySelector('#' + ids.allLabs) : null;
     if (allLabsEl) allLabsEl.addEventListener('change', () => filterOwnerPickerByGroup(m, m._bom.groupOrg, ids));
+    // Category decides the staff billing percent (recomputeBomTotals resolves it) — without this,
+    // switching categories would silently leave the on-screen total priced at whatever category
+    // was selected when the modal opened, disagreeing with what booking-save actually stores.
+    const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
+    if (categoryEl) categoryEl.addEventListener('change', () => { recalc(); recalcConflicts(); });
     const discEl = m.querySelector('#' + ids.prefix + '-discount');
     if (discEl) discEl.addEventListener('input', () => { m._bom.manualPct = Number(discEl.value) || 0; recalc(); });
 
@@ -2918,7 +2985,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' }, insts: instId ? [instId] : undefined }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', category: 'bk-category', allLabs: 'bk-all-labs' }, insts: instId ? [instId] : undefined }));
   }
 
   // Cap on how many occurrences a single "Repeat" save can create — a sanity backstop against a
@@ -2965,6 +3032,14 @@
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
 
+    // Requires-staff enforcement (category billing policy) runs BEFORE the conflict gate below, and
+    // before the recurring-occurrence loop even exists yet — so every occurrence of a repeating
+    // booking inherits this check automatically, for free, just by living here.
+    if (DB.categoryPolicy(category).requires_staff && !staffIds.length) {
+      UI.toast(`"${category}" bookings require a facility staff member`, 'error');
+      return;
+    }
+
     const repeatWeeksEl = m.querySelector('#bk-repeat-weeks');
     const repeatUntilEl = m.querySelector('#bk-repeat-until');
     const repeatUntil = repeatUntilEl ? repeatUntilEl.value || '' : '';
@@ -3004,16 +3079,16 @@
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    const ids = { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group' };
+    const ids = { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group', category: 'bk-category' };
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
     // Same BOM snapshot (rates read once, at save time) for every occurrence — deliberate:
     // identical recurring sessions are priced at today's rates, not recomputed per occurrence.
     function insertBookingRow(dateStr) {
-      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct]);
+      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct, category_staff_pct)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct]);
       const inserted = DB.row('SELECT last_insert_rowid() as id');
       const mid = inserted ? inserted.id : null;
       if (mid) {
@@ -3092,7 +3167,7 @@
         instrumentDetails: currentInstDetails, staffDetails: currentStaffDetails,
         discountPct: mt.discount_pct || 0, note: mt.note,
         groupOrg: mt.group_org || '', groupPct: mt.group_discount_pct || 0,
-        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', date: 'bke-date', project: 'bke-project', group: 'bke-group', allLabs: 'bke-all-labs', excludeId: mt.id }
+        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', date: 'bke-date', project: 'bke-project', group: 'bke-group', category: 'bke-category', allLabs: 'bke-all-labs', excludeId: mt.id }
       }));
   }
 
@@ -3121,8 +3196,24 @@
     // minimum-advance-notice check — that constraint is about giving the facility warning before
     // a NEW time is committed to, not about blocking edits to a booking whose slot was already
     // locked in. Duration and gap constraints still apply regardless.
-    const stored = DB.row('SELECT date, start_time FROM meetings WHERE id=?', [id]) || {};
+    const stored = DB.row('SELECT date, start_time, category FROM meetings WHERE id=?', [id]) || {};
     const skipNotice = stored.date === date && (stored.start_time || '') === start;
+
+    // Requires-staff enforcement (category billing policy), same class of history guard as
+    // skipNotice just above: a legacy booking already saved with this exact category and no staff
+    // must still be editable for notes/other fields without retroactively getting blocked by a
+    // requirement that didn't exist (or wasn't enforced) when it was first saved. Any REAL change —
+    // to the category, or to who's assigned as staff — drops the exemption and enforces normally.
+    const storedStaffIds = DB.rows('SELECT person_id FROM meeting_staff WHERE meeting_id=?', [id]).map((r) => r.person_id).sort((a, b) => a - b);
+    const currentStaffSorted = [...staffIds].sort((a, b) => a - b);
+    const staffUnchanged = storedStaffIds.length === currentStaffSorted.length && storedStaffIds.every((v, i) => v === currentStaffSorted[i]);
+    const categoryUnchanged = (stored.category || '') === category;
+    const skipRequiresStaffCheck = categoryUnchanged && staffUnchanged && storedStaffIds.length === 0;
+    const catPolicy = DB.categoryPolicy(category);
+    if (catPolicy.requires_staff && !staffIds.length && !skipRequiresStaffCheck) {
+      UI.toast(`"${category}" bookings require a facility staff member`, 'error');
+      return;
+    }
 
     const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds, skipNotice });
     if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
@@ -3131,14 +3222,14 @@
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    const ids = { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group' };
+    const ids = { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group', category: 'bke-category' };
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
     DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
               discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
-              tier_id=?, tier_overhead_pct=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, id]);
+              tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
@@ -3604,6 +3695,49 @@
     });
     UI.toast('Group discounts & tiers saved');
     refresh();
+  }
+
+  // Category Billing (Settings): one row per DB.vocabList('BOOKING_CATEGORY') entry, each an
+  // independent DB.setCategoryPolicy call — a facility-SETTINGS write, same "applies to NEW
+  // bookings only" framing as the card's own copy; no existing meetings row is ever touched here.
+  function saveCategoryPolicies() {
+    document.querySelectorAll('.cat-policy-row').forEach((rowEl) => {
+      const category = rowEl.dataset.category;
+      if (!category) return;
+      const pctEl = rowEl.querySelector('.cat-staff-pct');
+      const reqEl = rowEl.querySelector('.cat-requires-staff');
+      const followEl = rowEl.querySelector('.cat-follow-assisted');
+      DB.setCategoryPolicy(category, {
+        staff_pct: pctEl ? Number(pctEl.value) || 0 : 100,
+        requires_staff: !!(reqEl && reqEl.checked),
+        follow_assisted: !!(followEl && followEl.checked)
+      });
+    });
+    UI.toast('Category billing policies saved');
+    refresh();
+  }
+
+  // Keeps the training row honest while "Same as assisted session" is checked: the disabled %
+  // input still shows training's own STORED value, but the percent actually billed comes from the
+  // assisted-session row — so a visible hint mirrors that effective percent live (updated from
+  // both the checkbox and the assisted row's % input) without ever changing the stored value.
+  function syncCategoryBillingHints() {
+    const rows = [...document.querySelectorAll('.cat-policy-row')];
+    const assistedRow = rows.find((r) => r.dataset.category === 'assisted session');
+    const trainingRow = rows.find((r) => r.dataset.category === 'training');
+    if (!trainingRow) return;
+    const followEl = trainingRow.querySelector('.cat-follow-assisted');
+    const pctEl = trainingRow.querySelector('.cat-staff-pct');
+    const hintEl = trainingRow.querySelector('.cat-follow-hint');
+    const on = !!(followEl && followEl.checked);
+    if (pctEl) pctEl.disabled = on;
+    if (hintEl) {
+      hintEl.hidden = !on;
+      if (on) {
+        const assistedPct = assistedRow ? Number((assistedRow.querySelector('.cat-staff-pct') || {}).value) || 0 : 100;
+        hintEl.textContent = `→ billing at assisted session's ${assistedPct}% (the disabled value above is ignored)`;
+      }
+    }
   }
 
   // Rename/merge a lab name everywhere it appears (people.organization, meetings.group_org, and
