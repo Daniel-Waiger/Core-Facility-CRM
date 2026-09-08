@@ -1252,6 +1252,23 @@
       actions: 'Maya to prepare test 24-well plate for PSF and resolution calibration next week.',
       category: 'consult'
     });
+    // — and the roadmap's other consult modality: a booking with the core member's time billed
+    // retroactively (1-hour floor), attributed to the instrument it was about via
+    // meeting_instruments (amount 0 ⇒ no per-grid charge — only Priya's time is billed). This is
+    // the seed row that gives the Consults report's per-instrument panel something to show.
+    seedBooking({
+      projectId: 3,
+      grantId: 3, // Islet Imaging State Grant — matches project 3's own grant
+      title: 'Vitrification Troubleshooting Consult',
+      date: day(-60), start: '14:00', end: '14:45',
+      instruments: [{ id: 5 }], // Glacios Cryo-TEM — what the consult was about; 0 units billed
+      staff: [{ id: 7 }], // Dr. Priya Anand — 45 min, billed at the 1-hour floor
+      peopleIds: [3, 7], // Sarah Lin, Priya Anand
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Walked through blot-force and humidity settings after repeated thin-ice failures on islet grids.',
+      actions: 'Priya\'s time billed retroactively per facility consult policy; new plunge parameters logged on the instrument sheet.',
+      category: 'consult'
+    });
 
     // #4 — multi-instrument (parallel sample runs): the only booking exercising Reports' even
     // split of one staff member's hours across more than one instrument.
