@@ -571,15 +571,18 @@
       // One level, no chains: read 'assisted session'.staff_pct directly, not through another
       // recursive categoryPolicy() call (which would let a chain of follow_assisted flags loop).
       const assisted = row('SELECT staff_pct FROM category_policies WHERE category=?', ['assisted session']);
-      return { staff_pct: assisted ? Number(assisted.staff_pct) : 100, requires_staff: raw.requires_staff };
+      // Same non-negative clamp as setCategoryPolicy, for rows written before the clamp existed.
+      return { staff_pct: assisted ? Math.max(0, Number(assisted.staff_pct) || 0) : 100, requires_staff: raw.requires_staff };
     }
-    return { staff_pct: raw.staff_pct, requires_staff: raw.requires_staff };
+    return { staff_pct: Math.max(0, Number(raw.staff_pct) || 0), requires_staff: raw.requires_staff };
   }
   function setCategoryPolicy(category, { staff_pct, requires_staff, follow_assisted }) {
     if (!category) return;
+    // Clamp to non-negative: a negative percent would flow through computeBookingBOM's
+    // staffPctFactor and produce negative staff lines and booking totals.
     run(`INSERT INTO category_policies (category, staff_pct, requires_staff, follow_assisted) VALUES (?,?,?,?)
          ON CONFLICT(category) DO UPDATE SET staff_pct=excluded.staff_pct, requires_staff=excluded.requires_staff, follow_assisted=excluded.follow_assisted`,
-      [category, Number(staff_pct) || 0, requires_staff ? 1 : 0, follow_assisted ? 1 : 0]);
+      [category, Math.max(0, Number(staff_pct) || 0), requires_staff ? 1 : 0, follow_assisted ? 1 : 0]);
   }
 
   async function boot() {

@@ -30,6 +30,8 @@ This project uses [Semantic Versioning](https://semver.org/).
 - **Typing in a picker's search box no longer recomputes the booking cost per keystroke.** The
   cost breakdown and conflict advisory now refresh only when the actual selection changes; the
   search input also carries an accessible label.
+- **Category staff percentages can't go negative.** The policy is clamped to zero at save and at
+  read, so a stray minus sign can't produce negative staff lines or booking totals.
 
 ## [1.7.0] — 2026-09-08
 
