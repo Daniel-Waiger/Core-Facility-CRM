@@ -3,7 +3,7 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.7.0] — 2026-09-08
 
 ### Added
 - **Week calendar view (roadmap 1.1).** The Calendar screen gains a Month/Week toggle alongside
