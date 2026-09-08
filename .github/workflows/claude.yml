@@ -1,0 +1,45 @@
+name: Claude Code
+
+# Summon Claude by writing "@claude <request>" in an issue (title or body when
+# opening it) or in any issue / PR-review comment. The action authenticates as
+# the Claude GitHub App (install once: https://github.com/apps/claude) and
+# spends from the ANTHROPIC_API_KEY repository secret.
+# Docs: https://code.claude.com/docs/en/github-actions
+on:
+  issues:
+    types: [opened, assigned]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Repo ground rules for anything Claude does from an issue/PR mention.
+          # CLAUDE.md carries the full architecture rules; these are the hard lines.
+          prompt: |
+            Follow the repository's CLAUDE.md conventions strictly. Never bump
+            ?v=/CACHE_VERSION/APP_VERSION or add CHANGELOG version headers unless
+            explicitly asked to cut a release. Never recompute stored cost
+            snapshots. For issue analysis: verify claims against the code before
+            answering, and prefer pointing at existing app capabilities over
+            proposing workarounds that duplicate entities or pollute history.
