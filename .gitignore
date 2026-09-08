@@ -14,3 +14,9 @@ outreach/
 
 .claude/worktrees/
 
+# CMA run state. The board's live data and the per-run task graph are scratch;
+# the durable record is the snapshot committed inside
+# tools/cma-dashboard/index.html.
+tools/cma-dashboard/status.json
+.cma/
+

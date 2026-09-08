@@ -6,6 +6,12 @@
       "name": "static-server",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-c", "import os,http.server;http.server.ThreadingHTTPServer(('',int(os.environ.get('PORT',8000))),http.server.SimpleHTTPRequestHandler).serve_forever()"]
+    },
+    {
+      "name": "cma-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "import os,http.server;os.chdir('tools/cma-dashboard');http.server.ThreadingHTTPServer(('',int(os.environ.get('PORT',8777))),http.server.SimpleHTTPRequestHandler).serve_forever()"],
+      "port": 8777
     }
   ]
 }

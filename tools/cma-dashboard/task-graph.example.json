@@ -1,0 +1,15 @@
+{
+  "_comment": "Shape the planner emits and --from-task-graph reads. Phase comes from `batches` when present, else a per-task `phase`, else 'Tasks'. A bare array of tasks, or of plain strings, is also accepted.",
+  "run": "Example run",
+  "tasks": [
+    { "id": "T1", "title": "Read lessons files and the touched sources", "depends_on": [] },
+    { "id": "T2", "title": "Add the schema migration", "depends_on": ["T1"] },
+    { "id": "T3", "title": "Wire the new data-act case", "depends_on": ["T1"] },
+    { "id": "T4", "title": "Adversarial verification pass", "depends_on": ["T2", "T3"] }
+  ],
+  "batches": [
+    { "name": "Context", "tasks": ["T1"] },
+    { "name": "Implement", "tasks": ["T2", "T3"] },
+    { "name": "Verify", "tasks": ["T4"] }
+  ]
+}

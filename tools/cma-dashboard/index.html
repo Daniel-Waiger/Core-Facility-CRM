@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CMA Run Dashboard</title>
+<!--
+  GENERALIST TEMPLATE. This page knows nothing about any run, project or task
+  vocabulary. Every string it shows comes from status.json (when served) or
+  from the embedded snapshot at the bottom (when opened over file://).
+
+  DO NOT hand-edit this file to change what it displays. update.py rewrites
+  the snapshot from status.json on every call; editing the HTML is how that
+  snapshot silently rots. If the board shows the wrong thing, fix the data.
+-->
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --panel-2:#fbfcfd; --line:#e2e6ec;
+    --ink:#161a20; --muted:#697384; --faint:#98a1b0;
+    --accent:#3b6df6; --accent-soft:#e8eefe;
+    --run:#2f77d6; --verify:#7a5af5; --done:#1f9d5b; --fail:#d64545;
+    --resolve:#c98a12; --pause:#8b93a3; --warm:#0f9d8f; --cold:#d1741f;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 18px rgba(16,24,40,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e1116; --panel:#161b23; --panel-2:#1b212b; --line:#262e3a;
+      --ink:#e8ecf2; --muted:#98a3b5; --faint:#69748a;
+      --accent:#6f97ff; --accent-soft:#1b2540;
+      --run:#5b96ec; --verify:#a58bff; --done:#3ec97f; --fail:#f2706e;
+      --resolve:#e0aa3e; --pause:#7d879a; --warm:#2bc4b2; --cold:#e8934a;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    padding:22px 20px 60px;
+  }
+  .wrap{max-width:1180px;margin:0 auto}
+
+  header{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  .brand{font-weight:700;letter-spacing:-.02em;font-size:20px}
+  .brand span{color:var(--muted);font-weight:500}
+  .runname{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+  .meta{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .meta b{color:var(--ink);font-weight:600}
+  .spacer{flex:1}
+  .pathtag{
+    font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+    padding:5px 10px;border-radius:999px;border:1px solid var(--line);
+    background:var(--panel);color:var(--muted);white-space:nowrap;
+  }
+  .pathtag.warm{color:var(--warm);border-color:color-mix(in srgb,var(--warm) 40%,var(--line))}
+  .pathtag.full{color:var(--verify);border-color:color-mix(in srgb,var(--verify) 40%,var(--line))}
+
+  .panel{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden;
+  }
+  .panel > h2{
+    margin:0;padding:11px 16px;font-size:11.5px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    border-bottom:1px solid var(--line);background:var(--panel-2);
+    display:flex;align-items:center;gap:10px;
+  }
+  .panel > h2 .hint{
+    font-weight:500;text-transform:none;letter-spacing:0;font-size:11.5px;
+    color:var(--faint);margin-left:auto;
+  }
+  .body{padding:14px 16px}
+
+  /* ---- stats ---- */
+  .stats{display:flex;flex-wrap:wrap;gap:10px}
+  .stat{
+    flex:1 1 130px;min-width:130px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+  }
+  .stat .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .stat .v{font-size:21px;font-weight:700;margin-top:2px;letter-spacing:-.02em}
+  .stat.good .v{color:var(--done)} .stat.warn .v{color:var(--resolve)}
+  .stat.bad .v{color:var(--fail)}
+
+  /* ---- network ---- */
+  .netwrap{display:grid;grid-template-columns:minmax(0,1fr) 218px;gap:14px}
+  @media (max-width:860px){.netwrap{grid-template-columns:1fr}}
+  .net{width:100%;height:auto;display:block;overflow:visible}
+  .nlabel{font:600 12.5px system-ui,sans-serif;fill:var(--ink)}
+  .nsub{font:500 10.5px var(--mono);fill:var(--muted)}
+  .ncount{font:700 11px var(--mono);fill:var(--panel)}
+  .elabel{font:600 10px var(--mono);fill:var(--muted)}
+  .nbox{fill:var(--panel-2);stroke:var(--line);stroke-width:1.5}
+  .nbox.hot{stroke:var(--accent);stroke-width:2}
+  .edge{fill:none;stroke-linecap:round;opacity:.9}
+  .edge.idle{stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 5;opacity:.7}
+  .flow{stroke-dasharray:7 9;animation:flow 1.1s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-16}}
+  @media (prefers-reduced-motion:reduce){.flow{animation:none}}
+
+  .ledger{
+    background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+    padding:12px 13px;align-self:start;
+  }
+  .ledger h3{margin:0 0 3px;font-size:11px;text-transform:uppercase;
+    letter-spacing:.06em;color:var(--muted)}
+  .ledger .big{font-size:30px;font-weight:800;letter-spacing:-.03em;color:var(--warm)}
+  .ledger .note{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+  .bar{height:8px;border-radius:99px;background:var(--cold);overflow:hidden;margin:9px 0 7px}
+  .bar > i{display:block;height:100%;background:var(--warm)}
+  .lrow{display:flex;justify-content:space-between;font-size:11.5px;
+    font-family:var(--mono);color:var(--muted);padding:1px 0}
+  .lrow b{color:var(--ink);font-weight:600}
+
+  /* ---- tasks ---- */
+  .phase{margin-bottom:15px} .phase:last-child{margin-bottom:0}
+  .phase > h3{
+    margin:0 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--muted);display:flex;align-items:center;gap:8px;
+  }
+  .phase > h3:after{content:"";flex:1;height:1px;background:var(--line)}
+  .task{
+    display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;
+    border:1px solid transparent;
+  }
+  .task + .task{margin-top:2px}
+  .task:nth-child(even){background:var(--panel-2)}
+  .task.cur{border-color:var(--accent);background:var(--accent-soft)}
+  .tid{font-family:var(--mono);font-size:11.5px;color:var(--muted);min-width:44px}
+  .ttitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .badge{
+    font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    padding:3px 8px;border-radius:99px;color:#fff;white-space:nowrap;
+  }
+  .b-pending{background:var(--pause);opacity:.55} .b-idle{background:var(--pause);opacity:.55}
+  .b-running{background:var(--run)} .b-verifying{background:var(--verify)}
+  .b-done{background:var(--done)} .b-resolved{background:var(--resolve)}
+  .b-failed{background:var(--fail)} .b-paused{background:var(--pause)}
+  .by{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:56px;text-align:right}
+  .mode{
+    font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.04em;
+    padding:2px 6px;border-radius:5px;min-width:44px;text-align:center;
+  }
+  .mode.warm{color:var(--warm);background:color-mix(in srgb,var(--warm) 14%,transparent)}
+  .mode.cold{color:var(--cold);background:color-mix(in srgb,var(--cold) 14%,transparent)}
+  .mode.none{color:var(--faint);background:transparent}
+
+  /* ---- defects + log ---- */
+  .defect{
+    display:flex;gap:9px;padding:8px 11px;border-radius:8px;margin-bottom:6px;
+    background:color-mix(in srgb,var(--fail) 10%,transparent);
+    border:1px solid color-mix(in srgb,var(--fail) 32%,transparent);
+  }
+  .defect b{color:var(--fail)}
+  .log{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--muted);
+    max-height:190px;overflow:auto}
+  .log div{padding:2px 0;border-bottom:1px solid var(--line)}
+  .log div:last-child{border-bottom:0}
+  .log time{color:var(--faint);margin-right:9px}
+  .empty{color:var(--faint);font-style:italic;padding:4px 0}
+  footer{color:var(--faint);font-size:11.5px;text-align:center;margin-top:22px;line-height:1.7}
+  code{font-family:var(--mono);font-size:11.5px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="brand">CMA <span>· run dashboard</span></div>
+      <div class="runname" id="run-name">—</div>
+      <div class="meta" id="run-meta"></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="pathtag" id="run-path">—</div>
+  </header>
+
+  <section class="panel">
+    <h2>Signals <span class="hint" id="src-hint"></span></h2>
+    <div class="body"><div class="stats" id="stats"></div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Agent network
+      <span class="hint">traffic across the scheme — solid edges carry work, dashed are unused this run</span>
+    </h2>
+    <div class="body">
+      <div class="netwrap">
+        <svg class="net" id="net" viewBox="0 0 820 330" role="img"
+             aria-label="Agent dispatch network"></svg>
+        <div class="ledger">
+          <h3>Warm-context share</h3>
+          <div class="big" id="warm-pct">—</div>
+          <div class="bar"><i id="warm-bar" style="width:0%"></i></div>
+          <div class="lrow"><span>warm (no dispatch)</span><b id="warm-n">0</b></div>
+          <div class="lrow"><span>cold (subagent)</span><b id="cold-n">0</b></div>
+          <div class="note">Every cold dispatch re-pays first-read cost for
+            the lessons file, the plan and the touched sources. Warm work
+            reuses context already paid for.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Tasks <span class="hint" id="task-count"></span></h2>
+    <div class="body" id="tasks"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Open defects</h2>
+    <div class="body" id="defects"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Run log</h2>
+    <div class="body"><div class="log" id="log"></div></div>
+  </section>
+
+  <footer>
+    Generalist template — never hand-edit this file. Drive it with
+    <code>python update.py</code>; it rewrites the offline snapshot below on
+    every call.<br>
+    <span id="stamp"></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Fixed topology: the scheme's shape never varies, only its traffic does.
+  var NODES = {
+    orchestrator: {x:150, y:100, label:"Orchestrator", sub:"opus / fable"},
+    executor:     {x:410, y:100, label:"Executor",     sub:"sonnet"},
+    verifier:     {x:670, y:100, label:"Verifier",     sub:"opus / fable"},
+    ops:          {x:150, y:252, label:"Ops",          sub:"haiku"},
+    learner:      {x:670, y:252, label:"Learner",      sub:"cma-learner"}
+  };
+  var NW = 132, NH = 54;
+
+  var KIND = {
+    dispatch:{color:"var(--run)"},   verify:{color:"var(--verify)"},
+    defect:{color:"var(--fail)"},    warm:{color:"var(--warm)"},
+    learn:{color:"var(--done)"},     manual:{color:"var(--muted)"}
+  };
+
+  // Every edge the scheme can carry, so unused ones render dashed rather
+  // than vanishing — an absent path is information too.
+  var LANES = [
+    {from:"orchestrator", to:"executor",     kind:"dispatch"},
+    {from:"orchestrator", to:"ops",          kind:"dispatch"},
+    // Warm-context work goes straight from the orchestrator to the gate,
+    // skipping the executor entirely -- that IS the warm path, so it is a
+    // verify edge, not a dispatch, and it arcs over the executor rather
+    // than through it.
+    {from:"orchestrator", to:"verifier",     kind:"verify"},
+    {from:"orchestrator", to:"orchestrator", kind:"warm"},
+    {from:"executor",     to:"verifier",     kind:"verify"},
+    {from:"verifier",     to:"executor",     kind:"defect"},
+    {from:"verifier",     to:"orchestrator", kind:"defect"},
+    {from:"verifier",     to:"learner",      kind:"learn"}
+  ];
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function el(id) { return document.getElementById(id); }
+
+  function pathFor(lane) {
+    var a = NODES[lane.from], b = NODES[lane.to];
+    if (lane.from === lane.to) {                       // warm self-loop
+      return "M " + (a.x - 34) + " " + (a.y - NH / 2) +
+             " C " + (a.x - 52) + " " + (a.y - 96) + ", " +
+                     (a.x + 52) + " " + (a.y - 96) + ", " +
+                     (a.x + 34) + " " + (a.y - NH / 2);
+    }
+    if (lane.from === "orchestrator" && lane.to === "verifier") {
+      // Arc clear over the executor -- a straight line would run through it
+      // and read as if the work passed through the executor, which is the
+      // one thing the warm path did not do.
+      return "M " + (a.x + NW / 2 + 6) + " " + (a.y - 16) +
+             " C " + (a.x + 190) + " " + (a.y - 78) + ", " +
+                     (b.x - 190) + " " + (b.y - 78) + ", " +
+                     (b.x - NW / 2 - 10) + " " + (b.y - 16);
+    }
+    if (lane.kind === "defect") {
+      // Runs BACKWARDS, underneath: starts at the verifier and points at
+      // whoever owns the defect. Dip scales with span so the two possible
+      // return lanes never sit on top of each other.
+      var dip = 80 + Math.abs(a.x - b.x) * 0.09;
+      return "M " + (a.x - NW / 2 - 6) + " " + (a.y + 16) +
+             " C " + (a.x - 150) + " " + (a.y + dip) + ", " +
+                     (b.x + 150) + " " + (b.y + dip) + ", " +
+                     (b.x + NW / 2 + 10) + " " + (b.y + 16);
+    }
+    if (a.y !== b.y && a.x === b.x) {                  // vertical
+      var dir = b.y > a.y ? 1 : -1;
+      return "M " + a.x + " " + (a.y + dir * (NH / 2 + 6)) +
+             " L " + b.x + " " + (b.y - dir * (NH / 2 + 10));
+    }
+    if (a.y !== b.y) {                                 // diagonal
+      return "M " + (a.x + NW / 2 + 6) + " " + a.y +
+             " L " + (b.x - NW / 2 - 10) + " " + b.y;
+    }
+    var lr = b.x > a.x ? 1 : -1;                       // horizontal
+    return "M " + (a.x + lr * (NW / 2 + 6)) + " " + a.y +
+           " L " + (b.x - lr * (NW / 2 + 10)) + " " + b.y;
+  }
+
+  function midpoint(d) {
+    var p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", d);
+    try {
+      var pt = p.getPointAtLength(p.getTotalLength() / 2);
+      return {x: pt.x, y: pt.y};
+    } catch (e) { return null; }
+  }
+
+  function drawNetwork(net) {
+    var svg = el("net");
+    var edges = (net && net.edges) || [];
+    var counts = (net && net.nodes) || {};
+    var byKey = {};
+    edges.forEach(function (e) { byKey[e.from + ">" + e.to] = e; });
+
+    // markerUnits="userSpaceOnUse" is load-bearing: the SVG default scales
+    // markers by stroke-width, so a heavily-trafficked edge would grow a
+    // triangle several times the size of the nodes it points at.
+    var MK = 'viewBox="0 0 10 10" refX="7" refY="5" markerWidth="11" ' +
+             'markerHeight="11" markerUnits="userSpaceOnUse" ' +
+             'orient="auto-start-reverse"';
+    var defs = "<defs>";
+    Object.keys(KIND).forEach(function (k) {
+      defs += '<marker id="ah-' + k + '" ' + MK +
+              '><path d="M1 1 L9 5 L1 9 z" fill="' + KIND[k].color +
+              '"/></marker>';
+    });
+    defs += '<marker id="ah-off" ' + MK +
+            '><path d="M1 1 L9 5 L1 9 z" fill="var(--line)"/></marker></defs>';
+
+    var lanes = "", labels = "";
+    LANES.forEach(function (lane) {
+      var e = byKey[lane.from + ">" + lane.to];
+      var n = e ? e.n : 0;
+      var d = pathFor(lane);
+      if (!n) {
+        lanes += '<path class="edge idle" d="' + d + '" marker-end="url(#ah-off)"/>';
+        return;
+      }
+      var w = Math.min(7, 1.8 + n * 0.7);
+      lanes += '<path class="edge flow" d="' + d + '" stroke="' + KIND[lane.kind].color +
+               '" stroke-width="' + w.toFixed(1) + '" marker-end="url(#ah-' +
+               lane.kind + ')"/>';
+      var m = midpoint(d);
+      if (m) {
+        labels += '<text class="elabel" x="' + m.x.toFixed(0) + '" y="' +
+                  (m.y - 9).toFixed(0) + '" text-anchor="middle" fill="' +
+                  KIND[lane.kind].color + '">' + esc(e.label || lane.kind) +
+                  " ×" + n + "</text>";
+      }
+    });
+
+    var boxes = "";
+    Object.keys(NODES).forEach(function (key) {
+      var nd = NODES[key], c = counts[key] || 0;
+      boxes += '<g>' +
+        '<rect class="nbox' + (c ? " hot" : "") + '" x="' + (nd.x - NW / 2) +
+          '" y="' + (nd.y - NH / 2) + '" width="' + NW + '" height="' + NH +
+          '" rx="11"/>' +
+        '<text class="nlabel" x="' + nd.x + '" y="' + (nd.y - 4) +
+          '" text-anchor="middle">' + esc(nd.label) + '</text>' +
+        '<text class="nsub" x="' + nd.x + '" y="' + (nd.y + 13) +
+          '" text-anchor="middle">' + esc(nd.sub) + '</text>';
+      if (c) {
+        boxes += '<circle cx="' + (nd.x + NW / 2 - 4) + '" cy="' +
+            (nd.y - NH / 2 + 4) + '" r="11" fill="var(--accent)"/>' +
+          '<text class="ncount" x="' + (nd.x + NW / 2 - 4) + '" y="' +
+            (nd.y - NH / 2 + 8) + '" text-anchor="middle">' + c + '</text>';
+      }
+      boxes += "</g>";
+    });
+
+    svg.innerHTML = defs + lanes + boxes + labels;
+
+    var led = (net && net.ledger) || {warm: 0, cold: 0, ratio: 0};
+    el("warm-pct").textContent = (led.warm + led.cold) ? led.ratio + "%" : "—";
+    el("warm-bar").style.width = led.ratio + "%";
+    el("warm-n").textContent = led.warm;
+    el("cold-n").textContent = led.cold;
+  }
+
+  function drawTasks(tasks, current) {
+    var host = el("tasks");
+    if (!tasks || !tasks.length) {
+      host.innerHTML = '<div class="empty">No tasks seeded. Run ' +
+        '<code>update.py --new-run "name" --orch opus --from-task-graph</code>.</div>';
+      el("task-count").textContent = "";
+      return;
+    }
+    var order = [], groups = {};
+    tasks.forEach(function (t) {
+      var p = t.phase || "Tasks";
+      if (!groups[p]) { groups[p] = []; order.push(p); }
+      groups[p].push(t);
+    });
+    var curId = current && current.id;
+    var html = order.map(function (p) {
+      return '<div class="phase"><h3>' + esc(p) + "</h3>" +
+        groups[p].map(function (t) {
+          var mode = t.mode === "warm" ? "warm" : (t.mode === "cold" ? "cold" : "none");
+          return '<div class="task' + (t.id === curId ? " cur" : "") + '">' +
+            '<span class="tid">' + esc(t.id) + "</span>" +
+            '<span class="ttitle">' + esc(t.title) + "</span>" +
+            '<span class="mode ' + mode + '">' + (t.mode || "—") + "</span>" +
+            '<span class="by">' + esc(t.by || "—") + "</span>" +
+            '<span class="badge b-' + esc(t.status) + '">' + esc(t.status) + "</span>" +
+            "</div>";
+        }).join("") + "</div>";
+    }).join("");
+    host.innerHTML = html;
+
+    var done = tasks.filter(function (t) {
+      return t.status === "done" || t.status === "resolved";
+    }).length;
+    el("task-count").textContent = done + " of " + tasks.length + " complete";
+  }
+
+  function render(s) {
+    el("run-name").textContent = (s.run && s.run.name) || "(no run)";
+    var r = s.run || {};
+    el("run-meta").innerHTML =
+      "orchestrated by <b>" + esc(r.orch || "—") + "</b> · started " +
+      esc(r.started || "—") + " · updated " + esc(r.updated || "—");
+    var pt = el("run-path");
+    pt.textContent = r.path ? (r.path === "warm" ? "warm-context direct"
+                                                 : "full scheme") : "—";
+    pt.className = "pathtag " + (r.path || "");
+
+    var stats = s.stats || [];
+    el("stats").innerHTML = stats.length
+      ? stats.map(function (st) {
+          return '<div class="stat ' + esc(st.tone || "neutral") + '">' +
+                 '<div class="k">' + esc(st.k) + "</div>" +
+                 '<div class="v">' + esc(st.v) + "</div></div>";
+        }).join("")
+      : '<div class="empty">No signals recorded. Add with ' +
+        "<code>--stat K=V:tone</code>.</div>";
+
+    drawNetwork(s.network);
+    drawTasks(s.tasks, s.current);
+
+    var d = s.defects || [];
+    el("defects").innerHTML = d.length
+      ? d.map(function (x) {
+          return '<div class="defect"><b>!</b><span>' + esc(x.text) +
+                 "</span></div>";
+        }).join("")
+      : '<div class="empty">None open.</div>';
+
+    var lg = (s.log || []).slice().reverse();
+    el("log").innerHTML = lg.length
+      ? lg.map(function (x) {
+          return "<div><time>" + esc(x.ts) + "</time>" + esc(x.msg) + "</div>";
+        }).join("")
+      : '<div class="empty">Empty.</div>';
+
+    el("stamp").textContent = "Rendered " + new Date().toLocaleString();
+  }
+
+  function snapshot() {
+    var tag = document.getElementById("cma-snapshot");
+    if (!tag) { return null; }
+    try { return JSON.parse(tag.textContent); } catch (e) { return null; }
+  }
+
+  // Live status.json when served; embedded snapshot when opened over file://
+  // or when the fetch fails. The snapshot is what makes the board portable.
+  function load(first) {
+    fetch("status.json", {cache: "no-store"})
+      .then(function (res) {
+        if (!res.ok) { throw new Error(res.status); }
+        return res.json();
+      })
+      .then(function (data) {
+        el("src-hint").textContent = "live · status.json";
+        render(data);
+      })
+      .catch(function () {
+        var snap = snapshot();
+        if (snap) {
+          el("src-hint").textContent =
+            "offline snapshot · serve this directory for live updates";
+          render(snap);
+        } else if (first) {
+          el("src-hint").textContent = "no data";
+          render({});
+        }
+      });
+  }
+
+  load(true);
+  setInterval(function () { load(false); }, 2000);
+})();
+</script>
+
+<!--CMA:SNAPSHOT:START-->
+<script type="application/json" id="cma-snapshot">{"schema":1,"run":{"name":"CMA dashboard v2 + lessons + skill vendoring","orch":"opus","path":"warm","started":"2026-09-08T19:09:51","updated":"2026-09-08T19:29:16"},"current":{"id":"T11","title":"Committing the toolchain"},"tasks":[{"id":"T1","title":"Survey repo: gitignore, python, .claude tracking, docs layout","phase":"Context","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T2","title":"update.py — generalist driver, derived agent network, auto-seed","phase":"Dashboard","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T3","title":"index.html — template with agent-network SVG + warm/cold ledger","phase":"Dashboard","status":"resolved","by":"opus","mode":"warm","hist":["done","failed","resolved"],"depends_on":[]},{"id":"T4","title":"Repo lessons file (docs/cma-lessons.md)","phase":"Lessons","status":"done","by":"opus","mode":"warm","hist":["running","done"],"depends_on":[]},{"id":"T5","title":"Global lessons file (~/.claude/cma-lessons.md)","phase":"Lessons","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T6","title":"Vendor cma-run skill into .claude/skills for the second account","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T7","title":"install.py — non-clobbering promote-to-global","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T8","title":"README + .gitignore wiring","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T9","title":"Adversarial verification of the whole toolchain","phase":"Verify","status":"done","by":"opus","mode":"warm","hist":["verifying","done"],"depends_on":[]},{"id":"T10","title":"Fix python3 -> python note in CLAUDE.md and AGENTS.md","phase":"Follow-on","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T11","title":"Branch and commit the CMA toolchain","phase":"Follow-on","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]}],"stats":[{"k":"Path","v":"warm-context","tone":"good"},{"k":"Cold dispatches","v":"0","tone":"good"},{"k":"Defects found","v":"3","tone":"warn"},{"k":"Tasks","v":"11","tone":"neutral"}],"defects":[],"log":[{"ts":"2026-09-08T19:09:51","msg":"run started: CMA dashboard v2 + lessons + skill vendoring"},{"ts":"2026-09-08T19:09:51","msg":"seeded 9 task(s) from task-graph.json"},{"ts":"2026-09-08T19:09:59","msg":"batch 1 (dashboard) closed warm — no subagent dispatched"},{"ts":"2026-09-08T19:14:46","msg":"verify: warm work drew a dispatch edge through the Executor box — rerouted + recoloured"},{"ts":"2026-09-08T19:14:46","msg":"verify: idempotence, input rejection, --new-run reset, clobber refusal all pass"},{"ts":"2026-09-08T19:16:32","msg":"verify: defect edge re-pointed at the actual work owner; arrowheads pinned to userSpaceOnUse"},{"ts":"2026-09-08T19:16:55","msg":"verification complete: 3 defects found and fixed, 0 outstanding"},{"ts":"2026-09-08T19:29:00","msg":"seeded 2 task(s) from task-graph.json"},{"ts":"2026-09-08T19:29:16","msg":"docs: Windows interpreter note added to CLAUDE.md + AGENTS.md"},{"ts":"2026-09-08T19:29:16","msg":"merge-seed verified: +2 tasks, 9 prior statuses preserved"},{"ts":"2026-09-08T19:29:16","msg":"run complete — committing on claude/cma-run-toolchain"}],"manual_edges":[],"network":{"nodes":{"orchestrator":11,"executor":0,"verifier":0,"ops":0,"learner":0},"edges":[{"from":"orchestrator","to":"orchestrator","label":"warm","n":11,"kind":"warm"},{"from":"orchestrator","to":"verifier","label":"verify","n":11,"kind":"verify"},{"from":"verifier","to":"orchestrator","label":"defect","n":1,"kind":"defect"}],"ledger":{"warm":11,"cold":0,"ratio":100}}}</script>
+<!--CMA:SNAPSHOT:END-->
+</body>
+</html>
