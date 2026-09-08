@@ -205,7 +205,7 @@
          stale twice, which is exactly the kind of thing not worth remembering by hand. -->
     <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">1.8.0 is a booking-form quality release, driven directly by user feedback. The people and instrument pickers get a <strong>type-to-search box</strong> &mdash; no more scanning dozens of names &mdash; and booking categories get <strong>billing semantics</strong>: each category sets what percent of a staff member's rate it bills, so a consult can be free while an assisted session bills in full, and training sessions can insist on a facility staff member. Plus small polish: an aligned Category field and a notes toolbar trimmed to what actually gets used.</p>
+    <p class="lede">1.9.0 finishes the roadmap&rsquo;s reporting tier: the numbers a core facility is actually judged by. A <strong>stewardship scorecard</strong> credits each supervising staff member with their instruments&rsquo; bookings, hours, revenue and users; <strong>breadth &amp; activity-mix</strong> tables show how many labs you serve and where the hours go; and a new <strong>research outputs</strong> record on every project feeds a <strong>consult-to-output funnel</strong> &mdash; from first conversation to published paper, with conversion rates at each stage. Charts arrive too (hand-drawn SVG, themed, no library), and a <strong>custom report generator</strong> lets you pick an entity, the columns, and a date range, then export exactly that.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="manual/">User Manual</a>
@@ -219,12 +219,13 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.8.0.</p>
+    <p class="section-sub">What changed in 1.9.0.</p>
     <div class="cards">
-      <div class="card"><div class="ic">🔎</div><h3>Find people by typing</h3><p>Every assignment picker &mdash; people, facility staff, instruments, supervisors &mdash; takes a search box that filters by name <em>or</em> lab as you type, and clears after each pick. Asked for by a facility running dozens of researchers per booking.</p></div>
-      <div class="card"><div class="ic">🏷️</div><h3>Categories carry billing</h3><p>Settings &rarr; Category Billing: each booking category bills a configurable percent of staff rates &mdash; sync 0%, consult whatever your policy says, assisted 100%. Staff stay properly assigned; only the billing changes. Instrument time is untouched.</p></div>
-      <div class="card"><div class="ic">🎓</div><h3>Training equals assisted &mdash; by link</h3><p>Training and assisted sessions cost the same but mean different things, so training has a &ldquo;Same as assisted session&rdquo; switch that tracks the assisted rate live &mdash; and both categories now require a facility staff member on the booking.</p></div>
-      <div class="card"><div class="ic">🧹</div><h3>Modal polish</h3><p>The Category field lines up with its neighbors instead of sitting lower, and the notes toolbar is down to bullets and normal text &mdash; the broken font-size menu and the rarely-used styling buttons are gone. Old formatted notes still render and export.</p></div>
+      <div class="card"><div class="ic">🧭</div><h3>Stewardship scorecard</h3><p>Reports now groups instrument activity by <em>supervising staff</em>: bookings, hours, revenue, distinct and new users, projects served, plus facility-wide sessions and consults &mdash; the case each staff member&rsquo;s work makes for itself. Exports to its own XLSX sheet.</p></div>
+      <div class="card"><div class="ic">🌐</div><h3>Breadth &amp; activity mix</h3><p>How many labs and people did the facility serve this period, and how many labs were new? Plus a breakdown of facility hours by booking category &mdash; assisted, training, consult, sync &mdash; so the shape of the work is visible, not just the total.</p></div>
+      <div class="card"><div class="ic">📄</div><h3>Research outputs &amp; the funnel</h3><p>Projects can log publications, acknowledgements and datasets. A consult-to-output funnel then follows the pipeline &mdash; consult &rarr; project &rarr; active &rarr; milestones &rarr; completed &rarr; output &mdash; with conversion percentages and median time-in-stage.</p></div>
+      <div class="card"><div class="ic">📊</div><h3>Charts, no library</h3><p>Instrument utilization, the funnel, and the activity mix each get an inline SVG chart drawn from <em>exactly</em> the numbers in the table beneath it &mdash; hand-rolled, themed via CSS variables so dark mode recolors instantly, zero dependencies added.</p></div>
+      <div class="card"><div class="ic">🧰</div><h3>Custom report generator</h3><p>Pick an entity, tick the columns, set a date range, watch the live preview, export to XLSX. The preview and the export are driven from one column map, so what you see is byte-for-byte what you get.</p></div>
     </div>
   </div>
 </section>
@@ -236,7 +237,67 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>Pickers you can type into <span class="tag">new</span></h3>
+        <h3>Who stewards what &mdash; and what it produced <span class="tag">new</span></h3>
+        <p>The roadmap&rsquo;s reporting principle has been that metrics hang on instruments, and instruments name their supervising staff (1.6.0). The stewardship scorecard closes that loop: Reports groups every instrument&rsquo;s activity under its supervisor &mdash; bookings, hours, revenue, distinct users, <em>new</em> users this period, projects served &mdash; and adds the work that never held a slot: facility-wide sessions and consults. Occupancy follows the app&rsquo;s one rule (cancelled bookings don&rsquo;t count), money follows the other (a cancelled charge counts only if retained), and retired staff keep their rows, marked as retired &mdash; as everywhere in the app.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/65-stewardship-scorecard.png" alt="Reports stewardship card grouping instrument bookings, hours, revenue and users by supervising staff member" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/65-stewardship-scorecard.png</code></span></div>
+        <figcaption>Each supervisor&rsquo;s instruments, rolled up &mdash; the annual-review table, generated.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Log what the work became <span class="tag">new</span></h3>
+        <p>A facility&rsquo;s ultimate output is papers, not hours &mdash; and until now the app had nowhere to record one. Every project detail page gains a Research Outputs card: publications, acknowledgements, datasets, or anything else, each with a reference and an optional date. Outputs ride into the project&rsquo;s XLSX/DOCX/PDF exports and a facility-wide listing, and they are what the funnel&rsquo;s final stage counts.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/66-research-outputs.png" alt="Project detail page with a Research Outputs card listing a publication and a dataset" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/66-research-outputs.png</code></span></div>
+        <figcaption>Publications, acknowledgements, datasets &mdash; recorded on the project they came from.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>From first consult to published paper <span class="tag">new</span></h3>
+        <p>The funnel answers the question every facility review asks: of the people who came to talk, how many ended up with results? It walks the pipeline &mdash; consult volume &rarr; project created &rarr; project active &rarr; milestones progressing &rarr; project completed &rarr; research output &mdash; with a conversion percentage at each step and the median days spent in each stage. Honest by design: a backfilled project whose dates run backwards is excluded from the median but still counted, and the card says so rather than silently dropping it.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/67-funnel-chart.png" alt="Consult-to-output funnel card with an SVG funnel chart, conversion percentages and median time-in-stage" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/67-funnel-chart.png</code></span></div>
+        <figcaption>Consult &rarr; project &rarr; output, with conversion rates &mdash; the pipeline in one card.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Breadth, mix &mdash; and charts that can&rsquo;t lie <span class="tag">new</span></h3>
+        <p>Two more Reports cards: <em>Breadth</em> counts the distinct labs and people served per period and flags labs that are new &mdash; the reach argument &mdash; while <em>Activity Mix</em> splits facility hours by booking category, so a facility drowning in training or running on consults can see it. The new charts here and on Instrument Utilization are hand-drawn inline SVG reading the <em>same</em> computed rows as the table below each one &mdash; no chart library, no second aggregation to drift, and the colors are CSS variables so themes recolor them for free.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/68-activity-mix.png" alt="Activity Mix card with an SVG bar chart of facility hours split by booking category" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/68-activity-mix.png</code></span></div>
+        <figcaption>Hours by category, drawn from the very rows the table shows.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>The report you actually needed <span class="tag">new</span></h3>
+        <p>Every facility has a one-off ask &mdash; &ldquo;bookings by lab for Q2, just dates, hours and cost&rdquo; &mdash; that no fixed report quite matches. The custom report generator takes an entity, a set of columns, and a date range; a live preview updates as you tick, and one button exports that exact table to XLSX. Preview and export are driven from a single column map, and columns that would double-count a flattened dataset are locked in with the caveat spelled out in both the preview and the workbook&rsquo;s Notes sheet.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/69-custom-report.png" alt="Custom report modal with entity and column pickers, a date range, and a live preview table" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/69-custom-report.png</code></span></div>
+        <figcaption>Pick the columns, see the table, export it &mdash; preview and XLSX from one definition.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Pickers you can type into <span class="tag">1.8.0</span></h3>
         <p>A facility's people list grows for years, and the booking form asked you to scan all of it in one dropdown. Every token picker &mdash; Assign People, Assign Facility Staff, Assign Instruments, an instrument's supervisors &mdash; now has a search box: type a fragment of a name <em>or a lab</em>, the list narrows as you type, and the box clears after each pick so the next search starts fresh. It stacks with the existing group filtering, and someone retired-but-already-assigned still keeps their badge.</p>
       </div>
       <figure class="shot">
@@ -248,7 +309,7 @@
 
     <div class="feature reverse">
       <div class="txt">
-        <h3>What a consult costs is now your call <span class="tag">new</span></h3>
+        <h3>What a consult costs is now your call <span class="tag">1.8.0</span></h3>
         <p>A consult and an assisted session both put a staff member on a booking, but most facilities bill them differently &mdash; often not at all for the consult. Category Billing makes that a setting: each category bills a chosen percent of the staff member's normal rate (after the usual 1-hour floor), applied to staff time only &mdash; instrument pricing already has tiers and discounts and is untouched. Set consult to 0% and the conversation is recorded, attributed, and free, with no zero-rate duplicate people or other workarounds.</p>
         <ul>
           <li>Training&rsquo;s &ldquo;Same as assisted session&rdquo; is a live link &mdash; change the assisted rate and training follows, with a hint showing the percent that actually applies.</li>
@@ -265,7 +326,7 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>A tidier booking form <span class="tag">new</span></h3>
+        <h3>A tidier booking form <span class="tag">1.8.0</span></h3>
         <p>Two small irritations, fixed: the Category select sat visibly lower than its neighbors because its &ldquo;Add New&rdquo; button padded the row &mdash; it lines up now &mdash; and the notes editor&rsquo;s toolbar shrank to a bullet-list button and plain text. The font-size menu didn&rsquo;t work, and bold/italic belong in the report you export, not the note you jot; notes written with the old formatting keep rendering and exporting exactly as before.</p>
       </div>
       <figure class="shot">
