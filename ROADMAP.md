@@ -10,17 +10,19 @@ Effort labels (S/M/L) are rough estimates, not measurements. No dates are promis
 Ordering within a tier is the intended build order, but items are independent unless noted.
 
 **Status (2026-09-08):** Tiers 1 and 2 are fully shipped; **Tier 3 is shipped except for the
-parts that need data Tier 4 has not introduced yet** — the stewardship scorecard's trained-user
-and downtime columns, and a maintenance slice in the activity mix (see the clauses on 3.2 and
-3.4). ✅ marks below carry the release that shipped each item (1.6.0, 1.7.0, 1.9.0). Releases are
-cut per version via the `Release` workflow (Actions → Release → Run workflow) and published on
-the [Releases page](https://github.com/Daniel-Waiger/Core-Facility-CRM/releases). 1.8.0 added
-user-requested items beyond this roadmap: type-to-search in all assignment pickers, per-category
-staff billing policy (`category_policies` — consult/sync can bill 0% of staff rates; training
-links to assisted; training/assisted require a staff assignee), and booking-modal polish.
-Remaining: **Tier 4** and the **migration-tool milestone** — both deliberately parked while the
-app is used day-to-day, since real friction should shape them. See "How these get built" at the
-bottom before starting the next batch.
+parts noted on the items themselves** — the stewardship scorecard's trained-user and downtime
+columns and a maintenance slice in the activity mix (both waiting on data Tier 4 introduces),
+plus 3.3's narrowed time-in-stage, which is a scope choice rather than a missing dependency (see
+the clauses on 3.2, 3.3 and 3.4). ✅ marks below carry the release that shipped each item (1.6.0,
+1.7.0, 1.9.0). Releases are cut per version via the `Release` workflow (Actions → Release → Run
+workflow) and published on the [Releases
+page](https://github.com/Daniel-Waiger/Core-Facility-CRM/releases). 1.8.0 added user-requested
+items beyond this roadmap: type-to-search in all assignment pickers, per-category staff billing
+policy (`category_policies` — consult/sync can bill 0% of staff rates; training links to
+assisted; training/assisted require a staff assignee), and booking-modal polish. Remaining:
+**Tier 4** and the **migration-tool milestone** — both deliberately parked while the app is used
+day-to-day, since real friction should shape them. See "How these get built" at the bottom
+before starting the next batch.
 
 ---
 
@@ -71,7 +73,7 @@ with a specific user, the rare case worth remembering, is a sync entry with a no
 |---|------|--------|-------|
 | 3.1 | ✅ 1.6.0 — **Consult type tag on meetings** — a category on the existing meeting entity (e.g. sync / consult / training / assisted session) so aggregations can count consults per instrument and per period without a new record type. Instruments already link via `meeting_instruments`; `project_id` is already nullable for pre-project consults. | S | Feeds 3.2, 3.3, 3.4. |
 | 3.2 | ✅ 1.9.0 — **Instrument stewardship scorecard** — per-instrument justification view: utilization, distinct + new users, trained-user pool trend, projects served, consult-tagged meetings, downtime share. Designed to show *why* utilization is what it is, not one percentage — under-utilized ≠ unjustified (niche capability, backup unit, demand shift). A derived view groups scorecards by supervising staff member; explicitly dot-connecting, never a composite staff score. | M | Rendered from the single `js/reports.js` aggregation engine so screen and export can never disagree. Needs 3.6a. Shipped without the *trained-user pool trend* and *downtime share* columns — both need records Tier 4 introduces (4.3, 4.1); everything else in the item is live. |
-| 3.3 | ✅ 1.9.0 — **Funnel analysis** — consult → project created → active (first booking) → milestones progressing → completed → research output. Conversion and time-in-stage per period. | L | Front of the funnel reads from consult-tagged meetings (3.1); the exit needs an "outputs" record (publication/acknowledgement) on projects; middle stages derive from existing timestamps. |
+| 3.3 | ✅ 1.9.0 — **Funnel analysis** — consult → project created → active (first booking) → milestones progressing → completed → research output. Conversion and time-in-stage per period. | L | Front of the funnel reads from consult-tagged meetings (3.1); the exit needs an "outputs" record (publication/acknowledgement) on projects; middle stages derive from existing timestamps. Shipped with one narrowing: conversion is reported at every stage, but time-in-stage is two medians (created → first booking, first booking → first output) over the selected range rather than one per adjacent transition per period. |
 | 3.4 | ✅ 1.9.0 — **Breadth & activity-mix views** — distinct labs/people served and new labs onboarded per period, per instrument; facility activity split by category (assisted operation, training, consulting, maintenance) as a stacked view. Per-lab consult attribution is **opt-in**, not a default report column. | M | Shipped with two narrowings: the activity mix splits whatever categories are actually tagged on bookings, so a **maintenance** slice only becomes possible once Tier 4's downtime records exist (4.1); and new-lab counts are per period, with per-instrument newness reported as new *users* in 3.2's scorecard rather than new labs. |
 | 3.5 | ✅ 1.9.0 — **Charts on the Reports screen** — utilization, funnel, activity-mix | M | Client-side rendering only. |
 | 3.6a | ✅ 1.6.0 — **Instrument → supervising staff mapping** — who is responsible for each instrument (one or more staff). Prerequisite for the derived staff view in 3.2. | S | Join table or column on `instruments`; picker follows the existing "selectable = not retired OR already selected" rule. |
