@@ -23,4 +23,7 @@ window.CONST = {
   // rate is price-per-unit. Distinct from instruments' UNIT (which describes how an INSTRUMENT is
   // priced) since an entry's unit is a literal quantity label shown next to Qty, not a pricing mode.
   SERVICE_UNIT: ['hour', 'sample', 'unit', 'day', 'other'],
+  // Research output type on project_outputs (roadmap 3.3) — the funnel's exit stage. Facilities
+  // can add their own via the "+ Add New" vocab flow, same as every other list here.
+  OUTPUT_TYPE: ['publication', 'acknowledgement', 'dataset', 'other'],
 };

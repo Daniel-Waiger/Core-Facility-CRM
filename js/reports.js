@@ -708,6 +708,215 @@
     return { periods, categories, rows };
   }
 
+  /* ================================================================================
+     Card — Funnel analysis with project outputs (ROADMAP 3.3)
+     consult -> project created -> active (first booking) -> milestones progressing ->
+     completed -> research output. A funnel across genuinely different units (events,
+     projects, milestone-edits), stated up front rather than pretending otherwise — this is a
+     progression of what's happening at the facility over the period, not a single population
+     narrowing stage by stage, and the per-stage counts/labels say what's actually being counted.
+
+     Per-stage counts (bounded by [from,to], same as every other card in this file):
+       1. Consult volume       — meetings tagged category='consult', non-cancelled (rule 1).
+                                  Facility-wide consults (project_id IS NULL) count toward this
+                                  volume — they're real facility activity — but are never linked
+                                  to any project, so they don't feed any later stage. Reuses
+                                  computeConsultRows verbatim (no duplicated consult-tag math).
+       2. Project created      — projects.created_at, sliced to its date part (first 10 chars).
+                                  created_at is written via datetime('now'), which is a UTC
+                                  timestamp, while every other date in this file is a plain LOCAL
+                                  calendar-day string — slicing it mixes a UTC day boundary into a
+                                  local-day date range, so a project created within ~a day of
+                                  midnight can land one day off from where a human would place it.
+                                  Acknowledged imprecision, not a new bug: every other on-screen
+                                  "Created" display in this app (views.js's project header,
+                                  exports.js) already reads this same column the same way.
+       3. Active (first booking) — MIN(meetings.date) per project, occupancy-filtered (rule 1):
+                                  a project is "active" the day its first non-cancelled booking
+                                  happened, computed from the project's WHOLE history (unbounded),
+                                  same reasoning as loadFirstInstrumentUserDates above — then that
+                                  date is checked against [from,to].
+       4. Milestones progressing — COUNT-ONLY. milestones.updated_at moves on ANY edit (status
+                                  change, note edit, due-date change, reassignment...), not just a
+                                  status transition, so this counts "a milestone got touched this
+                                  period", not "a milestone finished a review stage". No per-project
+                                  dedup — a project with 3 milestones edited in-period contributes 3.
+       5. Completed             — COUNT-ONLY. A project counts if status='Completed' OR
+                                  is_archived=1 (no new column). There's no "date the project
+                                  became complete" field to bound this to a period honestly, so a
+                                  LABELED PROXY is used when available: projects.end_date if set,
+                                  else archived_at (date part) if the project is archived. A
+                                  completed project with NEITHER proxy set has no date to place it
+                                  in a bounded period, so it's excluded from a bounded [from,to]
+                                  count (but included when the range is fully unbounded — "All
+                                  Time" has no boundary to place it outside of) — always disclosed.
+       6. Research output       — project_outputs.date, falling back to created_at's date part
+                                  when date is blank (same UTC/local caveat as stage 2 above).
+
+     Time-in-stage medians — ONLY these two transitions, per the roadmap spec (no median is
+     computed for any other adjacent pair):
+       - created -> first booking
+       - first booking -> first output
+     Both use each project's UNBOUNDED true first-booking/first-output date (never a date
+     merely inside the selected range — the same "look at the whole history" reasoning as
+     loadFirstInstrumentUserDates), scoped to the population of projects whose EARLIER end of
+     the transition falls in [from,to] (i.e. the same projects counted in the "created" stage for
+     the first median, and in the "active" stage for the second).
+
+     HONESTY REQUIREMENT (this item's rejected first attempt): a negative day-delta — the later
+     event predating the earlier one — is real, not a bug, for backfilled/imported data (e.g. a
+     booking logged before the project record was ever created in this app). EXCLUSION RULE:
+     negative deltas are dropped from the median calculation itself (a "the booking happened
+     before the project existed" data point does not have a meaningful non-negative duration to
+     average in) but every excluded project is COUNTED and the count is surfaced everywhere the
+     median is shown — the card footnote below and the exportReportsXlsx Notes sheet — as
+     "N projects excluded: first booking predates the project record" (and the equivalent for the
+     output transition). Never silently dropped, never clamped to zero. */
+  function loadProjectFunnelFacts() {
+    // Deliberately UNBOUNDED (no from/to) — same reasoning as loadFirstInstrumentUserDates: to
+    // know a project's TRUE first booking/output, the whole history must be visible, not just
+    // whatever falls inside the report's selected range.
+    return DB.rows(`
+      SELECT pr.id, pr.status, pr.is_archived, pr.created_at, pr.end_date, pr.archived_at,
+        (SELECT MIN(mt.date) FROM meetings mt WHERE mt.project_id = pr.id AND mt.is_cancelled = 0) AS first_booking_date,
+        (SELECT MIN(CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END)
+           FROM project_outputs po WHERE po.project_id = pr.id) AS first_output_date
+      FROM projects pr`);
+  }
+  function loadMilestoneUpdatesInRange(from, to) {
+    return DB.rows(`
+      SELECT id FROM milestones
+      WHERE (? = '' OR date(updated_at) >= ?) AND (? = '' OR date(updated_at) <= ?)`, rangeParams(from, to));
+  }
+  function loadOutputsInRange(from, to) {
+    return DB.rows(`
+      SELECT po.*, p.code AS project_code, p.title AS project_title,
+             CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END AS eff_date
+      FROM project_outputs po
+      JOIN projects p ON p.id = po.project_id
+      WHERE (? = '' OR CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END >= ?)
+        AND (? = '' OR CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END <= ?)
+      ORDER BY eff_date DESC, po.id DESC`, rangeParams(from, to));
+  }
+  // 'YYYY-MM-DD' (or a longer datetime string, sliced) in-range check — '' on either bound means
+  // unbounded, mirroring RANGE_SQL's own '' = unbounded convention above, just in plain JS for
+  // per-project date facts that aren't worth a round-trip to SQL.
+  function dateInRange(dateStr, from, to) {
+    if (!dateStr) return false;
+    const d = String(dateStr).slice(0, 10);
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  }
+  // Local-calendar-day difference in whole days, per CLAUDE.md's date rules: both inputs are
+  // sliced to their date-only part and parsed with an explicit local midnight ('T00:00:00'), the
+  // same construction UI.fmtDate already uses — never toISOString, never a bare `new Date(str)`.
+  function daysBetweenDates(aStr, bStr) {
+    const a = new Date(String(aStr).slice(0, 10) + 'T00:00:00');
+    const b = new Date(String(bStr).slice(0, 10) + 'T00:00:00');
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
+    return Math.round((b.getTime() - a.getTime()) / 86400000);
+  }
+  function median(values) {
+    if (!values.length) return null;
+    const s = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  }
+  function computeFunnelRows(from, to) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    const unbounded = !from && !to;
+
+    // Stage 1 — reuse computeConsultRows verbatim; see its own header for the cancellation rule.
+    const consultCount = computeConsultRows(from, to).totalConsults;
+
+    const facts = loadProjectFunnelFacts();
+
+    // Stage 2 — project created, by created_at's date part.
+    const createdIn = facts.filter((f) => dateInRange(f.created_at, from, to));
+
+    // Stage 3 — active (first booking), by the project's true (unbounded) first non-cancelled
+    // booking date.
+    const activeIn = facts.filter((f) => dateInRange(f.first_booking_date, from, to));
+
+    // Stage 4 — milestones progressing, count-only, no per-project dedup.
+    const milestonesCount = loadMilestoneUpdatesInRange(from, to).length;
+
+    // Stage 5 — completed, count-only, end_date/archived_at as a labeled proxy where present.
+    let completedCount = 0, completedNoDateCount = 0;
+    facts.forEach((f) => {
+      const isCompleted = f.status === 'Completed' || !!f.is_archived;
+      if (!isCompleted) return;
+      const proxyDate = f.end_date || (f.is_archived ? f.archived_at : '') || '';
+      if (proxyDate) {
+        if (dateInRange(proxyDate, from, to)) completedCount += 1;
+      } else if (unbounded) {
+        completedCount += 1;
+      } else {
+        completedNoDateCount += 1;
+      }
+    });
+
+    // Stage 6 — research output.
+    const outputRows = loadOutputsInRange(from, to);
+    const outputCount = outputRows.length;
+
+    // Median 1: created -> first booking, over the "created" population (createdIn), using each
+    // project's true unbounded first-booking date. Negative deltas (booking predates the
+    // project's own created_at) are excluded from the median but counted for disclosure.
+    let createdToActiveNegative = 0;
+    const createdToActiveDeltas = [];
+    createdIn.forEach((f) => {
+      if (!f.first_booking_date) return; // no booking at all yet — nothing to measure
+      const delta = daysBetweenDates(f.created_at, f.first_booking_date);
+      if (delta == null) return;
+      if (delta < 0) { createdToActiveNegative += 1; return; }
+      createdToActiveDeltas.push(delta);
+    });
+
+    // Median 2: first booking -> first output, over the "active" population (activeIn), using
+    // each project's true unbounded first-output date. Same negative-delta exclusion+disclosure.
+    let activeToOutputNegative = 0;
+    const activeToOutputDeltas = [];
+    activeIn.forEach((f) => {
+      if (!f.first_output_date) return; // no output recorded yet
+      const delta = daysBetweenDates(f.first_booking_date, f.first_output_date);
+      if (delta == null) return;
+      if (delta < 0) { activeToOutputNegative += 1; return; }
+      activeToOutputDeltas.push(delta);
+    });
+
+    // Adjacent conversion %: each stage's count over the previous stage's count. Stages count
+    // different kinds of things (events / projects / milestone-edits) — see file header — so
+    // this is a rough period-over-period ratio, not a literal population narrowing; the on-screen
+    // footnote says so.
+    function pct(num, den) { return den > 0 ? (num / den) * 100 : null; }
+    const stages = [
+      { key: 'consult', label: 'Consult Volume', count: consultCount, conversionPct: null },
+      { key: 'created', label: 'Project Created', count: createdIn.length, conversionPct: pct(createdIn.length, consultCount) },
+      { key: 'active', label: 'Active (First Booking)', count: activeIn.length, conversionPct: pct(activeIn.length, createdIn.length) },
+      { key: 'milestones', label: 'Milestones Progressing', count: milestonesCount, conversionPct: pct(milestonesCount, activeIn.length) },
+      { key: 'completed', label: 'Completed', count: completedCount, conversionPct: pct(completedCount, milestonesCount) },
+      { key: 'output', label: 'Research Output', count: outputCount, conversionPct: pct(outputCount, completedCount) }
+    ];
+
+    return {
+      stages,
+      completedNoDateCount,
+      medians: {
+        createdToActive: {
+          days: median(createdToActiveDeltas), sampleSize: createdToActiveDeltas.length,
+          excludedNegative: createdToActiveNegative
+        },
+        activeToOutput: {
+          days: median(activeToOutputDeltas), sampleSize: activeToOutputDeltas.length,
+          excludedNegative: activeToOutputNegative
+        }
+      },
+      outputRows
+    };
+  }
+
   /* ---------------- Small render helpers ---------------- */
   function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
   // Same configured symbol the booking modal and Project Costs use (Settings -> Billing Rates);
@@ -733,6 +942,7 @@
     const svc = computeServiceEntryRows(from, to);
     const breadth = computeBreadthRows(from, to);
     const mix = computeActivityMixRows(from, to);
+    const funnel = computeFunnelRows(from, to);
     const labConsultsOn = getLabConsultsEnabled();
 
     return `
@@ -1038,6 +1248,37 @@
         </table>
       </div>`}
       <div class="faint small mt-8">Hours booked per category per month, excluding cancelled bookings; a booking with no category on file is grouped under "(uncategorized)". Category values are read from the data (not a fixed list), so a facility-added category appears here automatically. Standalone service entries are not included — they're logged in units/quantity, not hours, so there's nothing to attribute here.</div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('target')} Funnel: Consult to Output</span></div></div>
+      ${!funnel.stages.some((s) => s.count > 0) ? global.Views.emptyState('target', 'No funnel activity in this range', 'Widen the date range or add consults, projects, bookings, milestones and outputs.') : `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Stage</th><th>Count</th><th>Conversion from Previous</th></tr></thead>
+          <tbody>
+            ${funnel.stages.map((s) => `
+              <tr>
+                <td style="font-weight:600">${esc(s.label)}</td>
+                <td class="mono small">${s.count}</td>
+                <td class="mono small">${s.conversionPct == null ? '—' : s.conversionPct.toFixed(1) + '%'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="grid cols-2 mt-16">
+        <div class="faint small">
+          <strong>Median, created &rarr; first booking:</strong>
+          ${funnel.medians.createdToActive.days == null ? 'no data' : funnel.medians.createdToActive.days + ' day' + (funnel.medians.createdToActive.days === 1 ? '' : 's') + ` (n=${funnel.medians.createdToActive.sampleSize})`}
+          ${funnel.medians.createdToActive.excludedNegative ? `<br/>${funnel.medians.createdToActive.excludedNegative} project${funnel.medians.createdToActive.excludedNegative === 1 ? '' : 's'} excluded: first booking predates the project record.` : ''}
+        </div>
+        <div class="faint small">
+          <strong>Median, first booking &rarr; first output:</strong>
+          ${funnel.medians.activeToOutput.days == null ? 'no data' : funnel.medians.activeToOutput.days + ' day' + (funnel.medians.activeToOutput.days === 1 ? '' : 's') + ` (n=${funnel.medians.activeToOutput.sampleSize})`}
+          ${funnel.medians.activeToOutput.excludedNegative ? `<br/>${funnel.medians.activeToOutput.excludedNegative} project${funnel.medians.activeToOutput.excludedNegative === 1 ? '' : 's'} excluded: first output predates the first booking.` : ''}
+        </div>
+      </div>`}
+      <div class="faint small mt-8">Stages count different things (consult/output are events, milestones are edits, the rest are projects) — read this as facility activity over the period, not one population literally narrowing. Consult volume includes facility-wide (project-less) consults, which cannot feed any later stage. "Completed" is count-only via status='Completed' or archived, dated by end_date (or archive date) when set — otherwise it has no date to place in a bounded range and${funnel.completedNoDateCount ? ` is excluded here (${funnel.completedNoDateCount} completed project${funnel.completedNoDateCount === 1 ? '' : 's'} with no end/archive date).` : ' none are excluded in this range.'} "Milestones Progressing" counts any milestone edited in the period, not a status change specifically. Both medians exclude (but disclose) projects where the later event predates the earlier one — real for backfilled/imported data.</div>
     </div>`;
   }
 
@@ -1058,6 +1299,7 @@
     computeServiceEntryRows,
     computeBreadthRows,
     computeActivityMixRows,
+    computeFunnelRows,
     getLabConsultsEnabled,
     setLabConsultsEnabled
   };

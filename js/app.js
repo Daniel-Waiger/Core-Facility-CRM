@@ -1069,6 +1069,13 @@
       case 'kv-edit-save': return kvEditSave(el.dataset.id);
       case 'kv-del': return kvDel(el.dataset.id);
 
+      // Research Outputs CRUD (roadmap 3.3)
+      case 'output-add': return addOutput(el.dataset.projectId || ctx.project);
+      case 'output-save': return outputSave();
+      case 'output-edit': return editOutput(el.dataset.id);
+      case 'output-edit-save': return outputEditSave(el.dataset.id);
+      case 'output-del': return outputDel(el.dataset.id);
+
       // Files CRUD
       case 'add-file': return addFile();
       case 'f-save': return fSave();
@@ -1357,7 +1364,11 @@
       // service_entries.project_id normally carries ON DELETE SET NULL, but countProjectRefs now
       // counts entries too, so this branch only runs when there are none anyway — the explicit
       // delete is the same belt-and-suspenders convention every other delete path here follows.
+      // project_outputs carries a real ON DELETE CASCADE, but this branch only runs when
+      // countProjectRefs already counted zero of them, so the explicit delete here is a no-op in
+      // practice and purely the same belt-and-suspenders convention as the line above.
       DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
+      DB.run('DELETE FROM project_outputs WHERE project_id=?', [pid]);
       DB.run('DELETE FROM projects WHERE id=?', [pid]);
       UI.toast('Project deleted');
       route('projects');
@@ -1373,6 +1384,7 @@
     if (refs.entries) holds.push(refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
     if (refs.files) holds.push(plural(refs.files, 'file'));
     if (refs.fields) holds.push(plural(refs.fields, 'custom field'));
+    if (refs.outputs) holds.push(plural(refs.outputs, 'research output'));
     const billed = refs.billed > 0 ? ` It carries ${fmtMoney(refs.billed)} of billing (bookings and service entries), which stays on the record.` : '';
 
     const ok = await UI.confirmModal(
@@ -3532,6 +3544,89 @@
 
     DB.run('DELETE FROM kv WHERE id=?', [id]);
     UI.toast('Field deleted');
+    refresh();
+  }
+
+  /* ---------------- Research Outputs (roadmap 3.3) ----------------
+     Cloned from the Custom Key-Value Fields pattern just above — same add/edit/delete shape,
+     just with a Type vocab field (vocabField, category OUTPUT_TYPE) in place of the free-text
+     key. Feeds Reports.computeFunnelRows' exit stage. */
+  function addOutput(projectId) {
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('tag')} Add Research Output</span></div>
+      <div class="body"><div class="stack">
+        ${vocabField({ category: 'OUTPUT_TYPE', id: 'out-type', selected: 'publication', label: 'Type', required: true })}
+        <div class="field"><label>Title *</label><input class="input" id="out-title" placeholder="e.g. Volumetric mapping of pancreatic islet distribution..." /></div>
+        <div class="field"><label>Reference</label><input class="input" id="out-ref" placeholder="e.g. journal citation, DOI, grant report title" /></div>
+        <div class="field"><label>Date</label><input type="date" class="input" id="out-date" /></div>
+        <div class="field"><label>Note</label><textarea class="input" id="out-note" rows="2"></textarea></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="output-save" data-project-id="${projectId}">Add Output</button>
+      </div>`);
+  }
+
+  function outputSave() {
+    const m = document.querySelector('.modal');
+    const projectId = Number(m.querySelector('[data-act="output-save"]').dataset.projectId) || ctx.project;
+    const type = m.querySelector('#out-type').value.trim();
+    const title = m.querySelector('#out-title').value.trim();
+    const reference = m.querySelector('#out-ref').value.trim();
+    const date = m.querySelector('#out-date').value;
+    const note = m.querySelector('#out-note').value.trim();
+    if (!type || !title) { UI.toast('Type and title are required', 'error'); return; }
+
+    DB.run('INSERT INTO project_outputs (project_id, type, title, reference, date, note) VALUES (?,?,?,?,?,?)',
+      [projectId, type, title, reference, date, note]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Output added');
+    refresh();
+  }
+
+  function editOutput(id) {
+    const item = DB.row('SELECT * FROM project_outputs WHERE id=?', [id]);
+    if (!item) return;
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Research Output</span></div>
+      <div class="body"><div class="stack">
+        ${vocabField({ category: 'OUTPUT_TYPE', id: 'oute-type', selected: item.type, label: 'Type', required: true })}
+        <div class="field"><label>Title *</label><input class="input" id="oute-title" value="${esc(item.title)}" /></div>
+        <div class="field"><label>Reference</label><input class="input" id="oute-ref" value="${esc(item.reference)}" /></div>
+        <div class="field"><label>Date</label><input type="date" class="input" id="oute-date" value="${esc(item.date)}" /></div>
+        <div class="field"><label>Note</label><textarea class="input" id="oute-note" rows="2">${esc(item.note)}</textarea></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="output-edit-save" data-id="${item.id}">Save Changes</button>
+      </div>`);
+  }
+
+  function outputEditSave(id) {
+    const m = document.querySelector('.modal');
+    const type = m.querySelector('#oute-type').value.trim();
+    const title = m.querySelector('#oute-title').value.trim();
+    const reference = m.querySelector('#oute-ref').value.trim();
+    const date = m.querySelector('#oute-date').value;
+    const note = m.querySelector('#oute-note').value.trim();
+    if (!type || !title) { UI.toast('Type and title are required', 'error'); return; }
+
+    DB.run('UPDATE project_outputs SET type=?, title=?, reference=?, date=?, note=? WHERE id=?',
+      [type, title, reference, date, note, id]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Output updated');
+    refresh();
+  }
+
+  async function outputDel(id) {
+    const item = DB.row('SELECT title FROM project_outputs WHERE id=?', [id]);
+    if (!item) return;
+    const ok = await UI.confirmModal('Delete Output', `Delete research output "${esc(item.title)}"? This cannot be undone.`, { danger: true, confirmText: 'Delete' });
+    if (!ok) return;
+
+    DB.run('DELETE FROM project_outputs WHERE id=?', [id]);
+    UI.toast('Output deleted');
     refresh();
   }
 

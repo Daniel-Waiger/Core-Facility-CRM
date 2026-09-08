@@ -72,9 +72,11 @@
       WHERE se.project_id=?
       ORDER BY se.date DESC, se.id DESC`, [id]);
     const files = DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
+    // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
+    const outputs = DB.rows('SELECT * FROM project_outputs WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
     const prog = DB.projectProgress(id);
 
-    return { p, ppl, inst, ms, kv, mtgs, entries, files, prog };
+    return { p, ppl, inst, ms, kv, mtgs, entries, files, outputs, prog };
   }
 
   function blobDownload(blob, filename) {
@@ -348,6 +350,15 @@
     ws6['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 40 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws6, 'Files');
 
+    // Sheet 7: Research Outputs (roadmap 3.3) — the funnel's exit stage.
+    const outRows = [['Type', 'Title', 'Reference', 'Date', 'Note']];
+    d.outputs.forEach((o) => {
+      outRows.push([o.type, o.title, o.reference || '—', o.date || '—', o.note || '']);
+    });
+    const ws7 = XLSX.utils.aoa_to_sheet(outRows);
+    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, ws7, 'Research Outputs');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${d.p.code}_${d.p.title.replace(/[^a-z0-9_-]/gi, '_')}.xlsx`);
     UI.toast('Exported XLSX report');
@@ -455,6 +466,24 @@
       });
     } else {
       children.push(new Paragraph({ text: 'No service entries recorded.' }));
+    }
+
+    // Research Outputs (roadmap 3.3)
+    children.push(new Paragraph({ text: 'Research Outputs', heading: HeadingLevel.HEADING_2 }));
+    if (d.outputs.length) {
+      d.outputs.forEach((o) => {
+        children.push(new Paragraph({
+          children: [
+            new TextRun({ text: `[${o.type.toUpperCase()}] `, bold: true }),
+            new TextRun({ text: `${o.title} `, bold: true }),
+            new TextRun({ text: o.date ? `(${UI.fmtDate(o.date)}) ` : '' }),
+            new TextRun({ text: o.reference ? `${o.reference} ` : '', italics: true }),
+            new TextRun({ text: o.note ? `— ${o.note}` : '' }),
+          ]
+        }));
+      });
+    } else {
+      children.push(new Paragraph({ text: 'No research outputs recorded.' }));
     }
 
     const doc = new Document({
@@ -704,6 +733,28 @@
       });
     }
 
+    // Research Outputs (roadmap 3.3)
+    if (d.outputs.length) {
+      addHeading('Research Outputs');
+      pdf.setFontSize(9);
+      d.outputs.forEach((o) => {
+        checkPage(12);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(`[${o.type.toUpperCase()}] ${o.title}${o.date ? ' (' + UI.fmtDate(o.date) + ')' : ''}`, margin, y);
+        pdf.setFont('helvetica', 'normal');
+        y += 5;
+        if (o.reference || o.note) {
+          const detail = [o.reference, o.note].filter(Boolean).join(' — ');
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text(detail, margin + 4, y);
+          pdf.setTextColor(20, 20, 20);
+          pdf.setFontSize(9);
+          y += 5;
+        }
+      });
+    }
+
     // Custom Metadata
     if (d.kv.length) {
       addHeading('Custom Metadata Fields');
@@ -878,6 +929,20 @@
     wsSe['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsSe, 'Service Entries');
 
+    // Sheet 8: Research Outputs (roadmap 3.3) — across every project, same "Project Code /
+    // Project" leading columns as the Meetings/Service Entries sheets above.
+    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Reference', 'Date', 'Note']];
+    DB.rows(`
+      SELECT po.*, p.code as project_code, p.title as project_title
+      FROM project_outputs po
+      JOIN projects p ON p.id = po.project_id
+      ORDER BY po.date DESC, po.id DESC`).forEach((o) => {
+      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date || '—', o.note || '']);
+    });
+    const wsOut = XLSX.utils.aoa_to_sheet(outRows);
+    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 12 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
   }
@@ -911,6 +976,7 @@
     const svc = Reports.computeServiceEntryRows(from, to);
     const breadth = Reports.computeBreadthRows(from, to);
     const mix = Reports.computeActivityMixRows(from, to);
+    const funnel = Reports.computeFunnelRows(from, to);
     const labConsultsOn = Reports.getLabConsultsEnabled(); // mirror the on-screen opt-in toggle exactly
 
     const wb = XLSX.utils.book_new();
@@ -946,6 +1012,12 @@
       [labConsultsOn
         ? 'Per-lab consult attribution was ON (opt-in) at export time — see the "Per-Lab Consults" sheet.'
         : 'Per-lab consult attribution is OFF by default (opt-in, not a standing report column) — the "Per-Lab Consults" sheet is omitted from this export. Enable the checkbox on the Breadth card and re-export to include it.'],
+      [''],
+      ['Funnel: Consult to Output'],
+      ['Stages count different kinds of things (consult/output are events, milestones are edits, the rest are projects) — read the counts as facility activity over the period, not one population literally narrowing. Consult volume includes facility-wide (project-less) consults, which cannot feed any later stage. "Milestones Progressing" counts any milestone edited in the period (updated_at moves on any edit), not a status change specifically. "Completed" is count-only via status=\'Completed\' or archived, dated by end_date (or archive date) as a labeled proxy when set; with neither date available a completed project is excluded from a bounded range' + (funnel.completedNoDateCount ? ` (${funnel.completedNoDateCount} such project${funnel.completedNoDateCount === 1 ? '' : 's'} excluded from this export\'s range).` : ' (none excluded in this export\'s range).')],
+      ['Both time-in-stage medians (created->first booking, first booking->first output) exclude negative day-deltas — the later event predating the earlier one, real for backfilled/imported data — from the median itself, but every excluded project is counted here: '
+        + `${funnel.medians.createdToActive.excludedNegative} project${funnel.medians.createdToActive.excludedNegative === 1 ? '' : 's'} excluded: first booking predates the project record. `
+        + `${funnel.medians.activeToOutput.excludedNegative} project${funnel.medians.activeToOutput.excludedNegative === 1 ? '' : 's'} excluded: first output predates the first booking.`],
       [''],
       ['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']
     ];
@@ -1064,6 +1136,18 @@
       wsLabConsult['!cols'] = [{ wch: 30 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, wsLabConsult, 'Per-Lab Consults');
     }
+
+    // Sheet 12: Funnel: Consult to Output — fed from the exact same Reports.computeFunnelRows
+    // the screen renders from. Both medians and their disclosed negative-delta exclusion counts
+    // are repeated here (not just in the Notes sheet) so the sheet is self-explanatory on its own.
+    const funnelRows = [['Stage', 'Count', 'Conversion from Previous %']];
+    funnel.stages.forEach((s) => funnelRows.push([s.label, s.count, s.conversionPct == null ? '' : round2(s.conversionPct)]));
+    funnelRows.push(['', '', '']);
+    funnelRows.push(['Median: created -> first booking (days)', funnel.medians.createdToActive.days == null ? '' : round2(funnel.medians.createdToActive.days), `n=${funnel.medians.createdToActive.sampleSize}, excluded (negative delta)=${funnel.medians.createdToActive.excludedNegative}`]);
+    funnelRows.push(['Median: first booking -> first output (days)', funnel.medians.activeToOutput.days == null ? '' : round2(funnel.medians.activeToOutput.days), `n=${funnel.medians.activeToOutput.sampleSize}, excluded (negative delta)=${funnel.medians.activeToOutput.excludedNegative}`]);
+    const wsFunnel = XLSX.utils.aoa_to_sheet(funnelRows);
+    wsFunnel['!cols'] = [{ wch: 36 }, { wch: 12 }, { wch: 50 }];
+    XLSX.utils.book_append_sheet(wb, wsFunnel, 'Funnel');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);

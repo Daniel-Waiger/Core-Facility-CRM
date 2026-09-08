@@ -15,6 +15,17 @@ This project uses [Semantic Versioning](https://semver.org/).
   scoped) with an opt-in, off-by-default per-lab consult attribution table, and an Activity Mix
   card breaking down facility hours by booking category per period; both export to XLSX as
   matching "Breadth" and "Activity Mix" sheets (the lab-consult sheet only when the toggle is on).
+- **Funnel analysis with project outputs (roadmap 3.3).** A new `project_outputs` entity
+  (publication/acknowledgement/dataset/other, with a "Research Outputs" card and add/edit/delete
+  modals on the project detail screen) backs a new Reports & Utilization "Funnel: Consult to
+  Output" card — consult volume, project created, active (first booking), milestones progressing,
+  completed, and research output, with adjacent conversion % and a median time-in-stage for
+  created→first-booking and first-booking→first-output. Negative day-deltas (the later event
+  predating the earlier one — real for backfilled/imported projects) are excluded from the median
+  but always counted and disclosed, in the card's own footnote and the exported "Notes"/"Funnel"
+  sheets. Exported to XLSX as a matching "Funnel" sheet in the Reports export, an "Outputs" sheet
+  in the per-project XLSX/DOCX/PDF exports, and a facility-wide "Research Outputs" listing sheet
+  in the all-projects XLSX export.
 
 ## [1.8.0] — 2026-09-08
 
