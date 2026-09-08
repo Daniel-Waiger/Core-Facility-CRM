@@ -20,3 +20,7 @@ outreach/
 tools/cma-dashboard/status.json
 .cma/
 
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc

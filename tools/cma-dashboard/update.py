@@ -63,6 +63,17 @@ TIER_NODE = {
     "learner": "learner", "cma-learner": "learner",
 }
 
+# The lanes index.html can actually draw. --edge is validated against this:
+# an edge outside it would be written to status.json and then silently never
+# rendered, which is worse than refusing it.
+DRAWABLE_LANES = {
+    ("orchestrator", "orchestrator"), ("orchestrator", "executor"),
+    ("orchestrator", "ops"), ("orchestrator", "verifier"),
+    ("orchestrator", "learner"), ("executor", "verifier"),
+    ("verifier", "executor"), ("verifier", "orchestrator"),
+    ("verifier", "learner"),
+}
+
 TASK_GRAPH_CANDIDATES = [
     ".cma/task-graph.json",
     "cma/task-graph.json",
@@ -87,7 +98,10 @@ def die(msg):
 def repo_root():
     d = HERE
     while True:
-        if os.path.isdir(os.path.join(d, ".git")):
+        # exists(), not isdir(): in a `git worktree` checkout .git is a
+        # FILE pointing at the common gitdir, and an isdir() test walks past
+        # the real root -- breaking task-graph discovery and lessons paths.
+        if os.path.exists(os.path.join(d, ".git")):
             return d
         parent = os.path.dirname(d)
         if parent == d:
@@ -398,6 +412,10 @@ def apply_edge(state, spec):
     for n in (a, b):
         if n not in NODES:
             die("unknown node %r -- nodes are: %s" % (n, " ".join(NODES)))
+    if (a, b) not in DRAWABLE_LANES:
+        die("the dashboard cannot draw %s>%s, so recording it would be a "
+            "silent no-op. Drawable lanes: %s"
+            % (a, b, ", ".join(sorted("%s>%s" % l for l in DRAWABLE_LANES))))
     state["manual_edges"].append({"from": a, "to": b,
                                   "label": label.strip(), "n": 1})
 
@@ -504,10 +522,12 @@ def doctor():
 
 def serve(port):
     import http.server
-    import socketserver
     os.chdir(HERE)
     handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", port), handler) as httpd:
+    # ThreadingHTTPServer, not TCPServer: it sets allow_reuse_address, so a
+    # Ctrl-C does not leave the port in TIME_WAIT and refuse the next start.
+    # Matches what .claude/launch.json already uses.
+    with http.server.ThreadingHTTPServer(("", port), handler) as httpd:
         print("cma-dashboard on http://localhost:%d/  (ctrl-c to stop)" % port)
         try:
             httpd.serve_forever()
