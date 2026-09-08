@@ -700,31 +700,41 @@
     </div>`;
   }
 
-  /* ---------------- Calendar (Fixed 7-Day Grid) ---------------- */
-  let calOffset = 0;
+  /* ---------------- Calendar (Month grid + Week hourly view) ---------------- */
+  let calOffset = 0; // Month mode: whole months. Week mode: whole weeks. Reset on mode switch.
+  let calMode = 'month'; // 'month' | 'week'
   function navCalendar(delta) { calOffset += delta; global.App.refresh(); }
-  function calendar() {
-    const base = new Date();
-    const shifted = new Date(base.getFullYear(), base.getMonth() + calOffset, 1);
-    const sy = shifted.getFullYear(), sm = shifted.getMonth();
-    const monthLabel = shifted.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  function calToday() { calOffset = 0; global.App.refresh(); }
+  function setCalMode(mode) {
+    if (mode !== 'month' && mode !== 'week') return;
+    // calOffset's unit changes (months <-> weeks) when the mode changes, so a stale offset from
+    // the other mode would jump to the wrong month/week — reset it whenever the mode actually flips.
+    if (mode !== calMode) { calMode = mode; calOffset = 0; }
+    global.App.refresh();
+  }
 
-    const firstDayOfMonth = new Date(sy, sm, 1);
-    const lastDayOfMonth = new Date(sy, sm + 1, 0);
+  // Shared toolbar for both calendar renderers: Month/Week toggle + prev/today/next.
+  function calToolbarHtml(label, unitLabel) {
+    return `
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('calendar')} ${label}</span></div>
+        <div class="row" style="gap:6px">
+          <button class="btn ${calMode === 'month' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="month">Month</button>
+          <button class="btn ${calMode === 'week' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="week">Week</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous ${unitLabel}">${ic('chevron-left')} Prev</button>
+          <button class="btn btn-primary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next ${unitLabel}">Next ${ic('chevron-right')}</button>
+          <button class="btn btn-secondary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">${ic('clock')} Agenda</button>
+        </div>
+      </div>`;
+  }
 
-    // Calculate first Monday on or before the 1st
-    const start = new Date(firstDayOfMonth);
-    const dayOfWeek = (start.getDay() + 6) % 7;
-    start.setDate(start.getDate() - dayOfWeek);
-
-    // Calculate last Sunday on or after last day
-    const end = new Date(lastDayOfMonth);
-    const endDayOfWeek = (end.getDay() + 6) % 7;
-    end.setDate(end.getDate() + (6 - endDayOfWeek));
-
-    const startStr = global.UI.ymd(start);
-    const endStr = global.UI.ymd(end);
-
+  // Milestones (by due_date) + meetings (by date) in [startStr, endStr] (inclusive, local
+  // 'YYYY-MM-DD' strings), bucketed by day string. Shared by the month and week renderers so
+  // there's one query pair to keep in sync — this used to omit m.is_cancelled from the meetings
+  // SELECT even though the chip renderer read mt.is_cancelled for the ev-cancelled style, so
+  // cancelled bookings never actually looked cancelled on the calendar. Fixed here, once.
+  function calFetchByDay(startStr, endStr) {
     const ms = global.DB.rows(`
       SELECT m.id, m.due_date, m.name, m.status, p.id as project_id, p.title as project_title
       FROM milestones m
@@ -732,7 +742,7 @@
       WHERE m.due_date >= ? AND m.due_date <= ?`, [startStr, endStr]);
 
     const mtgs = global.DB.rows(`
-      SELECT m.id, m.date, m.start_time, m.end_time, m.title, p.id as project_id, p.title as project_title
+      SELECT m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled, p.id as project_id, p.title as project_title
       FROM meetings m
       LEFT JOIN projects p ON p.id = m.project_id
       WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
@@ -771,6 +781,101 @@
         return at < bt ? -1 : at > bt ? 1 : 0;
       });
     }
+    return byDay;
+  }
+
+  // One event chip, shared by month cells (no styleAttr) and week event blocks (styleAttr carries
+  // the absolute top/height positioning from calEventBlockLayout).
+  function calEvChipHtml(e, styleAttr) {
+    return `
+      <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
+           style="${styleAttr || ''}"
+           data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
+           title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
+        ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+      </div>`;
+  }
+
+  /* ---- Hour-grid layout helpers ----
+     Shared by the week view below and (per the roadmap) the resource timeline that follows it:
+     turning an "HH:MM" time into a vertical pixel offset within a day column, and laying out a
+     timed event's block (top + height) from its start/end. hourPx is a parameter rather than
+     baked in so a denser timeline grid can reuse the same math at a different scale. */
+  const CAL_HOUR_PX = 48; // px per hour row at the week view's default scale
+  const CAL_DAY_HOURS = 24;
+
+  function calTimeToPx(hhmm, hourPx) {
+    const mins = global.UI.timeToMinutes(hhmm);
+    return mins == null ? null : (mins / 60) * (hourPx || CAL_HOUR_PX);
+  }
+
+  // { top, height } in px for a timed event's block. A missing/unparsable/non-positive duration
+  // still gets a small fixed-height block so the event stays visible and clickable.
+  function calEventBlockLayout(start, end, hourPx) {
+    const px = hourPx || CAL_HOUR_PX;
+    const top = calTimeToPx(start, px);
+    if (top == null) return null;
+    const endPx = calTimeToPx(end, px);
+    const MIN_H = 20;
+    const height = (endPx != null && endPx > top) ? Math.max(MIN_H, endPx - top) : MIN_H;
+    return { top, height };
+  }
+
+  // Hour-label gutter markup (00:00, 01:00, ... 23:00), one row per hour at hourPx tall.
+  function calHourLabelsHtml(hourPx) {
+    const px = hourPx || CAL_HOUR_PX;
+    let out = '';
+    for (let h = 0; h < CAL_DAY_HOURS; h++) {
+      out += `<div class="cal-hour-row" style="height:${px}px"><span class="cal-hour-label">${String(h).padStart(2, '0')}:00</span></div>`;
+    }
+    return out;
+  }
+
+  // One day column's backing click-to-book layer: an hour-tall slot per hour, each pre-filling
+  // that hour as the new booking's start/end. Event blocks render on top of these (both are
+  // positioned, so they stack above in DOM order) and click dispatch resolves the nearest
+  // ancestor with data-act, so clicking an event still opens edit-booking/edit-milestone rather
+  // than falling through to the slot underneath it.
+  function calHourSlotsHtml(ds, hourPx) {
+    const px = hourPx || CAL_HOUR_PX;
+    let out = '';
+    for (let h = 0; h < CAL_DAY_HOURS; h++) {
+      const startHH = String(h).padStart(2, '0') + ':00';
+      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '23:59';
+      out += `
+        <div class="cal-hour-slot clickable" style="height:${px}px"
+             data-act="new-booking" data-date="${ds}" data-start="${startHH}" data-end="${endHH}"
+             data-tooltip="Click to add a booking at ${startHH} on ${ds}"></div>`;
+    }
+    return out;
+  }
+
+  function calendar() {
+    return calMode === 'week' ? calendarWeek() : calendarMonth();
+  }
+
+  function calendarMonth() {
+    const base = new Date();
+    const shifted = new Date(base.getFullYear(), base.getMonth() + calOffset, 1);
+    const sy = shifted.getFullYear(), sm = shifted.getMonth();
+    const monthLabel = shifted.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    const firstDayOfMonth = new Date(sy, sm, 1);
+    const lastDayOfMonth = new Date(sy, sm + 1, 0);
+
+    // Calculate first Monday on or before the 1st
+    const start = new Date(firstDayOfMonth);
+    const dayOfWeek = (start.getDay() + 6) % 7;
+    start.setDate(start.getDate() - dayOfWeek);
+
+    // Calculate last Sunday on or after last day
+    const end = new Date(lastDayOfMonth);
+    const endDayOfWeek = (end.getDay() + 6) % 7;
+    end.setDate(end.getDate() + (6 - endDayOfWeek));
+
+    const startStr = global.UI.ymd(start);
+    const endStr = global.UI.ymd(end);
+    const byDay = calFetchByDay(startStr, endStr);
 
     const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     let headerCells = dow.map((d) => `<div class="dow">${d}</div>`).join('');
@@ -798,12 +903,7 @@
           ${isToday ? '<span class="today-tag">Today</span>' : ''}
         </div>
         <div class="cal-events">
-          ${evs.map((e) => `
-            <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
-                 data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
-                 title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
-              ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
-            </div>`).join('')}
+          ${evs.map((e) => calEvChipHtml(e)).join('')}
         </div>
       </div>`;
       cur.setDate(cur.getDate() + 1);
@@ -811,16 +911,92 @@
 
     return `
     <div class="card">
-      <div class="row mb-8">
-        <div class="grow"><span class="card-title">${ic('calendar')} ${monthLabel}</span></div>
-        <div class="row" style="gap:6px">
-          <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous Month">${ic('chevron-left')} Prev</button>
-          <button class="btn btn-primary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">Today</button>
-          <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next Month">Next ${ic('chevron-right')}</button>
-        </div>
-      </div>
+      ${calToolbarHtml(monthLabel, 'Month')}
       <div class="cal-grid-header">${headerCells}</div>
       <div class="cal-grid">${cells}</div>
+    </div>`;
+  }
+
+  // Monday..Sunday of (today + calOffset weeks), hourly grid with an all-day lane above it for
+  // untimed events (milestones, and any booking saved without a start time).
+  function calendarWeek() {
+    const now = new Date();
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // local midnight, no string parsing
+    base.setDate(base.getDate() + calOffset * 7);
+    const mondayOffset = (base.getDay() + 6) % 7; // Mon=0..Sun=6
+    const monday = new Date(base);
+    monday.setDate(monday.getDate() - mondayOffset);
+
+    const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(d.getDate() + i);
+      days.push(d);
+    }
+
+    const startStr = global.UI.ymd(days[0]);
+    const endStr = global.UI.ymd(days[6]);
+    const byDay = calFetchByDay(startStr, endStr);
+    const todayStr = today();
+
+    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+    const dayInfos = days.map((d, i) => {
+      const ds = global.UI.ymd(d); // local calendar day, not toISOString() — see calFetchByDay/ymd comments
+      const evs = byDay[ds] || [];
+      return {
+        ds,
+        date: d,
+        dow: dow[i],
+        isToday: ds === todayStr,
+        allDay: evs.filter((e) => !e.start_time), // milestones + untimed bookings
+        timed: evs.filter((e) => e.start_time)
+      };
+    });
+
+    const headHtml = dayInfos.map((d) => `
+      <div class="cal-week-daycol-head ${d.isToday ? 'today' : ''}">
+        <span class="dow">${d.dow}</span><span class="num">${d.date.getDate()}</span>
+        ${d.isToday ? '<span class="today-tag">Today</span>' : ''}
+      </div>`).join('');
+
+    const alldayHtml = dayInfos.map((d) => `
+      <div class="cal-week-allday-col clickable" data-act="new-booking" data-date="${d.ds}" data-tooltip="Click to add a booking on ${d.ds}">
+        ${d.allDay.map((e) => calEvChipHtml(e)).join('')}
+      </div>`).join('');
+
+    const gridHeight = CAL_HOUR_PX * CAL_DAY_HOURS;
+    const bodyHtml = dayInfos.map((d) => `
+      <div class="cal-week-daycol" style="height:${gridHeight}px">
+        ${calHourSlotsHtml(d.ds, CAL_HOUR_PX)}
+        ${d.timed.map((e) => {
+          const layout = calEventBlockLayout(e.start_time, e.end_time, CAL_HOUR_PX);
+          if (!layout) return '';
+          return calEvChipHtml(e, `position:absolute;left:2px;right:2px;top:${layout.top}px;height:${layout.height}px`);
+        }).join('')}
+      </div>`).join('');
+
+    return `
+    <div class="card">
+      ${calToolbarHtml(weekLabel, 'Week')}
+      <div class="cal-week">
+        <div class="cal-week-header">
+          <div class="cal-week-gutter"></div>
+          ${headHtml}
+        </div>
+        <div class="cal-week-allday">
+          <div class="cal-week-gutter cal-week-allday-label">All day</div>
+          ${alldayHtml}
+        </div>
+        <div class="cal-week-scroll">
+          <div class="cal-week-body" style="height:${gridHeight}px">
+            <div class="cal-week-gutter cal-week-hours">${calHourLabelsHtml(CAL_HOUR_PX)}</div>
+            ${bodyHtml}
+          </div>
+        </div>
+      </div>
     </div>`;
   }
 
@@ -1090,10 +1266,22 @@
     instruments,
     setInstrumentFilter,
     calendar,
+    setCalMode,
     settings,
     emptyState,
     navCalendar,
-    statusBadge
+    calToday,
+    statusBadge,
+    // Hour-grid layout helpers factored out of the week calendar for reuse by the resource
+    // timeline (roadmap 1.3): time->px, an event's {top,height} block, and hour-row markup.
+    calLayout: {
+      HOUR_PX: CAL_HOUR_PX,
+      DAY_HOURS: CAL_DAY_HOURS,
+      timeToPx: calTimeToPx,
+      eventBlockLayout: calEventBlockLayout,
+      hourLabelsHtml: calHourLabelsHtml,
+      hourSlotsHtml: calHourSlotsHtml
+    }
   };
 
 })(window);

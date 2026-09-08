@@ -3,6 +3,18 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Week calendar view (roadmap 1.1).** The Calendar screen gains a Month/Week toggle alongside
+  the existing Prev/Today/Next controls. Week mode shows an hourly grid (with an all-day lane for
+  milestones and untimed bookings) for the Monday–Sunday of the current week; clicking an hour
+  slot opens a new booking pre-filled with that hour's start/end. Month and Week share one
+  milestone/meeting fetch and one event-chip renderer so the two views can never disagree, and the
+  hour-grid layout math is factored out for reuse by the resource timeline (roadmap 1.3). Also
+  fixes cancelled bookings not rendering with the cancelled style on the calendar (the month query
+  was missing `is_cancelled`).
+
 ## [1.6.0] — 2026-09-07
 
 ### Added

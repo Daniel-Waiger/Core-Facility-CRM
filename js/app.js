@@ -933,7 +933,8 @@
       case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
       case 'cal-prev': return Views.navCalendar(-1);
       case 'cal-next': return Views.navCalendar(1);
-      case 'cal-today': return Views.navCalendar(0);
+      case 'cal-today': return Views.calToday();
+      case 'cal-mode': return Views.setCalMode(el.dataset.mode);
       case 'open-today-modal': return openTodayModal();
       case 'close': {
         // Close the TOPMOST modal (so a nested "+ Add New" / "Register person" modal
@@ -1018,7 +1019,7 @@
       case 'restore-instrument': return restoreInstrument(el.dataset.id);
 
       // Bookings (Meetings) CRUD
-      case 'new-booking': return newBooking(el.dataset.date, ctx.project);
+      case 'new-booking': return newBooking(el.dataset.date, ctx.project, el.dataset.start, el.dataset.end);
       case 'add-meeting': return newBooking(UI.today(), ctx.project);
       case 'booking-save': return bookingSave();
       case 'edit-booking': return editBooking(el.dataset.id);
@@ -2663,7 +2664,7 @@
     return conflicts;
   }
 
-  function newBooking(date, projectId = null) {
+  function newBooking(date, projectId = null, start = '', end = '') {
     const allProjects = DB.rows('SELECT id, title FROM projects ORDER BY title');
     const pid = projectId != null ? Number(projectId) : null;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
@@ -2674,8 +2675,8 @@
         <div class="field"><label>Title *</label><input class="input" id="bk-title" placeholder="e.g. Initial Image Analysis Pipeline Sync" /></div>
         <div class="grid cols-3">
           <div class="field"><label>Date</label><input type="date" class="input" id="bk-date" value="${esc(date || UI.today())}" /></div>
-          <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" /></div>
-          <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" /></div>
+          <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" value="${esc(start || '')}" /></div>
+          <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" value="${esc(end || '')}" /></div>
         </div>
         <div class="grid cols-4">
           <div class="field">
