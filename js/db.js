@@ -563,7 +563,9 @@
     if (!category) return { staff_pct: 100, requires_staff: false, follow_assisted: false };
     const r = row('SELECT staff_pct, requires_staff, follow_assisted FROM category_policies WHERE category=?', [category]);
     if (!r) return { staff_pct: 100, requires_staff: false, follow_assisted: false };
-    return { staff_pct: Number(r.staff_pct), requires_staff: !!r.requires_staff, follow_assisted: !!r.follow_assisted };
+    // Same non-negative clamp as categoryPolicy/setCategoryPolicy — this raw form feeds the
+    // Settings UI, which must never display a negative from a row written before the clamp.
+    return { staff_pct: Math.max(0, Number(r.staff_pct) || 0), requires_staff: !!r.requires_staff, follow_assisted: !!r.follow_assisted };
   }
   function categoryPolicy(category) {
     const raw = getCategoryPolicyRaw(category);
