@@ -317,7 +317,7 @@
         <div class="card-body">
           <div class="metadata-grid">
             <div class="meta-item"><span class="meta-label">Funding:</span> <span class="meta-val">${esc(p.funding || '—')}</span></div>
-            <div class="meta-item"><span class="meta-label">Grant:</span> <span class="meta-val">${p.grant_id ? esc(grantDisplayStr) : '—'}</span></div>
+            <div class="meta-item"><span class="meta-label">Grant:</span> <span class="meta-val">${grantDisplayStr ? esc(grantDisplayStr) : '—'}</span></div>
             <div class="meta-item"><span class="meta-label">Modality:</span> <span class="meta-val">${esc(p.modality || '—')}</span></div>
             <div class="meta-item"><span class="meta-label">Sample Type:</span> <span class="meta-val">${esc(p.sample || '—')}</span></div>
             <div class="meta-item"><span class="meta-label">Flags:</span> <span class="meta-val">${flags.length ? flags.map((f) => `<span class="badge danger">${esc(f)}</span>`).join(' ') : '—'}</span></div>
@@ -416,7 +416,7 @@
                 return `
                 <tr class="${m.is_cancelled ? 'row-retired' : ''}">
                   <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled before it started — charge dropped' : 'Cancelled after its start time — charge stands'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
-                  <td class="small">${m.grant_id ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
+                  <td class="small">${bookingGrantStr ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>

@@ -12,7 +12,10 @@
   // denormalized grant name, since the name/number toggle would make a frozen string wrong later.
   function grantLabelFor(row) {
     if (!row || !row.grant_id) return '—';
-    return UI.retiredName(DB.grantLabel({ name: row.grant_name, number: row.grant_number }), row.grant_is_retired);
+    // grant_id is a soft link (no FK), so a joined row can come back empty; an orphaned id must
+    // still render the fallback rather than a blank cell.
+    const label = DB.grantLabel({ name: row.grant_name, number: row.grant_number });
+    return label ? UI.retiredName(label, row.grant_is_retired) : '—';
   }
 
   function loadProject(id) {

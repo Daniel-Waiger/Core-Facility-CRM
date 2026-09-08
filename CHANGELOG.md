@@ -40,6 +40,15 @@ This project uses [Semantic Versioning](https://semver.org/).
   All" report. Purely additive — any failure building or writing the XLSX is swallowed and never
   falls back to an unprompted browser download; only the JSON backup is load-bearing.
 
+### Fixed
+- **Orphaned grant references render the fallback dash, not a blank.** `grant_id` is a soft
+  link, so a referenced grant row can be missing; Project Detail, the bookings table, and every
+  export now decide between label and "—" from the *resolved* label rather than from `grant_id`
+  alone.
+- **Live conflict advisory matches the save-time date default.** The New Booking form defaults a
+  blank date to today at save; the as-you-type conflict check now applies the same default (the
+  edit form stores a blank date as no-date, where no conflict is possible — unchanged).
+
 ## [1.5.7] — 2026-09-07
 
 ### Fixed

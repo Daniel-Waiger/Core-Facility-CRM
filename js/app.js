@@ -2556,7 +2556,12 @@
   function renderBookingConflicts(m, ids) {
     const host = m.querySelector('#' + ids.prefix + '-conflicts');
     if (!host) return;
-    const date = ids.date ? (m.querySelector('#' + ids.date) || {}).value || '' : '';
+    // A blank date must mean here exactly what it means at save time, or the advisory drifts
+    // from the hard gate: bookingSave defaults a blank date to UI.today() (ids.dateDefault
+    // 'today'), while bookingEditSave stores null — which findBookingConflicts matches nothing
+    // against, so '' is already faithful there.
+    let date = ids.date ? (m.querySelector('#' + ids.date) || {}).value || '' : '';
+    if (!date && ids.dateDefault === 'today') date = UI.today();
     const start = (m.querySelector('#' + ids.start) || {}).value || '';
     const end = (m.querySelector('#' + ids.end) || {}).value || '';
     if (!start || !end) { host.innerHTML = ''; return; }
@@ -2703,7 +2708,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
   }
 
   function bookingSave() {
