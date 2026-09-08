@@ -3,7 +3,7 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.9.0] — 2026-09-08
 
 ### Added
 - **Instrument stewardship scorecard (roadmap 3.2).** Reports & Utilization gains a new card,
