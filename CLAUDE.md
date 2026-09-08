@@ -29,6 +29,9 @@ python3 -m http.server 8000   # from the repo root
 # then open http://localhost:8000/index.html
 ```
 
+On Windows the interpreter is `python` (or `py`) — `python3` is not installed and the command
+above fails with "command not found". Use `python -m http.server 8000` there.
+
 (Opening `index.html` directly via `file://` also works on desktop, but a local server avoids
 storage restrictions on some browsers/tablets — see README's "Running on Tablets" section.)
 
