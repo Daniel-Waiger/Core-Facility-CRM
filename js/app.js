@@ -937,6 +937,7 @@
       case 'save-billing-rates': return saveBillingRates();
       case 'save-cancellation-rules': return saveCancellationRules();
       case 'save-group-discounts': return saveGroupDiscounts();
+      case 'save-category-policies': return saveCategoryPolicies();
       case 'rename-org': return renameOrgFromSettings();
       case 'save-grant-display': return saveGrantDisplay();
 
@@ -2601,7 +2602,7 @@
           <span class="mono small faint" style="width:70px">${fmtMoney(p.rate)}/hr</span>
           <input type="time" class="input bom-staff-start" data-id="${p.id}" value="${esc(win.start || '')}" placeholder="full booking" style="width:105px" data-tooltip="Leave blank to bill this person for the entire booking window" />
           <input type="time" class="input bom-staff-end" data-id="${p.id}" value="${esc(win.end || '')}" placeholder="full booking" style="width:105px" />
-          <span class="mono small faint bom-billhours" data-id="${p.id}" style="width:110px">0 hrs</span>
+          <span class="mono small faint bom-billhours" data-id="${p.id}" style="width:150px">0 hrs</span>
           <span class="mono font-medium bom-line" data-id="${p.id}" style="width:90px;text-align:right">${fmtMoney(0)}</span>
         </div>`;
       }).join('');
@@ -2634,14 +2635,24 @@
       overheadPct: resolvedOverhead.overheadPct,
       taxPct: DB.getConfigNum('tax_pct', 0)
     };
+    // Category billing policy (roadmap item B) — resolved here, the one live-modal caller, per the
+    // same "callers resolve, computeBookingBOM just does arithmetic" division of labor as overhead/
+    // instrument-tier resolution above. Reads whatever the Category select currently shows, so
+    // switching categories mid-form re-prices staff lines immediately (wireBomInputs wires that
+    // select's change event to recalc, or the on-screen total would drift from what gets saved).
+    const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
+    const category = categoryEl ? categoryEl.value || '' : '';
+    const catPolicy = DB.categoryPolicy(category);
+    const staffPctFactor = (Number(catPolicy.staff_pct) || 0) / 100;
     const bom = UI.computeBookingBOM({
       start, end, instruments: instrumentsForCalc, staff: staffForCalc,
-      groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates
+      groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates, staffPctFactor
     });
     // Snapshot columns bookingSave/bookingEditSave/insertBookingRow write onto the meetings row
     // alongside the money — null/null together means this booking priced via the legacy fallback.
     bom.tierId = resolvedOverhead.tierId;
     bom.tierOverheadPct = resolvedOverhead.tierOverheadPct;
+    bom.categoryStaffPct = catPolicy.staff_pct;
     m._bom.last = bom; // read back at save time so the stored total matches what's on screen
 
     bom.instrumentLines.forEach((line) => {
@@ -2652,7 +2663,10 @@
     });
     bom.staffLines.forEach((line) => {
       const bhEl = m.querySelector(`.bom-billhours[data-id="${line.id}"]`);
-      if (bhEl) bhEl.textContent = line.billHours + (line.billHours === 1 ? ' hr' : ' hrs') + (line.rawHours > 0 && line.rawHours < 1 ? ' (1hr floor)' : '');
+      // The applied category percent only merits a mention when it actually changes something —
+      // stays silent at the (overwhelmingly common) 100% default.
+      const pctNote = bom.staffPctFactor !== 1 ? ` <span class="faint">(× ${catPolicy.staff_pct}%)</span>` : '';
+      if (bhEl) bhEl.innerHTML = line.billHours + (line.billHours === 1 ? ' hr' : ' hrs') + (line.rawHours > 0 && line.rawHours < 1 ? ' (1hr floor)' : '') + pctNote;
       const lineEl = m.querySelector(`.bom-line[data-id="${line.id}"]`);
       if (lineEl) lineEl.textContent = fmtMoney(line.line);
     });
@@ -2696,6 +2710,13 @@
         ? `Overhead (${esc(DB.tierLabel(bom.tierId))} tier, ${bom.overheadPct}%)`
         : `Overhead (${bom.overheadPct}%)`;
 
+      // A subtle note only when this category's policy actually changes something — silent at the
+      // (overwhelmingly common) 100%/no-requirement default, same "don't mention it unless it
+      // matters" rule as the staff-line pctNote above.
+      const categoryNote = (bom.staffPctFactor !== 1 || catPolicy.requires_staff)
+        ? `<div class="faint small mt-8">${ic('tag')} Category Billing: staff time bills at ${catPolicy.staff_pct}%${catPolicy.requires_staff ? ' · requires a facility staff member' : ''}</div>`
+        : '';
+
       summaryEl.innerHTML =
         row('Subtotal', fmtMoney(bom.subtotal)) +
         groupRow +
@@ -2703,7 +2724,8 @@
         row(overheadLabel, '+' + fmtMoney(bom.overheadAmt)) +
         row('Before tax', fmtMoney(bom.beforeTax), { strong: true }) +
         row(`Tax (${bom.taxPct}%)`, '+' + fmtMoney(bom.taxAmt)) +
-        row('Total', fmtMoney(bom.total), { strong: true, big: true });
+        row('Total', fmtMoney(bom.total), { strong: true, big: true }) +
+        categoryNote;
     }
   }
 
@@ -2714,6 +2736,17 @@
   // have to tell those two apart themselves: render nothing in the first case (an empty "no
   // conflicts" box before the user's even picked times is just noise), a subtle all-clear line in
   // the second.
+  // Category billing policy advisory — deliberately a SEPARATE call from findBookingConflicts, not
+  // folded into its returned array: "no staff assignee yet" isn't a scheduling conflict (nothing's
+  // double-booked, no constraint is violated), it's a billing-policy hint that's trivially fixed by
+  // picking one, so it doesn't belong in the same semantic bucket as an overlap or a min-notice
+  // violation. Cheap enough to just recompute on every render rather than caching it.
+  function categoryStaffAdvisory(category, staffIds) {
+    return DB.categoryPolicy(category).requires_staff && !(staffIds && staffIds.length)
+      ? `"${category}" bookings require a facility staff member`
+      : '';
+  }
+
   function renderBookingConflicts(m, ids) {
     const host = m.querySelector('#' + ids.prefix + '-conflicts');
     if (!host) return;
@@ -2725,9 +2758,17 @@
     if (!date && ids.dateDefault === 'today') date = UI.today();
     const start = (m.querySelector('#' + ids.start) || {}).value || '';
     const end = (m.querySelector('#' + ids.end) || {}).value || '';
-    if (!start || !end) { host.innerHTML = ''; return; }
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
+
+    // Independent of start/end being set — a booking can be missing a required staff assignee
+    // before it has times at all, so this renders (or stays silent) regardless of the early
+    // return just below.
+    const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
+    const advisory = categoryStaffAdvisory(categoryEl ? categoryEl.value || '' : '', staffIds);
+    const advisoryHtml = advisory ? `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} ${esc(advisory)}</span></div>` : '';
+
+    if (!start || !end) { host.innerHTML = advisoryHtml; return; }
     // Mirror bookingEditSave's skipNotice exactly: a notes-only edit (date/start unchanged from
     // what's stored) shouldn't show a notice-advisory warning that bookingEditSave itself won't
     // enforce at save time either, or the advisory would drift from the hard gate.
@@ -2738,10 +2779,10 @@
     }
     const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds, skipNotice });
     if (!conflicts.length) {
-      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>`;
+      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>` + advisoryHtml;
       return;
     }
-    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>`;
+    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>` + advisoryHtml;
   }
 
   function wireBomInputs(m, ids) {
@@ -2759,6 +2800,11 @@
     if (groupEl) groupEl.addEventListener('change', () => offerGroupDiscount(m, ids, groupEl.value));
     const allLabsEl = ids.allLabs ? m.querySelector('#' + ids.allLabs) : null;
     if (allLabsEl) allLabsEl.addEventListener('change', () => filterOwnerPickerByGroup(m, m._bom.groupOrg, ids));
+    // Category decides the staff billing percent (recomputeBomTotals resolves it) — without this,
+    // switching categories would silently leave the on-screen total priced at whatever category
+    // was selected when the modal opened, disagreeing with what booking-save actually stores.
+    const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
+    if (categoryEl) categoryEl.addEventListener('change', () => { recalc(); recalcConflicts(); });
     const discEl = m.querySelector('#' + ids.prefix + '-discount');
     if (discEl) discEl.addEventListener('input', () => { m._bom.manualPct = Number(discEl.value) || 0; recalc(); });
 
@@ -2946,7 +2992,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' }, insts: instId ? [instId] : undefined }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', category: 'bk-category', allLabs: 'bk-all-labs' }, insts: instId ? [instId] : undefined }));
   }
 
   // Cap on how many occurrences a single "Repeat" save can create — a sanity backstop against a
@@ -2993,6 +3039,14 @@
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
 
+    // Requires-staff enforcement (category billing policy) runs BEFORE the conflict gate below, and
+    // before the recurring-occurrence loop even exists yet — so every occurrence of a repeating
+    // booking inherits this check automatically, for free, just by living here.
+    if (DB.categoryPolicy(category).requires_staff && !staffIds.length) {
+      UI.toast(`"${category}" bookings require a facility staff member`, 'error');
+      return;
+    }
+
     const repeatWeeksEl = m.querySelector('#bk-repeat-weeks');
     const repeatUntilEl = m.querySelector('#bk-repeat-until');
     const repeatUntil = repeatUntilEl ? repeatUntilEl.value || '' : '';
@@ -3032,16 +3086,16 @@
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    const ids = { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group' };
+    const ids = { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group', category: 'bk-category' };
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
     // Same BOM snapshot (rates read once, at save time) for every occurrence — deliberate:
     // identical recurring sessions are priced at today's rates, not recomputed per occurrence.
     function insertBookingRow(dateStr) {
-      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct]);
+      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct, category_staff_pct)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct]);
       const inserted = DB.row('SELECT last_insert_rowid() as id');
       const mid = inserted ? inserted.id : null;
       if (mid) {
@@ -3120,7 +3174,7 @@
         instrumentDetails: currentInstDetails, staffDetails: currentStaffDetails,
         discountPct: mt.discount_pct || 0, note: mt.note,
         groupOrg: mt.group_org || '', groupPct: mt.group_discount_pct || 0,
-        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', date: 'bke-date', project: 'bke-project', group: 'bke-group', allLabs: 'bke-all-labs', excludeId: mt.id }
+        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', date: 'bke-date', project: 'bke-project', group: 'bke-group', category: 'bke-category', allLabs: 'bke-all-labs', excludeId: mt.id }
       }));
   }
 
@@ -3149,8 +3203,24 @@
     // minimum-advance-notice check — that constraint is about giving the facility warning before
     // a NEW time is committed to, not about blocking edits to a booking whose slot was already
     // locked in. Duration and gap constraints still apply regardless.
-    const stored = DB.row('SELECT date, start_time FROM meetings WHERE id=?', [id]) || {};
+    const stored = DB.row('SELECT date, start_time, category FROM meetings WHERE id=?', [id]) || {};
     const skipNotice = stored.date === date && (stored.start_time || '') === start;
+
+    // Requires-staff enforcement (category billing policy), same class of history guard as
+    // skipNotice just above: a legacy booking already saved with this exact category and no staff
+    // must still be editable for notes/other fields without retroactively getting blocked by a
+    // requirement that didn't exist (or wasn't enforced) when it was first saved. Any REAL change —
+    // to the category, or to who's assigned as staff — drops the exemption and enforces normally.
+    const storedStaffIds = DB.rows('SELECT person_id FROM meeting_staff WHERE meeting_id=?', [id]).map((r) => r.person_id).sort((a, b) => a - b);
+    const currentStaffSorted = [...staffIds].sort((a, b) => a - b);
+    const staffUnchanged = storedStaffIds.length === currentStaffSorted.length && storedStaffIds.every((v, i) => v === currentStaffSorted[i]);
+    const categoryUnchanged = (stored.category || '') === category;
+    const skipRequiresStaffCheck = categoryUnchanged && staffUnchanged && storedStaffIds.length === 0;
+    const catPolicy = DB.categoryPolicy(category);
+    if (catPolicy.requires_staff && !staffIds.length && !skipRequiresStaffCheck) {
+      UI.toast(`"${category}" bookings require a facility staff member`, 'error');
+      return;
+    }
 
     const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds, skipNotice });
     if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
@@ -3159,14 +3229,14 @@
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
 
-    const ids = { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group' };
+    const ids = { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group', category: 'bke-category' };
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
     DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
               discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
-              tier_id=?, tier_overhead_pct=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, id]);
+              tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
@@ -3631,6 +3701,26 @@
       DB.setGroupTier(sel.dataset.org, sel.value ? Number(sel.value) : null);
     });
     UI.toast('Group discounts & tiers saved');
+    refresh();
+  }
+
+  // Category Billing (Settings): one row per DB.vocabList('BOOKING_CATEGORY') entry, each an
+  // independent DB.setCategoryPolicy call — a facility-SETTINGS write, same "applies to NEW
+  // bookings only" framing as the card's own copy; no existing meetings row is ever touched here.
+  function saveCategoryPolicies() {
+    document.querySelectorAll('.cat-policy-row').forEach((rowEl) => {
+      const category = rowEl.dataset.category;
+      if (!category) return;
+      const pctEl = rowEl.querySelector('.cat-staff-pct');
+      const reqEl = rowEl.querySelector('.cat-requires-staff');
+      const followEl = rowEl.querySelector('.cat-follow-assisted');
+      DB.setCategoryPolicy(category, {
+        staff_pct: pctEl ? Number(pctEl.value) || 0 : 100,
+        requires_staff: !!(reqEl && reqEl.checked),
+        follow_assisted: !!(followEl && followEl.checked)
+      });
+    });
+    UI.toast('Category billing policies saved');
     refresh();
   }
 

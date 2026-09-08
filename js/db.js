@@ -132,6 +132,7 @@
     billing_retained INTEGER DEFAULT 0,
     tier_id INTEGER,
     tier_overhead_pct REAL,
+    category_staff_pct REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -200,6 +201,12 @@
     tier_id INTEGER NOT NULL,
     cost REAL DEFAULT 0,
     PRIMARY KEY(instrument_id, tier_id)
+  );
+  CREATE TABLE IF NOT EXISTS category_policies (
+    category TEXT PRIMARY KEY,
+    staff_pct REAL DEFAULT 100,
+    requires_staff INTEGER DEFAULT 0,
+    follow_assisted INTEGER DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS service_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -489,6 +496,90 @@
         }
       }
     } catch (_) {}
+
+    // Per-category staff billing policy (roadmap item B): what percent of a Facility Staff
+    // member's normal rate a booking's category bills, plus whether that category requires a
+    // facility staff assignee at all. A facility-SETTINGS table (like group_discounts/
+    // pricing_tiers above) — clearAllData() deliberately leaves it alone. Runs at the very end of
+    // migrate() for the same reason as the pricing-tier block above: meetings.category_staff_pct
+    // just below must come after the meetings_new rebuild earlier in this function, which copies
+    // an explicit (older) column list into a fresh table and would otherwise silently drop a
+    // column added before it ran.
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS category_policies (
+          category TEXT PRIMARY KEY,
+          staff_pct REAL DEFAULT 100,
+          requires_staff INTEGER DEFAULT 0,
+          follow_assisted INTEGER DEFAULT 0
+        );
+      `);
+    } catch (_) {}
+    seedDefaultCategoryPolicies();
+    try { db.exec('ALTER TABLE meetings ADD COLUMN category_staff_pct REAL'); } catch (_) {}
+  }
+
+  // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
+  // category_policies has any row at all, seeded or user-edited) — defaults preserve current
+  // behavior exactly: every staff_pct is 100 (no scaling until a facility configures one), and
+  // 'training'/'assisted session' start out requiring a facility staff assignee, since that was
+  // already the de facto expectation for those two categories. 'training' also starts with
+  // follow_assisted=1 (a live link to 'assisted session'.staff_pct, not a value copy) so the
+  // owner's "train same as assisted" default holds without anyone touching Settings — with both
+  // rows at 100% that link changes nothing to look at until a facility actually configures a
+  // percent. Runs from BOTH migrate() (an existing database being upgraded) and boot()'s
+  // fresh-SCHEMA path below (a brand-new database, which never calls migrate()) so a facility
+  // sees these defaults either way. Any other/user-added category (sync, consult, or a
+  // facility-added vocab term) simply gets no row — categoryPolicy()'s {100, false} fallback
+  // already reproduces "unscaled, no staff required" for those.
+  function seedDefaultCategoryPolicies() {
+    const already = row('SELECT COUNT(*) as c FROM category_policies') || { c: 0 };
+    if (already.c) return;
+    const defaults = [
+      // [category, staff_pct, requires_staff, follow_assisted]
+      ['sync', 100, 0, 0],
+      ['consult', 100, 0, 0],
+      ['assisted session', 100, 1, 0],
+      ['training', 100, 1, 1]
+    ];
+    defaults.forEach(([category, staff_pct, requires_staff, follow_assisted]) => {
+      run('INSERT INTO category_policies (category, staff_pct, requires_staff, follow_assisted) VALUES (?,?,?,?)',
+        [category, staff_pct, requires_staff, follow_assisted]);
+    });
+  }
+
+  /* ---------------- Per-category staff billing policy (roadmap item B) ----------------
+     Resolves ONE category to {staff_pct, requires_staff} — the single place app.js's live modal
+     (recomputeBomTotals) and this file's own seedBooking resolve it, so a seeded booking can
+     never price differently than the live modal would for the same category (same pattern as
+     resolveOverheadForOrg/resolveInstrumentCost above). follow_assisted is a LIVE LINK, not a
+     value copy: it reads 'assisted session'.staff_pct fresh every time, one level deep only (no
+     chains — a category that follows assisted-session's OWN staff_pct, never another category's
+     follow_assisted). requires_staff is never inherited via follow_assisted — that flag only
+     links the percent. Missing category (blank, or no row at all — an unknown/user-added vocab
+     term) resolves to {100, false}, i.e. unscaled and no staff required: exactly today's
+     behavior, so an unconfigured category changes nothing. */
+  function getCategoryPolicyRaw(category) {
+    if (!category) return { staff_pct: 100, requires_staff: false, follow_assisted: false };
+    const r = row('SELECT staff_pct, requires_staff, follow_assisted FROM category_policies WHERE category=?', [category]);
+    if (!r) return { staff_pct: 100, requires_staff: false, follow_assisted: false };
+    return { staff_pct: Number(r.staff_pct), requires_staff: !!r.requires_staff, follow_assisted: !!r.follow_assisted };
+  }
+  function categoryPolicy(category) {
+    const raw = getCategoryPolicyRaw(category);
+    if (raw.follow_assisted) {
+      // One level, no chains: read 'assisted session'.staff_pct directly, not through another
+      // recursive categoryPolicy() call (which would let a chain of follow_assisted flags loop).
+      const assisted = row('SELECT staff_pct FROM category_policies WHERE category=?', ['assisted session']);
+      return { staff_pct: assisted ? Number(assisted.staff_pct) : 100, requires_staff: raw.requires_staff };
+    }
+    return { staff_pct: raw.staff_pct, requires_staff: raw.requires_staff };
+  }
+  function setCategoryPolicy(category, { staff_pct, requires_staff, follow_assisted }) {
+    if (!category) return;
+    run(`INSERT INTO category_policies (category, staff_pct, requires_staff, follow_assisted) VALUES (?,?,?,?)
+         ON CONFLICT(category) DO UPDATE SET staff_pct=excluded.staff_pct, requires_staff=excluded.requires_staff, follow_assisted=excluded.follow_assisted`,
+      [category, Number(staff_pct) || 0, requires_staff ? 1 : 0, follow_assisted ? 1 : 0]);
   }
 
   async function boot() {
@@ -514,6 +605,10 @@
     } else {
       db = new SQL.Database();
       db.exec(SCHEMA);
+      // migrate() never runs for a brand-new database (SCHEMA already has every current column/
+      // table), but the category-policy defaults still need seeding here — see
+      // seedDefaultCategoryPolicies's comment for why this can't just live inside migrate().
+      seedDefaultCategoryPolicies();
     }
     return { persistent: !memoryMode };
   }
@@ -1281,7 +1376,14 @@
       overheadPct: resolvedOverhead.overheadPct,
       taxPct: getConfigNum('tax_pct', 0)
     };
-    const bom = global.UI.computeBookingBOM({ start, end, instruments: instrumentsForCalc, staff: staffForCalc, groupPct, manualPct: 0, rates });
+    // Same one place (categoryPolicy) app.js's recomputeBomTotals resolves this from, so a seeded
+    // booking can never bill staff time differently than the live modal would for the same
+    // category. Every seeded category defaults to 100% (see seedDefaultCategoryPolicies), so this
+    // is a no-op factor of 1 unless a caller's own seed data has edited category_policies —
+    // seedSampleData never does, which is exactly why its cost regression triple stays valid.
+    const catPolicy = categoryPolicy(category);
+    const staffPctFactor = (Number(catPolicy.staff_pct) || 0) / 100;
+    const bom = global.UI.computeBookingBOM({ start, end, instruments: instrumentsForCalc, staff: staffForCalc, groupPct, manualPct: 0, rates, staffPctFactor });
 
     const attendees = peopleIds.length
       ? rows(`SELECT name FROM people WHERE id IN (${peopleIds.map(() => '?').join(',')})`, peopleIds).map((r) => r.name).join(', ')
@@ -1290,15 +1392,15 @@
     const isCancelled = !!(cancelled && cancelled.cancelled !== false);
     run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, note, actions,
           discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost,
-          is_cancelled, cancelled_at, billing_retained, category, tier_id, tier_overhead_pct)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+          is_cancelled, cancelled_at, billing_retained, category, tier_id, tier_overhead_pct, category_staff_pct)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       projectId, grantId, title, date, start, end, attendees, note, actions,
       0, groupOrg, groupPct, bom.subtotal, bom.beforeTax, bom.total,
       isCancelled ? 1 : 0,
       // Full timestamp, not a calendar day — toISOString() is the right tool here (see CLAUDE.md).
       isCancelled ? new Date().toISOString() : '',
       isCancelled && cancelled.retained ? 1 : 0,
-      category, resolvedOverhead.tierId, resolvedOverhead.tierOverheadPct
+      category, resolvedOverhead.tierId, resolvedOverhead.tierOverheadPct, catPolicy.staff_pct
     ]);
     const inserted = row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
@@ -1776,6 +1878,9 @@
     setInstrumentTierRate,
     deleteInstrumentTierRate,
     listInstrumentTierRates,
+    getCategoryPolicyRaw,
+    categoryPolicy,
+    setCategoryPolicy,
     countPersonRefs,
     countInstrumentRefs,
     countProjectRefs,

@@ -9,6 +9,11 @@ This project uses [Semantic Versioning](https://semver.org/).
 - **Search filter in token pickers.** Token pickers (People/Instruments/Staff/etc.) gain a
   type-to-filter search box above the dropdown, narrowing the available options without ever
   hiding an already-picked badge.
+- **Per-category staff billing policy and staff requirement (roadmap item B).** A new Settings
+  card lets a facility set what percent of a Facility Staff member's normal rate each booking
+  category bills (e.g. discounted for training), and whether that category requires a facility
+  staff assignee before it can be saved; the booking modal shows a live advisory and price note,
+  and enforcement applies only to new/edited bookings so legacy history is untouched.
 
 ## [1.7.0] — 2026-09-08
 

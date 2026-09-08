@@ -1231,6 +1231,11 @@
       SELECT t.*, (SELECT COUNT(*) FROM group_tiers gt WHERE gt.tier_id = t.id) as group_count,
              (SELECT COUNT(*) FROM meetings m WHERE m.tier_id = t.id) as booking_count
       FROM pricing_tiers t ORDER BY t.is_retired ASC, t.name ASC`);
+    // One row per booking category (built-ins plus any facility-added vocab term) — an unlisted
+    // category simply hasn't been given a row yet, and DB.categoryPolicy's {100, false} default
+    // reproduces exactly what booking billing did before this feature existed.
+    const bookingCategories = global.DB.vocabList('BOOKING_CATEGORY');
+    const categoryPolicies = bookingCategories.map((cat) => Object.assign({ category: cat }, global.DB.getCategoryPolicyRaw(cat)));
 
     return `
     <div class="card mb-16">
@@ -1369,6 +1374,29 @@
             </tbody>
           </table>
         </div>` : emptyState('tag', 'No pricing tiers yet', 'Add a tier to assign labs a named overhead rate instead of the legacy Internal/External split.')}
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-title">${ic('tag')} Category Billing</div>
+      <div class="card-body">
+        <div class="faint small mb-8">What percent of a Facility Staff member's normal rate a booking category bills, and whether that category requires a facility staff assignee at all. Instrument time is unaffected — tiers and discounts already govern that. Applies to staff time on NEW bookings only; existing bookings keep the price they were saved with.</div>
+        ${categoryPolicies.map((p) => `
+          <div class="row mb-8 cat-policy-row" style="gap:14px;align-items:center;flex-wrap:wrap" data-category="${esc(p.category)}">
+            <span class="small font-medium" style="min-width:130px">${esc(p.category)}</span>
+            <div class="field" style="margin:0">
+              <label class="small faint">Staff %</label>
+              <input type="number" min="0" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} />
+            </div>
+            <label class="row small" style="gap:6px;align-items:center;cursor:pointer">
+              <input type="checkbox" class="cat-requires-staff" ${p.requires_staff ? 'checked' : ''} /> Requires facility staff
+            </label>
+            ${p.category === 'training' ? `
+            <label class="row small" style="gap:6px;align-items:center;cursor:pointer">
+              <input type="checkbox" class="cat-follow-assisted" ${p.follow_assisted ? 'checked' : ''} onchange="this.closest('.cat-policy-row').querySelector('.cat-staff-pct').disabled = this.checked" /> Same as assisted session
+            </label>` : ''}
+          </div>`).join('')}
+        <button class="btn btn-primary btn-sm mt-8" data-act="save-category-policies">${ic('check')} Save Category Billing</button>
       </div>
     </div>
 

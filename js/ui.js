@@ -532,7 +532,8 @@
           manually-typed amount (any other unit — $/sample, $/gram, etc).
        3. Each Facility Staff assignee bills by their OWN window inside the booking (left blank =
           the full booking window), but never less than 1 hour, and always rounded UP to a whole
-          hour beyond that — so 10 minutes bills as 1 hour, and 65 minutes bills as 2 hours.
+          hour beyond that — so 10 minutes bills as 1 hour, and 65 minutes bills as 2 hours — and
+          THEN scaled by the booking's category billing policy (staffPctFactor below), if any.
        4. Discounts — a standing per-lab percent plus a manual admin override, added together —
           apply ONLY to the time-billed instrument cost, never to staff time or to per-unit/
           per-weight instrument costs.
@@ -543,10 +544,19 @@
           handed — that "before tax" figure is what a facility would actually invoice before any
           tax line — and finally the tax percentage is added on top of THAT to get the final
           total. */
-  function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates }) {
+  // staffPctFactor (default 1, i.e. 100%): the category billing policy's staff_pct/100, applied to
+  // STAFF LINES ONLY, and applied AFTER the 1-hour floor above — the floor is stated policy (a
+  // facility always holds at least an hour of staff time), the percent scales what that floored
+  // line then bills. Instrument time is never touched by it: tiers/discounts already govern that.
+  // Resolving which policy applies to a given category is the CALLER's job (DB.categoryPolicy),
+  // same division of labor as overheadPct/instrument tier rates above — this function only does
+  // arithmetic on whatever factor it's handed. Omitted/undefined ⇒ 1, so every existing caller
+  // that predates this parameter (and any legacy booking recomputation) is unaffected.
+  function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates, staffPctFactor }) {
     const bookingHours = hoursBetween(start, end);
     const overheadPct = (rates && rates.overheadPct) || 0;
     const taxPct = (rates && rates.taxPct) || 0;
+    const pctFactor = staffPctFactor == null ? 1 : staffPctFactor;
 
     let instrTime = 0, instrAmount = 0;
     const instrumentLines = (instruments || []).map((it) => {
@@ -560,7 +570,7 @@
     const staffLines = (staff || []).map((p) => {
       const rawHours = (p.start && p.end) ? hoursBetween(p.start, p.end) : bookingHours;
       const billHours = billableStaffHours(rawHours);
-      const line = (p.rate || 0) * billHours;
+      const line = (p.rate || 0) * billHours * pctFactor;
       staffTotal += line;
       return Object.assign({}, p, { rawHours, billHours, line });
     });
@@ -577,7 +587,7 @@
     return {
       bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
       groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
-      overheadPct, overheadAmt, beforeTax, taxPct, taxAmt, total
+      overheadPct, overheadAmt, beforeTax, taxPct, taxAmt, total, staffPctFactor: pctFactor
     };
   }  /* A retired person/instrument keeps its real name in the database — the suffix is added at
      display time only, so historical records still read back exactly as they were entered. */
