@@ -1361,7 +1361,7 @@
     if (refs.entries) holds.push(refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
     if (refs.files) holds.push(plural(refs.files, 'file'));
     if (refs.fields) holds.push(plural(refs.fields, 'custom field'));
-    const billed = refs.billed > 0 ? ` Its bookings account for ${fmtMoney(refs.billed)} of billing, which stays on the record.` : '';
+    const billed = refs.billed > 0 ? ` It carries ${fmtMoney(refs.billed)} of billing (bookings and service entries), which stays on the record.` : '';
 
     const ok = await UI.confirmModal(
       'Archive Project',
@@ -4007,7 +4007,9 @@
     const m = document.querySelector('.modal');
     const desc = m.querySelector('#see-desc').value.trim();
     if (!desc) { UI.toast('Description required', 'error'); return; }
-    const date = m.querySelector('#see-date').value || null;
+    // Same default as seSave: a NULL date would drop out of Reports' date-range filters
+    // (se.date >= ?), silently hiding the entry from every ranged report and export.
+    const date = m.querySelector('#see-date').value || UI.today();
     const staffVal = m.querySelector('#see-staff').value;
     const personId = staffVal ? Number(staffVal) : null;
     const projectVal = m.querySelector('#see-project').value;

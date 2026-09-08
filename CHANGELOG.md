@@ -52,6 +52,11 @@ This project uses [Semantic Versioning](https://semver.org/).
 - **Retired timeline lanes no longer claim an instrument prefill.** An empty slot in a retired
   instrument's lane now omits the instrument from the click-to-book shortcut's markup and tooltip,
   matching the documented intent (the picker would exclude the retired instrument anyway).
+- **Editing a service entry keeps its date.** Clearing the Date field while editing stored an
+  empty date that fell outside every Reports date-range filter, hiding the entry from ranged
+  reports and exports; it now defaults to today, exactly as creating one does.
+- **Archive dialog no longer credits all billing to bookings.** The preserved-billing figure
+  includes service entries, and the copy now says so.
 
 ## [1.6.0] — 2026-09-07
 
