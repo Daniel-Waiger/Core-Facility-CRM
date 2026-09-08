@@ -66,6 +66,10 @@
     cost_unit TEXT DEFAULT 'time',
     is_retired INTEGER DEFAULT 0,
     retired_at TEXT DEFAULT '',
+    min_duration_mins INTEGER DEFAULT 0,
+    max_duration_mins INTEGER DEFAULT 0,
+    min_gap_mins INTEGER DEFAULT 0,
+    min_notice_hours REAL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS project_people (
@@ -349,6 +353,15 @@
     } catch (_) {}
     try { db.exec('ALTER TABLE meetings ADD COLUMN grant_id INTEGER'); } catch (_) {}
     try { db.exec('ALTER TABLE projects ADD COLUMN grant_id INTEGER'); } catch (_) {}
+
+    // Per-instrument booking constraints (min/max session duration, minimum gap between bookings
+    // on the same instrument, minimum advance notice before a booking's start). Zero = unconstrained,
+    // so an existing instrument with no configured constraints behaves exactly as before. Enforced
+    // in app.js's findBookingConflicts.
+    try { db.exec('ALTER TABLE instruments ADD COLUMN min_duration_mins INTEGER DEFAULT 0'); } catch (_) {}
+    try { db.exec('ALTER TABLE instruments ADD COLUMN max_duration_mins INTEGER DEFAULT 0'); } catch (_) {}
+    try { db.exec('ALTER TABLE instruments ADD COLUMN min_gap_mins INTEGER DEFAULT 0'); } catch (_) {}
+    try { db.exec('ALTER TABLE instruments ADD COLUMN min_notice_hours REAL DEFAULT 0'); } catch (_) {}
   }
 
   async function boot() {
@@ -1035,16 +1048,20 @@
       run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', p);
     }
 
-    // 2. Instruments (cost_unit 'time' = price/hour; other units price per amount entered on a booking)
+    // 2. Instruments (cost_unit 'time' = price/hour; other units price per amount entered on a booking).
+    // Trailing 4 columns are booking constraints (min/max duration mins, min gap mins, min notice
+    // hours) — 0 = unconstrained. Olympus FV3000 carries a min/max session length, Nikon AX R a
+    // minimum gap between bookings, Zeiss Lightsheet a minimum advance-notice window; Glacios is left
+    // unconstrained on duration since its seed data includes a 45-minute consult.
     const instData = [
-      ['Leica SP8 FALCON', 'FLIM / Confocal', 'Available', 'Room 118', 'Fluorescence lifetime imaging, White Light Laser 470-670nm + 405nm', 120, 'time'],
-      ['Olympus FV3000', 'Multiphoton / Confocal', 'In-use', 'Room 204', 'High-sensitivity spectral GaAsP detectors, heated stage chamber', 150, 'time'],
-      ['Zeiss Lightsheet Z.1', 'Lightsheet (Volume)', 'Available', 'Room 210', 'Dual-side illumination for cleared tissue & whole organ 3D imaging', 200, 'time'],
-      ['Nikon AX R Resonant', 'Resonant Confocal', 'Available', 'Room 212', '2K x 2K resonant scanning for high-speed calcium dynamics', 100, 'time'],
-      ['Glacios Cryo-TEM', 'Cryo-EM', 'Maintenance', 'Room B14', '200kV autoloader - undergoing routine monthly beam alignment', 45, 'unit']
+      ['Leica SP8 FALCON', 'FLIM / Confocal', 'Available', 'Room 118', 'Fluorescence lifetime imaging, White Light Laser 470-670nm + 405nm', 120, 'time', 0, 0, 0, 0],
+      ['Olympus FV3000', 'Multiphoton / Confocal', 'In-use', 'Room 204', 'High-sensitivity spectral GaAsP detectors, heated stage chamber', 150, 'time', 60, 480, 0, 0],
+      ['Zeiss Lightsheet Z.1', 'Lightsheet (Volume)', 'Available', 'Room 210', 'Dual-side illumination for cleared tissue & whole organ 3D imaging', 200, 'time', 0, 0, 0, 24],
+      ['Nikon AX R Resonant', 'Resonant Confocal', 'Available', 'Room 212', '2K x 2K resonant scanning for high-speed calcium dynamics', 100, 'time', 0, 0, 30, 0],
+      ['Glacios Cryo-TEM', 'Cryo-EM', 'Maintenance', 'Room B14', '200kV autoloader - undergoing routine monthly beam alignment', 45, 'unit', 0, 0, 0, 0]
     ];
     for (const i of instData) {
-      run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)', i);
+      run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)', i);
     }
 
     // 2b. Instrument supervisors (instrument_staff): David Kim (6) covers the four optical

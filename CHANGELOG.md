@@ -14,6 +14,12 @@ This project uses [Semantic Versioning](https://semver.org/).
   hour-grid layout math is factored out for reuse by the resource timeline (roadmap 1.3). Also
   fixes cancelled bookings not rendering with the cancelled style on the calendar (the month query
   was missing `is_cancelled`).
+- **Per-instrument booking constraints (roadmap 1.3).** Instruments gain optional min/max session
+  duration, minimum gap between bookings, and minimum advance notice fields on the Add/Edit
+  Instrument modal (0 = unconstrained). `findBookingConflicts` enforces all four alongside the
+  existing overlap checks, shared by the booking modal's live advisory and its save-time hard
+  block so the two can never disagree; advance notice is skipped for notes-only edits and
+  reinstating a cancelled booking so it can't retroactively fail a slot already locked in.
 
 ## [1.6.0] — 2026-09-07
 

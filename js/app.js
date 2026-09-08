@@ -1755,6 +1755,14 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="i-cost" placeholder="0" /></div>
           ${vocabField({ category: 'UNIT', id: 'i-cost-unit', label: 'Billed per', selected: 'time', placeholder: '-- Select Unit --' })}
         </div>
+        <div class="field"><label>Booking Constraints</label>
+          <div class="grid cols-4">
+            <div class="field"><label class="small">Min Duration (mins)</label><input type="number" min="0" step="1" class="input" id="i-min-duration" placeholder="0" data-tooltip="0 = no minimum" /></div>
+            <div class="field"><label class="small">Max Duration (mins)</label><input type="number" min="0" step="1" class="input" id="i-max-duration" placeholder="0" data-tooltip="0 = no maximum" /></div>
+            <div class="field"><label class="small">Min Gap (mins)</label><input type="number" min="0" step="1" class="input" id="i-min-gap" placeholder="0" data-tooltip="Minimum gap required before/after another booking on this instrument. 0 = no minimum" /></div>
+            <div class="field"><label class="small">Min Notice (hours)</label><input type="number" min="0" step="any" class="input" id="i-min-notice" placeholder="0" data-tooltip="Minimum advance notice required before a booking's start time. 0 = no minimum" /></div>
+          </div>
+        </div>
         ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
       </div></div>
       <div class="foot">
@@ -1769,9 +1777,11 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#i-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)',
+    DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
-       Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time']);
+       Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time',
+       Number(m.querySelector('#i-min-duration').value) || 0, Number(m.querySelector('#i-max-duration').value) || 0,
+       Number(m.querySelector('#i-min-gap').value) || 0, Number(m.querySelector('#i-min-notice').value) || 0]);
     const iid = DB.q1('SELECT last_insert_rowid()')[0];
     readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
     UI.closeDim(m.closest('.modal-dim'));
@@ -1798,6 +1808,14 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="ie-cost" value="${inst.cost || 0}" /></div>
           ${vocabField({ category: 'UNIT', id: 'ie-cost-unit', label: 'Billed per', selected: inst.cost_unit || 'time', placeholder: '-- Select Unit --' })}
         </div>
+        <div class="field"><label>Booking Constraints</label>
+          <div class="grid cols-4">
+            <div class="field"><label class="small">Min Duration (mins)</label><input type="number" min="0" step="1" class="input" id="ie-min-duration" value="${inst.min_duration_mins || 0}" data-tooltip="0 = no minimum" /></div>
+            <div class="field"><label class="small">Max Duration (mins)</label><input type="number" min="0" step="1" class="input" id="ie-max-duration" value="${inst.max_duration_mins || 0}" data-tooltip="0 = no maximum" /></div>
+            <div class="field"><label class="small">Min Gap (mins)</label><input type="number" min="0" step="1" class="input" id="ie-min-gap" value="${inst.min_gap_mins || 0}" data-tooltip="Minimum gap required before/after another booking on this instrument. 0 = no minimum" /></div>
+            <div class="field"><label class="small">Min Notice (hours)</label><input type="number" min="0" step="any" class="input" id="ie-min-notice" value="${inst.min_notice_hours || 0}" data-tooltip="Minimum advance notice required before a booking's start time. 0 = no minimum" /></div>
+          </div>
+        </div>
         ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
       </div></div>
       <div class="foot">
@@ -1813,9 +1831,11 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#ie-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=? WHERE id=?',
+    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
       [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
-       Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time', id]);
+       Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time',
+       Number(m.querySelector('#ie-min-duration').value) || 0, Number(m.querySelector('#ie-max-duration').value) || 0,
+       Number(m.querySelector('#ie-min-gap').value) || 0, Number(m.querySelector('#ie-min-notice').value) || 0, id]);
     DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
     readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
     UI.closeDim(m.closest('.modal-dim'));
@@ -2568,7 +2588,15 @@
     if (!start || !end) { host.innerHTML = ''; return; }
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
-    const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds });
+    // Mirror bookingEditSave's skipNotice exactly: a notes-only edit (date/start unchanged from
+    // what's stored) shouldn't show a notice-advisory warning that bookingEditSave itself won't
+    // enforce at save time either, or the advisory would drift from the hard gate.
+    let skipNotice = false;
+    if (ids.excludeId) {
+      const stored = DB.row('SELECT date, start_time FROM meetings WHERE id=?', [ids.excludeId]) || {};
+      skipNotice = stored.date === date && (stored.start_time || '') === start;
+    }
+    const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds, skipNotice });
     if (!conflicts.length) {
       host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>`;
       return;
@@ -2640,7 +2668,7 @@
   // strings, and lexical string comparison already sorts them chronologically, so no time
   // parsing is needed in the SQL itself: two windows overlap unless one ends at/before the
   // other starts.
-  function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds }) {
+  function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds, skipNotice }) {
     if (!start || !end) return [];
     // is_cancelled=0: a cancelled booking has given its slot back, so it never blocks a new one.
     const overlapSql = `m.date = ? AND m.id != ? AND m.is_cancelled = 0 AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
@@ -2661,6 +2689,55 @@
         [...staffIds, date, excludeId || 0, start, end]
       ).forEach((r) => conflicts.push(`${r.name} is already booked ${r.start_time}–${r.end_time} on "${r.title}"`));
     }
+
+    // Per-instrument booking constraints (min/max duration, minimum gap between bookings, minimum
+    // advance notice) — all zero = unconstrained. Duration and gap always apply; notice can be
+    // skipped for edits that don't touch date/time (see bookingEditSave/reinstateBooking) so
+    // history can still be annotated after the fact without retroactively failing a notice window.
+    if (instrumentIds && instrumentIds.length && date) {
+      const durationMins = UI.hoursBetween(start, end) * 60;
+      const rows = DB.rows(`
+        SELECT id, name, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours
+        FROM instruments WHERE id IN (${instrumentIds.map(() => '?').join(',')})`, instrumentIds);
+      rows.forEach((inst) => {
+        if (inst.min_duration_mins > 0 && durationMins < inst.min_duration_mins) {
+          conflicts.push(`${inst.name} requires a minimum booking duration of ${inst.min_duration_mins} minutes`);
+        }
+        if (inst.max_duration_mins > 0 && durationMins > inst.max_duration_mins) {
+          conflicts.push(`${inst.name} allows a maximum booking duration of ${inst.max_duration_mins} minutes`);
+        }
+        if (inst.min_gap_mins > 0) {
+          const neighbors = DB.rows(`
+            SELECT m.start_time, m.end_time
+            FROM meeting_instruments mi JOIN meetings m ON m.id = mi.meeting_id
+            WHERE mi.instrument_id = ? AND m.date = ? AND m.id != ? AND m.is_cancelled = 0
+              AND m.start_time != '' AND m.end_time != ''`,
+            [inst.id, date, excludeId || 0]);
+          const startMin = UI.timeToMinutes(start), endMin = UI.timeToMinutes(end);
+          const gapViolation = neighbors.some((n) => {
+            const nStart = UI.timeToMinutes(n.start_time), nEnd = UI.timeToMinutes(n.end_time);
+            if (nStart == null || nEnd == null || startMin == null || endMin == null) return false;
+            // Overlaps are already reported above; only flag a neighbor that's fully outside this
+            // window but too close on either side.
+            if (nEnd <= startMin && startMin - nEnd < inst.min_gap_mins) return true;
+            if (nStart >= endMin && nStart - endMin < inst.min_gap_mins) return true;
+            return false;
+          });
+          if (gapViolation) conflicts.push(`${inst.name} requires at least ${inst.min_gap_mins} minutes between bookings`);
+        }
+        if (!skipNotice && inst.min_notice_hours > 0) {
+          const t = /^\d{1,2}:\d{2}$/.test(start) ? start : '00:00';
+          const startDt = new Date(date + 'T' + (t.length === 4 ? '0' + t : t) + ':00');
+          if (!isNaN(startDt.getTime())) {
+            const noticeHours = (startDt.getTime() - Date.now()) / 3600000;
+            if (noticeHours < inst.min_notice_hours) {
+              conflicts.push(`${inst.name} requires at least ${inst.min_notice_hours} hours advance notice`);
+            }
+          }
+        }
+      });
+    }
+
     return conflicts;
   }
 
@@ -2847,7 +2924,14 @@
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
 
-    const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds });
+    // A notes-only edit (date and start time both unchanged) shouldn't retroactively fail the
+    // minimum-advance-notice check — that constraint is about giving the facility warning before
+    // a NEW time is committed to, not about blocking edits to a booking whose slot was already
+    // locked in. Duration and gap constraints still apply regardless.
+    const stored = DB.row('SELECT date, start_time FROM meetings WHERE id=?', [id]) || {};
+    const skipNotice = stored.date === date && (stored.start_time || '') === start;
+
+    const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds, skipNotice });
     if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
 
     const attendees = ownerIds.length
@@ -3000,7 +3084,7 @@
     const staffIds = DB.rows('SELECT person_id FROM meeting_staff WHERE meeting_id=?', [id]).map((r) => r.person_id);
     const conflicts = findBookingConflicts({
       date: mt.date, start: mt.start_time, end: mt.end_time, excludeId: id,
-      instrumentIds: instIds, staffIds
+      instrumentIds: instIds, staffIds, skipNotice: true
     });
     if (conflicts.length) {
       UI.toast('Cannot reinstate — ' + conflicts.join('; '), 'error');
