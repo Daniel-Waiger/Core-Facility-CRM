@@ -73,7 +73,9 @@
       ORDER BY se.date DESC, se.id DESC`, [id]);
     const files = DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
-    const outputs = DB.rows(`SELECT * FROM project_outputs WHERE project_id=? ORDER BY ${DB.outputEffDate()} DESC, id DESC`, [id]);
+    // eff_date is exported as the row's Date: the same effective date the ordering (and any
+    // date-range reasoning) uses, so an undated output can't sort as recent while displaying '—'.
+    const outputs = DB.rows(`SELECT *, ${DB.outputEffDate()} AS eff_date FROM project_outputs WHERE project_id=? ORDER BY ${DB.outputEffDate()} DESC, id DESC`, [id]);
     const prog = DB.projectProgress(id);
 
     return { p, ppl, inst, ms, kv, mtgs, entries, files, outputs, prog };
@@ -350,10 +352,12 @@
     ws6['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 40 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws6, 'Files');
 
-    // Sheet 7: Research Outputs (roadmap 3.3) — the funnel's exit stage.
-    const outRows = [['Type', 'Title', 'Reference', 'Date', 'Note']];
+    // Sheet 7: Research Outputs (roadmap 3.3) — the funnel's exit stage. The Date column is the
+    // EFFECTIVE date (explicit date, else the record-creation day) — the same value the ordering
+    // uses — with a * marking the fallback so a backfilled row is distinguishable.
+    const outRows = [['Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
     d.outputs.forEach((o) => {
-      outRows.push([o.type, o.title, o.reference || '—', o.date || '—', o.note || '']);
+      outRows.push([o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
     const ws7 = XLSX.utils.aoa_to_sheet(outRows);
     ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 40 }];
@@ -931,13 +935,15 @@
 
     // Sheet 8: Research Outputs (roadmap 3.3) — across every project, same "Project Code /
     // Project" leading columns as the Meetings/Service Entries sheets above.
-    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Reference', 'Date', 'Note']];
+    // Date column = the effective date the ordering uses (explicit date, else creation day),
+    // * marking the fallback — same convention as the per-project outputs sheet.
+    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
     DB.rows(`
-      SELECT po.*, p.code as project_code, p.title as project_title
+      SELECT po.*, p.code as project_code, p.title as project_title, ${DB.outputEffDate('po')} AS eff_date
       FROM project_outputs po
       JOIN projects p ON p.id = po.project_id
       ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`).forEach((o) => {
-      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date || '—', o.note || '']);
+      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
     const wsOut = XLSX.utils.aoa_to_sheet(outRows);
     wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 12 }, { wch: 40 }];

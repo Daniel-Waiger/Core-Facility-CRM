@@ -52,6 +52,11 @@ This project uses [Semantic Versioning](https://semver.org/).
   were all distinct — each such dataset's duplication note appears in both the preview footnote
   and the exported workbook's Notes sheet.
 
+### Fixed
+- **Exported Research Outputs show the date they sort by.** Undated outputs displayed "—" while
+  ordering (and range reasoning) used their effective date; both XLSX outputs sheets now export
+  the effective date, with a "*" marking rows that fall back to the record-creation day.
+
 ## [1.8.0] — 2026-09-08
 
 ### Added
