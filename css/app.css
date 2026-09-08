@@ -19,6 +19,12 @@
   --warning-soft: #fbf1dc;
   --danger: #bb3350;
   --danger-soft: #fceaee;
+  --chart-1: #5b48c7;
+  --chart-2: #157a50;
+  --chart-3: #9a5c05;
+  --chart-4: #2f6fed;
+  --chart-5: #bb3350;
+  --chart-6: #57708a;
   --radius: 0.75rem;
   --shadow: 0 1px 2px rgba(23,39,43,.04), 0 1px 3px rgba(23,39,43,.06);
   --shadow-lg: 0 10px 24px rgba(23,39,43,.12);
@@ -48,6 +54,12 @@
   --danger: #f0798e;
   --danger-soft: #421a24;
   --danger-ink: #3d0d17;
+  --chart-1: #a094f2;
+  --chart-2: #4bc48f;
+  --chart-3: #e6ab45;
+  --chart-4: #7aa8ff;
+  --chart-5: #f0798e;
+  --chart-6: #8ea3ad;
   --shadow: 0 1px 2px rgba(0,0,0,.4);
   --shadow-lg: 0 10px 24px rgba(0,0,0,.5);
 }

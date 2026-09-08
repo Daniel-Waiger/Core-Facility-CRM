@@ -26,6 +26,15 @@ This project uses [Semantic Versioning](https://semver.org/).
   sheets. Exported to XLSX as a matching "Funnel" sheet in the Reports export, an "Outputs" sheet
   in the per-project XLSX/DOCX/PDF exports, and a facility-wide "Research Outputs" listing sheet
   in the all-projects XLSX export.
+- **Charts on the Reports screen (roadmap 3.5).** Instrument Utilisation, the Funnel, and Activity
+  Mix cards each gain a hand-rolled inline SVG chart (horizontal bars, a stage funnel with
+  conversion labels, and a stacked bar chart with legend) directly above their existing tables —
+  no chart library, and each chart reads the exact same `Reports.compute*` result the table below
+  it renders from, so a chart can never disagree with its own table. Colors come from six new
+  `--chart-1`..`--chart-6` CSS custom properties (light/dark themed), so switching themes recolors
+  the charts instantly with no re-render. Retired instrument names truncate the base name first
+  and append the " (Retired)" suffix after truncating (never the reverse), and every bar/segment
+  carries a `<title>` with the full, untruncated name. Display-only — no export changes.
 
 ## [1.8.0] — 2026-09-08
 

@@ -930,6 +930,118 @@
     return `<div class="row" style="gap:8px"><div class="progress seg grow" style="height:8px"><i style="width:${Math.max(0, Math.min(100, pct)).toFixed(1)}%"></i></div><span class="mono small" style="width:42px;text-align:right">${pct.toFixed(1)}%</span></div>`;
   }
 
+  /* ================================================================================
+     ROADMAP 3.5 — Hand-rolled inline SVG charts (no chart library).
+
+     Theming: every fill/stroke below is a CSS custom property (var(--primary),
+     var(--chart-1)..var(--chart-6), var(--surface-2), var(--text-muted)) defined in
+     css/app.css's :root / [data-theme="dark"] blocks, so a theme flip repaints these charts
+     with ZERO re-render — the browser just resolves the custom property again.
+
+     Retired-name labels (this item's rejected first attempt got this wrong): the on-chart
+     label truncates the BASE name first and appends UI.retiredName's " (Retired)" suffix
+     AFTER truncating — never truncate the already-suffixed string, which would cut it down to
+     something like "Leica SP8 FALCON (R…" and silently hide that the record is retired. Every
+     bar/segment also carries a <title> with the FULL (untruncated) name so the exact record is
+     always recoverable via hover/long-press, regardless of how the on-chart label was clipped.
+
+     Each chart is display-only: it consumes the SAME rows object the table below it renders
+     from (computed exactly once in render(), per this item's requirement), so a chart can never
+     show a number the table disagrees with — no export/app.js touches these. */
+  function chartLabel(name, retired, maxChars) {
+    const base = String(name == null ? '' : name);
+    const trimmed = base.length > maxChars ? base.slice(0, maxChars - 1).trimEnd() + '…' : base;
+    return UI.retiredName(trimmed, retired);
+  }
+  const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)'];
+
+  // Chart 1 of 3 — horizontal bars: instrument utilisation by booked hours (from
+  // computeInstrumentRows, already sorted by hours descending). Capped to the top 8 rows so the
+  // chart stays legible; the full set is always in the table underneath, and the cap is disclosed
+  // rather than silently dropping rows from view.
+  function chartUtilization(rows) {
+    if (!rows.length) return '';
+    const shown = rows.slice(0, 8);
+    const barH = 22, gap = 10, leftLabelW = 150, chartW = 380, rightPad = 90;
+    const maxVal = Math.max(1, ...shown.map((r) => r.hours));
+    const height = shown.length * (barH + gap) + gap;
+    const width = leftLabelW + chartW + rightPad;
+    const bars = shown.map((r, i) => {
+      const y = gap + i * (barH + gap);
+      const w = (r.hours / maxVal) * chartW;
+      const label = chartLabel(r.name, r.retired, 18);
+      const full = UI.retiredName(r.name, r.retired);
+      return `<g>
+        <title>${esc(full)}: ${fmtHours(r.hours)}h (${r.sharePct.toFixed(1)}% of total booked hours)</title>
+        <text x="${leftLabelW - 8}" y="${(y + barH / 2 + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--text-muted)">${esc(label)}</text>
+        <rect x="${leftLabelW}" y="${y}" width="${chartW}" height="${barH}" rx="4" fill="var(--surface-2)"></rect>
+        <rect x="${leftLabelW}" y="${y}" width="${w.toFixed(1)}" height="${barH}" rx="4" fill="var(--primary)"></rect>
+        <text x="${leftLabelW + chartW + 8}" y="${(y + barH / 2 + 4).toFixed(1)}" font-size="11" fill="var(--text-muted)" font-family="var(--mono)">${fmtHours(r.hours)}h</text>
+      </g>`;
+    }).join('');
+    const note = rows.length > shown.length
+      ? `<div class="faint small mt-8">Chart shows the top ${shown.length} of ${rows.length} instruments by booked hours; the table below lists all of them.</div>` : '';
+    return `<div class="tbl-wrap"><svg role="img" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="max-width:640px" aria-label="Instrument utilisation by booked hours"><title>Instrument utilisation by booked hours</title>${bars}</svg></div>${note}`;
+  }
+
+  // Chart 2 of 3 — funnel: stage bars + adjacent conversion-percentage labels, from
+  // computeFunnelRows. Bar length is each stage's count relative to the largest stage's count
+  // (not literally "percent of the funnel entrance", since the stages count different kinds of
+  // things — see computeFunnelRows' header); the conversion % printed alongside each bar is the
+  // exact same number the table below computes, never recomputed here.
+  function chartFunnel(stages) {
+    if (!stages.length) return '';
+    const barH = 24, gap = 12, leftLabelW = 190, chartW = 320, rightPad = 120;
+    const maxCount = Math.max(1, ...stages.map((s) => s.count));
+    const height = stages.length * (barH + gap) + gap;
+    const width = leftLabelW + chartW + rightPad;
+    const bars = stages.map((s, i) => {
+      const y = gap + i * (barH + gap);
+      const w = (s.count / maxCount) * chartW;
+      const color = CHART_COLORS[i % CHART_COLORS.length];
+      const convText = s.conversionPct == null ? '' : ` — ${s.conversionPct.toFixed(1)}% from previous stage`;
+      const convValue = s.conversionPct == null ? '' : ` · ${s.conversionPct.toFixed(1)}%`;
+      return `<g>
+        <title>${esc(s.label)}: ${s.count}${convText}</title>
+        <text x="${leftLabelW - 8}" y="${(y + barH / 2 + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--text-muted)">${esc(s.label)}</text>
+        <rect x="${leftLabelW}" y="${y}" width="${chartW}" height="${barH}" rx="4" fill="var(--surface-2)"></rect>
+        <rect x="${leftLabelW}" y="${y}" width="${w.toFixed(1)}" height="${barH}" rx="4" fill="${color}"></rect>
+        <text x="${leftLabelW + chartW + 8}" y="${(y + barH / 2 + 4).toFixed(1)}" font-size="11" fill="var(--text-muted)" font-family="var(--mono)">${s.count}${convValue}</text>
+      </g>`;
+    }).join('');
+    return `<div class="tbl-wrap"><svg role="img" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="max-width:680px" aria-label="Funnel from consult to research output"><title>Funnel: consult to research output</title>${bars}</svg></div>`;
+  }
+
+  // Chart 3 of 3 — stacked bars + legend: activity mix hours by month/category, from
+  // computeActivityMixRows. Bar segment order follows mix.categories (uncategorized always last,
+  // per that function's own sort), colored by cycling CHART_COLORS so a category keeps the same
+  // color across every bar in the chart; the legend below maps color to category name.
+  function chartActivityMix(mix) {
+    if (!mix.rows.length) return '';
+    const barW = 30, gap = 18, chartH = 140, leftPad = 8, topPad = 8, labelH = 26;
+    const totals = mix.rows.map((r) => mix.categories.reduce((s, c) => s + (r.hours[c] || 0), 0));
+    const maxTotal = Math.max(1, ...totals);
+    const width = leftPad * 2 + mix.rows.length * (barW + gap);
+    const height = topPad + chartH + labelH;
+    const bars = mix.rows.map((r, i) => {
+      const x = leftPad + i * (barW + gap);
+      let yTop = topPad + chartH;
+      const segs = mix.categories.map((c, ci) => {
+        const val = r.hours[c] || 0;
+        if (val <= 0) return '';
+        const segH = (val / maxTotal) * chartH;
+        yTop -= segH;
+        return `<rect x="${x}" y="${yTop.toFixed(1)}" width="${barW}" height="${segH.toFixed(1)}" fill="${CHART_COLORS[ci % CHART_COLORS.length]}"><title>${esc(r.period)} — ${esc(c)}: ${fmtHours(val)}h</title></rect>`;
+      }).join('');
+      return `<g>${segs}<text x="${(x + barW / 2).toFixed(1)}" y="${topPad + chartH + 16}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${esc(r.period)}</text></g>`;
+    }).join('');
+    const legend = mix.categories.map((c, ci) =>
+      `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${CHART_COLORS[ci % CHART_COLORS.length]}"></i><span class="small faint">${esc(c)}</span></span>`
+    ).join('');
+    const svg = `<div class="tbl-wrap"><svg role="img" viewBox="0 0 ${width} ${height}" width="${Math.max(width, 260)}" height="${height}" style="max-width:100%" aria-label="Activity mix hours by month and category"><title>Activity mix by month and category</title>${bars}</svg></div>`;
+    return `${svg}<div class="mt-8">${legend}</div>`;
+  }
+
   /* ---------------- Screen ---------------- */
   function render() {
     const { from, to } = getRange();
@@ -961,6 +1073,7 @@
     <div class="card mb-16">
       <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Instrument utilisation</span></div></div>
       ${!instr.rows.length ? global.Views.emptyState('cpu', 'No bookings in this range', 'Widen the date range or add instrument bookings.') : `
+      <div class="mb-16">${chartUtilization(instr.rows)}</div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr><th>Instrument</th><th>Bookings</th><th>Booked Hours</th><th>Billed Revenue</th><th>Share of Total Hours</th></tr></thead>
@@ -1235,6 +1348,7 @@
     <div class="card mb-16">
       <div class="row mb-8"><div class="grow"><span class="card-title">${ic('layers')} Activity Mix</span></div></div>
       ${!mix.periods.length ? global.Views.emptyState('layers', 'No bookings in this range', '') : `
+      <div class="mb-16">${chartActivityMix(mix)}</div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr><th>Month</th>${mix.categories.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
@@ -1253,6 +1367,7 @@
     <div class="card mb-16">
       <div class="row mb-8"><div class="grow"><span class="card-title">${ic('target')} Funnel: Consult to Output</span></div></div>
       ${!funnel.stages.some((s) => s.count > 0) ? global.Views.emptyState('target', 'No funnel activity in this range', 'Widen the date range or add consults, projects, bookings, milestones and outputs.') : `
+      <div class="mb-16">${chartFunnel(funnel.stages)}</div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr><th>Stage</th><th>Count</th><th>Conversion from Previous</th></tr></thead>
