@@ -54,8 +54,10 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **Exported Research Outputs show the date they sort by.** Undated outputs displayed "—" while
-  ordering (and range reasoning) used their effective date; both XLSX outputs sheets now export
-  the effective date, with a "*" marking rows that fall back to the record-creation day.
+  ordering (and range reasoning) used their effective date; every export path now carries that
+  effective date. The two XLSX sheets mark a fallback row with "*", explained in the column header;
+  the per-project DOCX and PDF write it as "(date, logged)", prose having no header to carry a
+  legend.
 
 ## [1.8.0] — 2026-09-08
 

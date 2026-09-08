@@ -360,7 +360,7 @@
       outRows.push([o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
     const ws7 = XLSX.utils.aoa_to_sheet(outRows);
-    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 40 }];
+    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, ws7, 'Research Outputs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -480,7 +480,8 @@
           children: [
             new TextRun({ text: `[${o.type.toUpperCase()}] `, bold: true }),
             new TextRun({ text: `${o.title} `, bold: true }),
-            new TextRun({ text: o.date ? `(${UI.fmtDate(o.date)}) ` : '' }),
+            new TextRun({ text: o.date ? `(${UI.fmtDate(o.date)}) `
+              : (o.eff_date ? `(${UI.fmtDate(o.eff_date)}, logged) ` : '') }),
             new TextRun({ text: o.reference ? `${o.reference} ` : '', italics: true }),
             new TextRun({ text: o.note ? `— ${o.note}` : '' }),
           ]
@@ -744,7 +745,11 @@
       d.outputs.forEach((o) => {
         checkPage(12);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`[${o.type.toUpperCase()}] ${o.title}${o.date ? ' (' + UI.fmtDate(o.date) + ')' : ''}`, margin, y);
+        // Matches the XLSX sheets' effective-date convention; spelled out as
+        // ', logged' because prose has no header legend to carry a '*'.
+        const when = o.date ? ' (' + UI.fmtDate(o.date) + ')'
+          : (o.eff_date ? ' (' + UI.fmtDate(o.eff_date) + ', logged)' : '');
+        pdf.text(`[${o.type.toUpperCase()}] ${o.title}${when}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (o.reference || o.note) {
@@ -946,7 +951,7 @@
       outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
     const wsOut = XLSX.utils.aoa_to_sheet(outRows);
-    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 12 }, { wch: 40 }];
+    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
