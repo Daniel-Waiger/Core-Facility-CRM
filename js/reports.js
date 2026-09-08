@@ -120,6 +120,65 @@
       WHERE (? = '' OR se.date >= ?) AND (? = '' OR se.date <= ?)
       ORDER BY se.date DESC, se.id DESC`, rangeParams(from, to));
   }
+  // Roadmap 3.2. Mirrors loadInstrumentLines's shape (bounded by the same range, joined fresh) but
+  // walks meeting_people x meetings x meeting_instruments to answer "which people touched this
+  // instrument", not "which instrument lines cost what". The is_cancelled filter is done here in
+  // SQL (rather than via annotateMeetings) because all this needs is distinct occupancy-filtered
+  // (instrument, person) pairs — rule 1, no money involved.
+  function loadAttendeeLines(from, to) {
+    return DB.rows(`
+      SELECT mi.instrument_id, mp.person_id
+      FROM meeting_instruments mi
+      JOIN meeting_people mp ON mp.meeting_id = mi.meeting_id
+      JOIN meetings mt ON mt.id = mi.meeting_id
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+  }
+  // Roadmap 3.2. Occupancy-filtered (instrument, project) pairs in range — feeds "projects served"
+  // and the facility-wide (project_id IS NULL) session count. Bounded like every loader above.
+  function loadProjectInstrumentLines(from, to) {
+    return DB.rows(`
+      SELECT mi.instrument_id, mt.project_id
+      FROM meeting_instruments mi
+      JOIN meetings mt ON mt.id = mi.meeting_id
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+  }
+  // Roadmap 3.2/3.6a. Current-state mapping (who supervises which instrument today) — not a
+  // historical fact tied to a date range, so unlike every loader above this one is NOT bounded by
+  // (from,to); it reads instrument_staff x people directly.
+  function loadInstrumentSupervisors() {
+    return DB.rows(`
+      SELECT ist.instrument_id, pe.id AS person_id, pe.name AS person_name, pe.is_retired AS person_retired
+      FROM instrument_staff ist
+      JOIN people pe ON pe.id = ist.person_id`);
+  }
+  /* Roadmap 3.2. DELIBERATELY UNBOUNDED — the one loader in this file that does not take
+     (from,to). To know whether a person's booking on this instrument in the selected range was
+     their FIRST EVER (not just their first in-range one), the query must see the instrument's
+     entire booking history; restricting it to the range would misreport every returning user
+     whose true first visit predates `from` as "new". Feeds countNewInRange below, which applies
+     the (from,to) filter afterward, against this pre-computed unbounded MIN(date). */
+  function loadFirstInstrumentUserDates() {
+    return DB.rows(`
+      SELECT mi.instrument_id, mp.person_id, MIN(mt.date) AS first_date
+      FROM meeting_instruments mi
+      JOIN meeting_people mp ON mp.meeting_id = mi.meeting_id
+      JOIN meetings mt ON mt.id = mi.meeting_id
+      WHERE mt.is_cancelled = 0
+      GROUP BY 1, 2`);
+  }
+  /* Reusable "first-ever appearance in range" helper (roadmap 3.2, reused by 3.4 keyed on
+     group_org instead of instrument_id). Takes rows already MIN-aggregated per (groupId, entityId)
+     pair by an UNBOUNDED query like loadFirstInstrumentUserDates above, and counts, per groupId,
+     how many entityIds had their first-ever appearance fall inside [from, to]. */
+  function countNewInRange(firstDateRows, from, to) {
+    const counts = new Map();
+    firstDateRows.forEach((r) => {
+      if (from && r.firstDate < from) return;
+      if (to && r.firstDate > to) return;
+      counts.set(r.groupId, (counts.get(r.groupId) || 0) + 1);
+    });
+    return counts;
+  }
   function loadStaffLines(from, to) {
     // meeting_staff always names a facility-staff assignee, but a person's is_staff flag could in
     // theory have been unset after the fact (retiring doesn't do this, but be defensive) — join
@@ -379,6 +438,100 @@
     return { instrumentRows, periodRows, totalConsults: consults.length };
   }
 
+  /* ================================================================================
+     Card — Instrument stewardship scorecard (ROADMAP 3.2)
+     A per-instrument justification view, grouped by supervising staff (instrument_staff): what
+     the instrument is actually doing for the facility, for whoever is on the hook to justify it.
+     Deliberately built ON TOP of computeInstrumentRows / computeConsultRows (never duplicating
+     their aggregation) plus two new occupancy-filtered loaders above.
+
+     A multi-supervisor instrument appears under EVERY supervisor it's linked to — this is a
+     GROUPING for review, not a partition of ownership, and the per-instrument numbers are
+     deliberately NOT rolled up into a per-supervisor total (that would silently double-count any
+     shared instrument into a fabricated "score" per person, which this app does not do).
+
+     OMITTED, on purpose, with a labeled footnote rather than a fake column: trained-user pool
+     trend and downtime share both need Tier 4 data (training records, downtime logs) this app
+     doesn't have yet.
+     ================================================================================ */
+  function computeStewardshipRows(from, to) {
+    if (from === undefined) { from = state.from; to = state.to; }
+
+    const instr = computeInstrumentRows(from, to);                 // reuse — no duplicated utilisation math
+    const consult = computeConsultRows(from, to);                  // reuse — no duplicated consult-tag math
+    const consultByInstrument = new Map(consult.instrumentRows.map((r) => [r.id, r.count]));
+
+    const distinctUsersByInstrument = new Map(); // instrument_id -> Set(person_id)
+    loadAttendeeLines(from, to).forEach((ln) => {
+      if (!distinctUsersByInstrument.has(ln.instrument_id)) distinctUsersByInstrument.set(ln.instrument_id, new Set());
+      distinctUsersByInstrument.get(ln.instrument_id).add(ln.person_id);
+    });
+
+    const projectsByInstrument = new Map();      // instrument_id -> Set(project_id), non-null only
+    const facilityWideByInstrument = new Map();  // instrument_id -> count of sessions with project_id NULL
+    loadProjectInstrumentLines(from, to).forEach((ln) => {
+      if (ln.project_id == null) {
+        facilityWideByInstrument.set(ln.instrument_id, (facilityWideByInstrument.get(ln.instrument_id) || 0) + 1);
+      } else {
+        if (!projectsByInstrument.has(ln.instrument_id)) projectsByInstrument.set(ln.instrument_id, new Set());
+        projectsByInstrument.get(ln.instrument_id).add(ln.project_id);
+      }
+    });
+
+    // "New in range" via the reusable unbounded-first-appearance helper (see its own comment).
+    const firstRows = loadFirstInstrumentUserDates().map((r) => ({ groupId: r.instrument_id, entityId: r.person_id, firstDate: r.first_date }));
+    const newUsersByInstrument = countNewInRange(firstRows, from, to);
+
+    const supervisorsByInstrument = new Map(); // instrument_id -> [{id,name,retired}]
+    loadInstrumentSupervisors().forEach((ln) => {
+      if (!supervisorsByInstrument.has(ln.instrument_id)) supervisorsByInstrument.set(ln.instrument_id, []);
+      supervisorsByInstrument.get(ln.instrument_id).push({ id: ln.person_id, name: ln.person_name, retired: !!ln.person_retired });
+    });
+
+    // One scorecard row per instrument that had any booking activity in range (an instrument with
+    // nothing booked has nothing to justify here — it simply won't appear).
+    const rowsByInstrument = new Map();
+    instr.rows.forEach((r) => {
+      rowsByInstrument.set(r.id, {
+        id: r.id, name: r.name, retired: r.retired,
+        bookings: r.bookings, hours: r.hours, revenue: r.revenue,
+        distinctUsers: (distinctUsersByInstrument.get(r.id) || new Set()).size,
+        newUsers: newUsersByInstrument.get(r.id) || 0,
+        projectsServed: (projectsByInstrument.get(r.id) || new Set()).size,
+        facilityWideSessions: facilityWideByInstrument.get(r.id) || 0,
+        consultCount: consultByInstrument.get(r.id) || 0
+      });
+    });
+
+    // Group under each supervisor ("Unassigned" heading for instruments with none). See file
+    // comment above: this is a grouping, not a partition — a shared instrument lands in more than
+    // one group.
+    const bySupervisor = new Map(); // key: person_id or 'unassigned' -> { supervisor, rows }
+    rowsByInstrument.forEach((row, instId) => {
+      const sups = supervisorsByInstrument.get(instId) || [];
+      if (!sups.length) {
+        if (!bySupervisor.has('unassigned')) bySupervisor.set('unassigned', { supervisor: null, rows: [] });
+        bySupervisor.get('unassigned').rows.push(row);
+      } else {
+        sups.forEach((sup) => {
+          const key = String(sup.id);
+          if (!bySupervisor.has(key)) bySupervisor.set(key, { supervisor: sup, rows: [] });
+          bySupervisor.get(key).rows.push(row);
+        });
+      }
+    });
+
+    const groups = Array.from(bySupervisor.values())
+      .map((g) => ({ supervisor: g.supervisor, rows: g.rows.sort((a, b) => b.hours - a.hours) }))
+      .sort((a, b) => {
+        if (!a.supervisor) return 1;
+        if (!b.supervisor) return -1;
+        return a.supervisor.name.localeCompare(b.supervisor.name);
+      });
+
+    return { groups };
+  }
+
   /* ---------------- Small render helpers ---------------- */
   function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
   // Same configured symbol the booking modal and Project Costs use (Settings -> Billing Rates);
@@ -399,6 +552,7 @@
     const staff = computeStaffRows(from, to);
     const matrix = computeStaffInstrumentMatrix(from, to);
     const proj = computeProjectRows(from, to);
+    const stewardship = computeStewardshipRows(from, to);
     const consult = computeConsultRows(from, to);
     const svc = computeServiceEntryRows(from, to);
 
@@ -525,6 +679,34 @@
     </div>
 
     <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('target')} Instrument Stewardship</span></div></div>
+      ${!stewardship.groups.length ? global.Views.emptyState('target', 'No bookings in this range', 'Widen the date range or add instrument bookings.') : stewardship.groups.map((g) => `
+        <div class="mb-16">
+          <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">${g.supervisor ? 'Supervisor: ' + nameCell(g.supervisor.name, g.supervisor.retired) : 'Unassigned (no supervisor on file)'}</div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Revenue</th><th>Distinct Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
+              <tbody>
+                ${g.rows.map((r) => `
+                  <tr class="${r.retired ? 'row-retired' : ''}">
+                    <td style="font-weight:600">${nameCell(r.name, r.retired)}</td>
+                    <td class="mono small">${r.bookings}</td>
+                    <td class="mono small">${fmtHours(r.hours)}</td>
+                    <td class="mono small">${fmtMoney(r.revenue)}</td>
+                    <td class="mono small">${r.distinctUsers}</td>
+                    <td class="mono small">${r.newUsers}</td>
+                    <td class="mono small">${r.projectsServed}</td>
+                    <td class="mono small">${r.facilityWideSessions}</td>
+                    <td class="mono small">${r.consultCount}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`).join('')}
+      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Revenue follows the retained-charge rule used everywhere else. Omitted on purpose (need Tier 4 data this app doesn't have yet): trained-user pool trend and downtime share.</div>
+    </div>
+
+    <div class="card mb-16">
       <div class="row mb-8"><div class="grow"><span class="card-title">${ic('tag')} Consults</span></div><span class="faint small mono">${consult.totalConsults} total</span></div>
       <div class="grid cols-2">
         <div>
@@ -612,6 +794,7 @@
     computeStaffRows,
     computeStaffInstrumentMatrix,
     computeProjectRows,
+    computeStewardshipRows,
     computeConsultRows,
     computeServiceEntryRows
   };

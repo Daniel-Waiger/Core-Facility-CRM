@@ -906,6 +906,7 @@
     const staff = Reports.computeStaffRows(from, to);
     const matrix = Reports.computeStaffInstrumentMatrix(from, to);
     const proj = Reports.computeProjectRows(from, to);
+    const stewardship = Reports.computeStewardshipRows(from, to);
     const consult = Reports.computeConsultRows(from, to);
     const svc = Reports.computeServiceEntryRows(from, to);
 
@@ -928,6 +929,9 @@
       [''],
       ['Staff x Instrument attribution'],
       ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total.'],
+      [''],
+      ['Instrument stewardship scorecard'],
+      ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. Omitted on purpose (need data this app does not track yet): trained-user pool trend and downtime share.'],
       [''],
       ['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']
     ];
@@ -974,7 +978,23 @@
     wsPg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, wsPg, 'Projects & Groups');
 
-    // Sheet 6: Consults — bookings tagged Category = "consult", counted per instrument and per
+    // Sheet 6: Instrument stewardship scorecard — flat row per supervisor x instrument, same
+    // pattern as the Staff x Instrument sheet above (a wide grid would grow unboundedly with
+    // supervisor count). Fed from the exact same Reports.computeStewardshipRows the screen
+    // renders from. A shared instrument repeats under every supervisor it's linked to — see the
+    // Notes sheet for why that's intentional.
+    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Revenue', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
+    stewardship.groups.forEach((g) => {
+      const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
+      g.rows.forEach((r) => {
+        stewardRows.push([supLabel, UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), r.distinctUsers, r.newUsers, r.projectsServed, r.facilityWideSessions, r.consultCount]);
+      });
+    });
+    const wsSteward = XLSX.utils.aoa_to_sheet(stewardRows);
+    wsSteward['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsSteward, 'Stewardship');
+
+    // Sheet 7: Consults — bookings tagged Category = "consult", counted per instrument and per
     // calendar-month period. Fed from the exact same Reports.computeConsultRows the screen
     // renders from, so this sheet can never disagree with what's on screen.
     const consultRows = [['Breakdown', 'Instrument / Month', 'Consults']];
@@ -985,7 +1005,7 @@
     wsConsult['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsConsult, 'Consults');
 
-    // Sheet 7: Service Entries — standalone billable work outside any booking, fed from the exact
+    // Sheet 8: Service Entries — standalone billable work outside any booking, fed from the exact
     // same Reports.computeServiceEntryRows the screen renders from.
     const svcRows = [['Description', 'Project', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
     svc.rows.forEach((r) => {

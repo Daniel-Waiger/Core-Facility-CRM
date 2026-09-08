@@ -3,6 +3,14 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Instrument stewardship scorecard (roadmap 3.2).** Reports & Utilization gains a new card,
+  grouped by supervising staff, showing per-instrument bookings, hours, revenue, distinct/new
+  users, projects served, facility-wide sessions, and consults; exported to XLSX as a matching
+  "Stewardship" sheet.
+
 ## [1.8.0] — 2026-09-08
 
 ### Added
