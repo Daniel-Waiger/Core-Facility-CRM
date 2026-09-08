@@ -19,4 +19,8 @@ window.CONST = {
   // Consult-type tag on a booking/meeting, so Reports can count consults per instrument/period.
   // Facilities can add their own via the "+ Add New" vocab flow, same as every other list here.
   BOOKING_CATEGORY: ['sync', 'consult', 'training', 'assisted session'],
+  // Billing unit for a standalone service entry (roadmap 2.3) — qty is "how many" of this unit,
+  // rate is price-per-unit. Distinct from instruments' UNIT (which describes how an INSTRUMENT is
+  // priced) since an entry's unit is a literal quantity label shown next to Qty, not a pricing mode.
+  SERVICE_UNIT: ['hour', 'sample', 'unit', 'day', 'other'],
 };

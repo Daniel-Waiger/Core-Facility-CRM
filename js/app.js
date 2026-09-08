@@ -983,6 +983,14 @@
       case 'retire-grant': return retireGrant(el.dataset.id);
       case 'restore-grant': return restoreGrant(el.dataset.id);
 
+      // Service Entries CRUD (roadmap 2.3)
+      case 'add-service-entry': return newServiceEntry(el.dataset.projectId || ctx.project);
+      case 'se-save': return seSave();
+      case 'edit-service-entry': return editServiceEntry(el.dataset.id);
+      case 'se-edit-save': return seEditSave(el.dataset.id);
+      case 'se-cancel': return cancelServiceEntry(el.dataset.id);
+      case 'se-reinstate': return reinstateServiceEntry(el.dataset.id);
+
       // Clipboard
       case 'copy': return UI.copyToClipboard(el.dataset.copy, el.dataset.copyLabel || 'Copied to clipboard');
 
@@ -1334,6 +1342,10 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
+      // service_entries.project_id normally carries ON DELETE SET NULL, but countProjectRefs now
+      // counts entries too, so this branch only runs when there are none anyway — the explicit
+      // delete is the same belt-and-suspenders convention every other delete path here follows.
+      DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
       DB.run('DELETE FROM projects WHERE id=?', [pid]);
       UI.toast('Project deleted');
       route('projects');
@@ -1346,6 +1358,7 @@
     if (refs.instruments) holds.push(plural(refs.instruments, 'assigned instrument'));
     if (refs.milestones) holds.push(plural(refs.milestones, 'milestone'));
     if (refs.bookings) holds.push(plural(refs.bookings, 'booking'));
+    if (refs.entries) holds.push(refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
     if (refs.files) holds.push(plural(refs.files, 'file'));
     if (refs.fields) holds.push(plural(refs.fields, 'custom field'));
     const billed = refs.billed > 0 ? ` Its bookings account for ${fmtMoney(refs.billed)} of billing, which stays on the record.` : '';
@@ -1714,6 +1727,11 @@
       // follows.
       DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
       DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
+      // service_entries.person_id is a soft link (no REFERENCES) like instrument_staff/grant_users
+      // above — a person with zero "real" refs (countPersonRefs now counts entries too, so this
+      // branch is only reached when there genuinely are none) can't hold one, but the explicit
+      // clear is the same belt-and-suspenders convention every delete path here follows.
+      DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
       DB.run('DELETE FROM people WHERE id=?', [id]);
       UI.toast('Person deleted');
       refresh();
@@ -1727,6 +1745,7 @@
     if (refs.milestones) where.push('owner of ' + plural(refs.milestones, 'milestone'));
     if (refs.bookings) where.push('an attendee on ' + plural(refs.bookings, 'booking'));
     if (refs.staffed) where.push('billable staff on ' + plural(refs.staffed, 'booking'));
+    if (refs.entries) where.push('performing staff on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
 
     const ok = await UI.confirmModal(
       'Retire Person',
@@ -1910,6 +1929,10 @@
       // path here follows.
       DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
       DB.run('DELETE FROM instrument_tier_rates WHERE instrument_id=?', [id]);
+      // service_entries.instrument_id is a soft link (no REFERENCES), same reasoning as above —
+      // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
+      // but the explicit clear is the same belt-and-suspenders convention as every other field here.
+      DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
       DB.run('DELETE FROM instruments WHERE id=?', [id]);
       UI.toast('Instrument deleted');
       refresh();
@@ -1921,6 +1944,7 @@
     if (refs.projects) where.push('assigned to ' + plural(refs.projects, 'project'));
     if (refs.milestones) where.push('used by ' + plural(refs.milestones, 'milestone'));
     if (refs.bookings) where.push('booked on ' + plural(refs.bookings, 'booking'));
+    if (refs.entries) where.push('attributed on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
 
     const ok = await UI.confirmModal(
       'Retire Instrument',
@@ -3767,6 +3791,10 @@
       // clause (matches the projects.pi_id precedent) so cascade wouldn't null it out anyway.
       DB.run('UPDATE meetings SET grant_id=NULL WHERE grant_id=?', [id]);
       DB.run('UPDATE projects SET grant_id=NULL WHERE grant_id=?', [id]);
+      // service_entries.grant_id is the same soft link (no REFERENCES) as the two columns above —
+      // countGrantRefs now counts entries too, so this only runs when there are none, but the
+      // explicit null-out is the same belt-and-suspenders convention as the rest of this branch.
+      DB.run('UPDATE service_entries SET grant_id=NULL WHERE grant_id=?', [id]);
       DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
       DB.run('DELETE FROM grants WHERE id=?', [id]);
       UI.toast('Grant deleted');
@@ -3778,6 +3806,7 @@
     const where = [];
     if (refs.projects) where.push('billed on ' + plural(refs.projects, 'project'));
     if (refs.bookings) where.push('billed on ' + plural(refs.bookings, 'booking'));
+    if (refs.entries) where.push('billed on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
 
     const ok = await UI.confirmModal(
       'Retire Grant',
@@ -3795,6 +3824,267 @@
     if (!g) return;
     DB.setRetired('grants', id, false);
     UI.toast(`${g.name} restored`);
+    refresh();
+  }
+
+  /* ---------------- Service Entries CRUD (roadmap 2.3) ----------------
+     A standalone billable line item outside any booking — technician time, sample prep, per-unit
+     items. Same Project Costs counting rule as a booking's cost snapshot (is_cancelled &&
+     !billing_retained ⇒ 0), but no denormalized display columns: every render resolves staff/
+     instrument/grant fresh via a join, same as a booking's grant_id. total_cost is a SNAPSHOT
+     (qty*rate at save time) computed here and in seedSampleData ONLY — never recomputed by
+     reports/exports, matching every other cost snapshot in this app. */
+
+  // Performing-staff <select> options: selectable = Facility Staff AND not retired, OR already
+  // the value on the entry being edited (`currentId`) — same "selectable = not retired OR already
+  // selected" rule as bkStaffItems, applied to a plain <select> since an entry has at most one
+  // performing staff member. data-rate on each option feeds the live rate prefill on selection.
+  function serviceStaffSelectOptions(currentId) {
+    return DB.rows(
+      `SELECT id, name, rate, is_retired, is_staff FROM people
+       WHERE (is_staff=1 AND is_retired=0) OR id=? ORDER BY is_retired, name`,
+      [currentId || 0]
+    );
+  }
+  function serviceStaffSelectField(id, selected) {
+    const opts = serviceStaffSelectOptions(selected);
+    return `<div class="field">
+      <label>Performing Staff</label>
+      <select class="input" id="${id}">
+        <option value="">-- None --</option>
+        ${opts.map((p) => `<option value="${p.id}" data-rate="${p.rate || 0}" ${p.id === selected ? 'selected' : ''}>${esc(UI.retiredName(p.name, p.is_retired))}${!p.is_staff && !p.is_retired ? ' (no longer Facility Staff)' : ''}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  // Same "not retired OR already selected" rule, applied to the optional Instrument <select>.
+  function serviceInstrumentSelectOptions(currentId) {
+    return DB.rows('SELECT id, name, is_retired FROM instruments WHERE is_retired=0 OR id=? ORDER BY is_retired, name', [currentId || 0]);
+  }
+  function serviceInstrumentSelectField(id, selected) {
+    const opts = serviceInstrumentSelectOptions(selected);
+    return `<div class="field">
+      <label>Instrument (optional)</label>
+      <select class="input" id="${id}">
+        <option value="">-- No Instrument --</option>
+        ${opts.map((i) => `<option value="${i.id}" ${i.id === selected ? 'selected' : ''}>${esc(UI.retiredName(i.name, i.is_retired))}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  function serviceEntryProjectOptions(selectedId) {
+    return DB.rows('SELECT id, title FROM projects ORDER BY title').map((p) =>
+      `<option value="${p.id}" ${selectedId === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('');
+  }
+
+  // Live total = qty * rate, and the Performing Staff select prefills Rate from that person's own
+  // rate whenever a different staff member is picked (people.rate — the simple, documented choice;
+  // see task notes for why a tier-resolved rate was not wired in here).
+  function recomputeServiceEntryTotal(m, prefix) {
+    const qty = Number((m.querySelector('#' + prefix + '-qty') || {}).value) || 0;
+    const rate = Number((m.querySelector('#' + prefix + '-rate') || {}).value) || 0;
+    const total = qty * rate;
+    const el = m.querySelector('#' + prefix + '-total');
+    if (el) el.textContent = fmtMoney(total);
+    return total;
+  }
+  function mountServiceEntryModal(m, prefix) {
+    const staffEl = m.querySelector('#' + prefix + '-staff');
+    const rateEl = m.querySelector('#' + prefix + '-rate');
+    const qtyEl = m.querySelector('#' + prefix + '-qty');
+    if (staffEl) staffEl.addEventListener('change', () => {
+      const opt = staffEl.options[staffEl.selectedIndex];
+      if (rateEl) rateEl.value = opt ? (opt.dataset.rate || 0) : 0;
+      recomputeServiceEntryTotal(m, prefix);
+    });
+    if (rateEl) rateEl.addEventListener('input', () => recomputeServiceEntryTotal(m, prefix));
+    if (qtyEl) qtyEl.addEventListener('input', () => recomputeServiceEntryTotal(m, prefix));
+    recomputeServiceEntryTotal(m, prefix);
+  }
+
+  // `projectId` prefills the project select — passed by the Project Costs card's own "+ Service
+  // Entry" button (data-project-id); the Reports screen's button omits it, so ctx.project (null
+  // there) leaves the entry facility-wide.
+  function newServiceEntry(projectId) {
+    const pid = projectId != null && projectId !== '' ? Number(projectId) : null;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('tag')} New Service Entry</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Description *</label><input class="input" id="se-desc" placeholder="e.g. Retroactive image analysis support" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Date</label><input type="date" class="input" id="se-date" value="${esc(UI.today())}" /></div>
+          ${serviceStaffSelectField('se-staff', null)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="se-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${serviceEntryProjectOptions(pid)}
+            </select>
+          </div>
+          ${grantSelectField('se-grant', null)}
+          ${serviceInstrumentSelectField('se-inst', null)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field"><label>Quantity</label><input type="number" min="0" step="any" class="input" id="se-qty" value="1" /></div>
+          ${vocabField({ category: 'SERVICE_UNIT', id: 'se-unit', label: 'Unit', selected: 'hour', placeholder: '-- Select Unit --' })}
+          <div class="field"><label>Rate</label><input type="number" min="0" step="any" class="input" id="se-rate" value="0" /></div>
+        </div>
+        <div class="field"><label>Total</label><div class="mono font-medium" id="se-total">${fmtMoney(0)}</div></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="se-save">Save Entry</button>
+      </div>`, (m) => mountServiceEntryModal(m, 'se'));
+  }
+
+  function seSave() {
+    const m = document.querySelector('.modal');
+    const desc = m.querySelector('#se-desc').value.trim();
+    if (!desc) { UI.toast('Description required', 'error'); return; }
+    const date = m.querySelector('#se-date').value || UI.today();
+    const staffVal = m.querySelector('#se-staff').value;
+    const personId = staffVal ? Number(staffVal) : null;
+    const projectVal = m.querySelector('#se-project').value;
+    const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#se-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
+    const instVal = m.querySelector('#se-inst').value;
+    const instrumentId = instVal ? Number(instVal) : null;
+    const qty = Number(m.querySelector('#se-qty').value) || 0;
+    const unit = m.querySelector('#se-unit').value || 'hour';
+    const rate = Number(m.querySelector('#se-rate').value) || 0;
+    const total = qty * rate;
+
+    DB.run(`INSERT INTO service_entries (project_id, grant_id, person_id, instrument_id, date, description, qty, unit, rate, total_cost)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Service entry saved');
+    refresh();
+  }
+
+  function editServiceEntry(id) {
+    const e = DB.row('SELECT * FROM service_entries WHERE id=?', [id]);
+    if (!e) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Service Entry</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Description *</label><input class="input" id="see-desc" value="${esc(e.description)}" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Date</label><input type="date" class="input" id="see-date" value="${esc(e.date || '')}" /></div>
+          ${serviceStaffSelectField('see-staff', e.person_id)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="see-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${serviceEntryProjectOptions(e.project_id)}
+            </select>
+          </div>
+          ${grantSelectField('see-grant', e.grant_id)}
+          ${serviceInstrumentSelectField('see-inst', e.instrument_id)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field"><label>Quantity</label><input type="number" min="0" step="any" class="input" id="see-qty" value="${e.qty || 0}" /></div>
+          ${vocabField({ category: 'SERVICE_UNIT', id: 'see-unit', label: 'Unit', selected: e.unit || 'hour', placeholder: '-- Select Unit --' })}
+          <div class="field"><label>Rate</label><input type="number" min="0" step="any" class="input" id="see-rate" value="${e.rate || 0}" /></div>
+        </div>
+        <div class="field"><label>Total</label><div class="mono font-medium" id="see-total">${fmtMoney(e.total_cost || 0)}</div></div>
+      </div></div>
+      <div class="foot">
+        ${e.is_cancelled
+          ? `<button class="btn btn-secondary" data-act="se-reinstate" data-id="${e.id}" style="margin-right:auto">${ic('rocket')} Reinstate</button>`
+          : `<button class="btn btn-secondary" data-act="se-cancel" data-id="${e.id}" style="margin-right:auto">${ic('archive')} Cancel Entry</button>`}
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="se-edit-save" data-id="${e.id}">Save Changes</button>
+      </div>`, (m) => mountServiceEntryModal(m, 'see'));
+  }
+
+  function seEditSave(id) {
+    const m = document.querySelector('.modal');
+    const desc = m.querySelector('#see-desc').value.trim();
+    if (!desc) { UI.toast('Description required', 'error'); return; }
+    const date = m.querySelector('#see-date').value || null;
+    const staffVal = m.querySelector('#see-staff').value;
+    const personId = staffVal ? Number(staffVal) : null;
+    const projectVal = m.querySelector('#see-project').value;
+    const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#see-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
+    const instVal = m.querySelector('#see-inst').value;
+    const instrumentId = instVal ? Number(instVal) : null;
+    const qty = Number(m.querySelector('#see-qty').value) || 0;
+    const unit = m.querySelector('#see-unit').value || 'hour';
+    const rate = Number(m.querySelector('#see-rate').value) || 0;
+    const total = qty * rate;
+
+    DB.run(`UPDATE service_entries SET project_id=?, grant_id=?, person_id=?, instrument_id=?, date=?, description=?, qty=?, unit=?, rate=?, total_cost=? WHERE id=?`,
+      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total, id]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Service entry updated');
+    refresh();
+  }
+
+  // Two-way charge choice (no admin gate — entries carry no before/after-start timing rule to
+  // gate on in the first place), same red-Cancel-button convention and 3-button shape as
+  // chooseCancelBilling: the abort ("Keep Entry") is the safe way out, styled danger/red.
+  function chooseServiceEntryCancelBilling(desc, total) {
+    return new Promise((resolve) => {
+      const m = UI.openModal(`
+        <div class="head"><span class="t" style="font-weight:600">Cancel Service Entry</span></div>
+        <div class="body"><p class="mt-0 mb-8">"${esc(desc)}" stays on the record either way — does its ${esc(fmtMoney(total))} charge still count toward Project Costs?</p></div>
+        <div class="foot">
+          <button class="btn btn-danger" data-act="abort">Keep Entry</button>
+          <button class="btn btn-secondary" data-act="waive">Cancel &amp; Waive Charge</button>
+          <button class="btn btn-secondary" data-act="keep">Cancel &amp; Keep Charge</button>
+        </div>`, null, () => resolve(null));
+      const dim = m.closest('.modal-dim');
+      m.querySelector('[data-act="abort"]').onclick = () => { UI.closeDim(dim); resolve(null); };
+      m.querySelector('[data-act="waive"]').onclick = () => { UI.closeDim(dim); resolve('waive'); };
+      m.querySelector('[data-act="keep"]').onclick = () => { UI.closeDim(dim); resolve('keep'); };
+    });
+  }
+
+  /* Cancelling, not deleting — same reasoning as cancelBooking: the entry stays on the record
+     either way. Callable both from a list row (Project Costs / Reports — no modal open) and from
+     inside the edit modal's footer, so it closes whatever modal is open after acting, if any. */
+  async function cancelServiceEntry(id) {
+    const e = DB.row('SELECT id, description, total_cost, is_cancelled FROM service_entries WHERE id=?', [id]);
+    if (!e) return;
+    if (e.is_cancelled) { reinstateServiceEntry(id); return; }
+
+    const total = e.total_cost || 0;
+    let retained;
+    if (total > 0) {
+      const choice = await chooseServiceEntryCancelBilling(e.description, total);
+      if (!choice) return;
+      retained = choice === 'keep';
+    } else {
+      const ok = await UI.confirmModal(
+        'Cancel Service Entry',
+        `Cancel "${esc(e.description)}"? It stays on the record; there's no charge to reconcile.`,
+        { confirmText: 'Cancel Entry', cancelText: 'Keep Entry' }
+      );
+      if (!ok) return;
+      retained = false;
+    }
+    DB.setServiceEntryCancelled(id, true, retained);
+    UI.toast(retained ? 'Service entry cancelled — charge kept' : 'Service entry cancelled');
+    const dim = document.querySelector('.modal-dim');
+    if (dim) UI.closeDim(dim);
+    refresh();
+  }
+
+  function reinstateServiceEntry(id) {
+    const e = DB.row('SELECT id FROM service_entries WHERE id=?', [id]);
+    if (!e) return;
+    DB.setServiceEntryCancelled(id, false, false);
+    UI.toast('Service entry reinstated');
+    const dim = document.querySelector('.modal-dim');
+    if (dim) UI.closeDim(dim);
     refresh();
   }
 

@@ -249,6 +249,18 @@
       LEFT JOIN grants g ON g.id = m.grant_id
       WHERE m.project_id=?
       ORDER BY m.date DESC, m.id DESC`, [id]);
+    // Standalone service entries (roadmap 2.3) — no denormalized name columns, so staff/
+    // instrument/grant are joined fresh here, same as the bookings query above.
+    const entries = global.DB.rows(`
+      SELECT se.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
+             pe.name as person_name, pe.is_retired as person_retired,
+             i.name as instrument_name, i.is_retired as instrument_retired
+      FROM service_entries se
+      LEFT JOIN grants g ON g.id = se.grant_id
+      LEFT JOIN people pe ON pe.id = se.person_id
+      LEFT JOIN instruments i ON i.id = se.instrument_id
+      WHERE se.project_id=?
+      ORDER BY se.date DESC, se.id DESC`, [id]);
     const costCur = global.DB.getConfig('currency', '$');
     const files = global.DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     const prog = global.DB.projectProgress(p.id);
@@ -396,11 +408,16 @@
 
     <!-- Project Costs Card — a running list of every booking's stored cost snapshot (see
          computeBookingBOM in app.js for how each figure below was originally computed; these
-         are the numbers as saved at booking time, not recalculated live). -->
+         are the numbers as saved at booking time, not recalculated live) plus every standalone
+         service entry (roadmap 2.3), which follows the identical counting rule. -->
     <div class="card mb-16">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Project Costs</span></div>
-        <span class="mono font-medium">${esc(costCur)}${mtgs.reduce((s, m) => s + ((m.is_cancelled && !m.billing_retained) ? 0 : (m.total_cost || 0)), 0).toFixed(2)} total</span>
+        <span class="mono font-medium">${esc(costCur)}${(
+          mtgs.reduce((s, m) => s + ((m.is_cancelled && !m.billing_retained) ? 0 : (m.total_cost || 0)), 0) +
+          entries.reduce((s, e) => s + ((e.is_cancelled && !e.billing_retained) ? 0 : (e.total_cost || 0)), 0)
+        ).toFixed(2)} total</span>
+        <button class="btn btn-ghost btn-sm" data-act="add-service-entry" data-project-id="${p.id}" title="Log standalone billable work outside any booking">${ic('plus')} Service Entry</button>
       </div>
       <div class="card-body">
         ${mtgs.length ? `
@@ -429,7 +446,39 @@
                 </tr>`; }).join('')}
             </tbody>
           </table>
-        </div>` : emptyState('tag', 'No bookings yet', 'Costs from instrument/staff bookings will appear here once you add one.')}
+        </div>` : ''}
+        ${entries.length ? `
+        <div class="tbl-wrap mt-16">
+          <table class="tbl">
+            <thead><tr><th>Service Entry</th><th>Staff</th><th>Instrument</th><th>Grant</th><th>Date</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Rate</th><th style="text-align:right">Total</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${entries.map((e) => {
+                const waived = e.is_cancelled && !e.billing_retained;
+                const entryGrantStr = e.grant_id
+                  ? global.UI.retiredName(global.DB.grantLabel({ name: e.grant_name, number: e.grant_number }), e.grant_is_retired)
+                  : '';
+                return `
+                <tr class="${e.is_cancelled ? 'row-retired' : ''}">
+                  <td class="font-medium small">${esc(e.description)}${e.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
+                  <td class="small">${e.person_name ? esc(global.UI.retiredName(e.person_name, e.person_retired)) : '<span class="faint">—</span>'}</td>
+                  <td class="small">${e.instrument_name ? esc(global.UI.retiredName(e.instrument_name, e.instrument_retired)) : '<span class="faint">—</span>'}</td>
+                  <td class="small">${entryGrantStr ? esc(entryGrantStr) : '<span class="faint">—</span>'}</td>
+                  <td class="mono small faint">${fmt(e.date)}</td>
+                  <td class="mono small" style="text-align:right">${e.qty || 0}</td>
+                  <td class="small">${esc(e.unit || '')}</td>
+                  <td class="mono small" style="text-align:right">${esc(costCur)}${(e.rate || 0).toFixed(2)}</td>
+                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(costCur)}${(e.total_cost || 0).toFixed(2)}</span>` : esc(costCur) + (e.total_cost || 0).toFixed(2)}</td>
+                  <td style="text-align:right">
+                    <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${e.id}" title="Edit entry">${ic('edit')}</button>
+                    ${e.is_cancelled
+                      ? `<button class="btn btn-ghost btn-xs" data-act="se-reinstate" data-id="${e.id}" title="Reinstate">${ic('rocket')}</button>`
+                      : `<button class="btn btn-ghost btn-xs" data-act="se-cancel" data-id="${e.id}" title="Cancel entry">${ic('archive')}</button>`}
+                  </td>
+                </tr>`; }).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}
+        ${(!mtgs.length && !entries.length) ? emptyState('tag', 'No bookings or service entries yet', 'Costs from instrument/staff bookings and standalone service entries will appear here once you add one.') : ''}
       </div>
     </div>
 

@@ -38,6 +38,13 @@ This project uses [Semantic Versioning](https://semver.org/).
   unaffected) and snapshots the resolved tier and percent onto the booking at save time so past
   costs never recompute. Existing `overhead_internal`/`overhead_external` settings migrate once
   into two default tiers.
+- **Standalone service entries (roadmap 2.3).** Billable work can now be logged outside any
+  booking — technician time, sample prep, per-unit items — as a new `service_entries` record
+  (project/grant/person/instrument attribution, qty × rate → a frozen cost snapshot). Entries
+  follow the same cancel-with-optional-billing-retained pattern as bookings, are counted into
+  Project Costs, Reports & Utilization (new Standalone Service Entries card), and the XLSX/DOCX/PDF
+  exports alongside meetings, and count toward person/instrument/project/grant reference checks so
+  a referenced record retires/archives instead of deleting.
 
 ## [1.6.0] — 2026-09-07
 

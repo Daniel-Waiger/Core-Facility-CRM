@@ -201,10 +201,28 @@
     cost REAL DEFAULT 0,
     PRIMARY KEY(instrument_id, tier_id)
   );
+  CREATE TABLE IF NOT EXISTS service_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    grant_id INTEGER,
+    person_id INTEGER,
+    instrument_id INTEGER,
+    date TEXT DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    qty REAL DEFAULT 0,
+    unit TEXT DEFAULT 'hour',
+    rate REAL DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    is_cancelled INTEGER DEFAULT 0,
+    cancelled_at TEXT DEFAULT '',
+    billing_retained INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
   CREATE INDEX IF NOT EXISTS ix_files_project ON files(project_id);
   CREATE INDEX IF NOT EXISTS ix_kv_project ON kv(project_id);
+  CREATE INDEX IF NOT EXISTS ix_service_entries_project ON service_entries(project_id);
   `;
 
   /* ---------------- sql.js bootstrap ---------------- */
@@ -414,6 +432,43 @@
     } catch (_) {}
     try { db.exec('ALTER TABLE meetings ADD COLUMN tier_id INTEGER'); } catch (_) {}
     try { db.exec('ALTER TABLE meetings ADD COLUMN tier_overhead_pct REAL'); } catch (_) {}
+
+    // Standalone service entries (roadmap 2.3): billable work logged outside any booking —
+    // technician time, sample prep, per-unit items. project_id carries ON DELETE SET NULL, same
+    // "facility-wide" precedent as meetings.project_id; grant_id/person_id/instrument_id carry NO
+    // REFERENCES clause, matching meetings.grant_id and projects.pi_id — a retired person/
+    // instrument or retired grant must stay attributable on a historical entry rather than being
+    // cascaded away, and any delete path for those tables must null/clean these up explicitly
+    // (see countPersonRefs/countInstrumentRefs/countGrantRefs and app.js's retire*/archiveProject).
+    // total_cost is a SNAPSHOT (qty*rate at save time, no overhead/tax — a direct charge), frozen
+    // like every other cost snapshot in this app: never recomputed after save. Cancel semantics
+    // mirror bookings' is_cancelled/billing_retained pair (see setServiceEntryCancelled below) but
+    // with no before/after-start timing rule — an entry is logged retrospectively, so cancelling
+    // one simply asks whether the charge still stands. No denormalized name columns: every display
+    // resolves person/instrument/grant via a join (UI.retiredName / DB.grantLabel), same as
+    // meetings' project_id and grant_id joins.
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS service_entries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+          grant_id INTEGER,
+          person_id INTEGER,
+          instrument_id INTEGER,
+          date TEXT DEFAULT '',
+          description TEXT NOT NULL DEFAULT '',
+          qty REAL DEFAULT 0,
+          unit TEXT DEFAULT 'hour',
+          rate REAL DEFAULT 0,
+          total_cost REAL DEFAULT 0,
+          is_cancelled INTEGER DEFAULT 0,
+          cancelled_at TEXT DEFAULT '',
+          billing_retained INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS ix_service_entries_project ON service_entries(project_id);
+      `);
+    } catch (_) {}
 
     // One-time migration of the legacy overhead_internal/overhead_external app_config pair into
     // two default tiers, so an existing facility sees its old rates as named, editable tiers
@@ -927,12 +982,13 @@
       (SELECT COUNT(*) FROM milestone_owners WHERE person_id=?) AS milestones,
       (SELECT COUNT(*) FROM meeting_people WHERE person_id=?) AS bookings,
       (SELECT COUNT(*) FROM meeting_staff WHERE person_id=?) AS staffed,
-      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi`, [id, id, id, id, id]) || {};
+      (SELECT COUNT(*) FROM service_entries WHERE person_id=?) AS entries,
+      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi`, [id, id, id, id, id, id]) || {};
     const parts = {
       projects: r.projects || 0, milestones: r.milestones || 0,
-      bookings: r.bookings || 0, staffed: r.staffed || 0, pi: r.pi || 0
+      bookings: r.bookings || 0, staffed: r.staffed || 0, entries: r.entries || 0, pi: r.pi || 0
     };
-    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.pi;
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.entries + parts.pi;
     return parts;
   }
   // Deliberately excludes instrument_staff: a supervisor assignment is current-state ("who looks
@@ -944,12 +1000,13 @@
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_instruments WHERE instrument_id=?) AS projects,
       (SELECT COUNT(*) FROM milestone_instruments WHERE instrument_id=?) AS milestones,
-      (SELECT COUNT(*) FROM meeting_instruments WHERE instrument_id=?) AS bookings`,
-      [id, id, id]) || {};
+      (SELECT COUNT(*) FROM meeting_instruments WHERE instrument_id=?) AS bookings,
+      (SELECT COUNT(*) FROM service_entries WHERE instrument_id=?) AS entries`,
+      [id, id, id, id]) || {};
     const parts = {
-      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0
+      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0, entries: r.entries || 0
     };
-    parts.total = parts.projects + parts.milestones + parts.bookings;
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.entries;
     return parts;
   }
   function countProjectRefs(id) {
@@ -958,16 +1015,18 @@
       (SELECT COUNT(*) FROM project_instruments WHERE project_id=?) AS instruments,
       (SELECT COUNT(*) FROM milestones WHERE project_id=?) AS milestones,
       (SELECT COUNT(*) FROM meetings WHERE project_id=?) AS bookings,
+      (SELECT COUNT(*) FROM service_entries WHERE project_id=?) AS entries,
       (SELECT COUNT(*) FROM files WHERE project_id=?) AS files,
       (SELECT COUNT(*) FROM kv WHERE project_id=?) AS fields,
-      (SELECT COALESCE(SUM(total_cost),0) FROM meetings WHERE project_id=?) AS billed`,
-      [id, id, id, id, id, id, id]) || {};
+      (SELECT COALESCE(SUM(total_cost),0) FROM meetings WHERE project_id=?) AS billed,
+      (SELECT COALESCE(SUM(total_cost),0) FROM service_entries WHERE project_id=?) AS entriesBilled`,
+      [id, id, id, id, id, id, id, id, id]) || {};
     const parts = {
       team: r.team || 0, instruments: r.instruments || 0, milestones: r.milestones || 0,
-      bookings: r.bookings || 0, files: r.files || 0, fields: r.fields || 0,
-      billed: Number(r.billed) || 0
+      bookings: r.bookings || 0, entries: r.entries || 0, files: r.files || 0, fields: r.fields || 0,
+      billed: (Number(r.billed) || 0) + (Number(r.entriesBilled) || 0)
     };
-    parts.total = parts.team + parts.instruments + parts.milestones + parts.bookings + parts.files + parts.fields;
+    parts.total = parts.team + parts.instruments + parts.milestones + parts.bookings + parts.entries + parts.files + parts.fields;
     return parts;
   }
   /* What a booking carries: billing line items, its saved total, and the people recorded as
@@ -995,9 +1054,10 @@
   function countGrantRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM projects WHERE grant_id=?) AS projects,
-      (SELECT COUNT(*) FROM meetings WHERE grant_id=?) AS bookings`, [id, id]) || {};
-    const parts = { projects: r.projects || 0, bookings: r.bookings || 0 };
-    parts.total = parts.projects + parts.bookings;
+      (SELECT COUNT(*) FROM meetings WHERE grant_id=?) AS bookings,
+      (SELECT COUNT(*) FROM service_entries WHERE grant_id=?) AS entries`, [id, id, id]) || {};
+    const parts = { projects: r.projects || 0, bookings: r.bookings || 0, entries: r.entries || 0 };
+    parts.total = parts.projects + parts.bookings + parts.entries;
     return parts;
   }
 
@@ -1029,6 +1089,17 @@
         [retained ? 1 : 0, id]);
     } else {
       run("UPDATE meetings SET is_cancelled=0, cancelled_at='', billing_retained=0, updated_at=datetime('now') WHERE id=?", [id]);
+    }
+  }
+  /* Same idea as setBookingCancelled above, applied to a standalone service entry: no before/
+     after-start timing rule (an entry is logged retrospectively, not scheduled), so the caller
+     decides directly whether the charge still stands. */
+  function setServiceEntryCancelled(id, cancelled, retained) {
+    if (cancelled) {
+      run("UPDATE service_entries SET is_cancelled=1, cancelled_at=datetime('now'), billing_retained=? WHERE id=?",
+        [retained ? 1 : 0, id]);
+    } else {
+      run("UPDATE service_entries SET is_cancelled=0, cancelled_at='', billing_retained=0 WHERE id=?", [id]);
     }
   }
   function setProjectArchived(id, archived) {
@@ -1142,6 +1213,7 @@
       DELETE FROM meeting_instruments;
       DELETE FROM meeting_staff;
       DELETE FROM meetings;
+      DELETE FROM service_entries;
       DELETE FROM grant_users;
       DELETE FROM grants;
       DELETE FROM files;
@@ -1154,7 +1226,7 @@
       // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
       // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
-      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants')");
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     markDirty();
   }
@@ -1625,6 +1697,22 @@
       category: 'assisted session'
     });
 
+    // 8b. Standalone Service Entries (roadmap 2.3) — billable work logged outside any booking,
+    // following the exact same Project Costs counting rule as a booking's cost snapshot. Priced
+    // from the seeded people rows above, not invented numbers: Tom Alvarez (person id 8) is
+    // seeded at $80/hr (see peopleData above), so 2 hours of retroactive image-analysis support
+    // on project 1 (grant 1 — CAR-T Immunology R01, matching that project's own grant) totals
+    // $160. The second is a per-sample prep charge — a different unit (samples, not hours), so it
+    // is deliberately NOT priced off anyone's hourly rate — attributed to project 3 and to David
+    // Kim (person id 6), already that project's Core Facility Support team member (see
+    // project_people above).
+    run(`INSERT INTO service_entries (project_id, grant_id, person_id, date, description, qty, unit, rate, total_cost)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      [1, 1, 8, day(-2), 'Retroactive image analysis support (Imaris batch reprocessing)', 2, 'hour', 80, 160]);
+    run(`INSERT INTO service_entries (project_id, person_id, date, description, qty, unit, rate, total_cost)
+         VALUES (?,?,?,?,?,?,?,?)`,
+      [3, 6, day(-20), 'CUBIC-cleared islet sample preparation (per-sample fee)', 5, 'sample', 20, 100]);
+
     // 9. Custom KV Metadata
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Biosafety Level", "BSL-2 (Murine Live In-Vivo)")');
     run('INSERT INTO kv (project_id, key, value) VALUES (1, "Laser Wavelength", "920nm Ti:Sapphire 80MHz")');
@@ -1696,6 +1784,7 @@
     setProjectArchived,
     countBookingRefs,
     setBookingCancelled,
+    setServiceEntryCancelled,
     setRetired,
     listAllOrgNames,
     countOrgRefs,
