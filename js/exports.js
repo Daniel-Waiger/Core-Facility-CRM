@@ -1157,6 +1157,71 @@
   // 1.9999999999998) showing up in a spreadsheet cell.
   function round2(n) { return Math.round((n || 0) * 100) / 100; }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx };
+  /* Custom report generator (roadmap 3.6). spec = { entity, columns: ['key',...], from, to } —
+     built by app.js from the Custom Report modal's current selection; from/to are always the
+     explicit range the modal is showing (mirrors the screen's Reports.getRange() at open time —
+     see js/app.js's rep-custom case), never module state. Single-sheet workbook (plus the
+     standing Notes sheet every export in this file carries) built from the EXACT SAME
+     Reports.computeCustomRows the modal's own preview table renders from, via the same
+     aoa_to_sheet pattern as every other sheet above, so the exported numbers can never disagree
+     with what the user previewed before exporting. */
+  function exportCustomXlsx(spec) {
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    const Reports = global.Reports;
+    if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
+
+    const from = spec.from || '', to = spec.to || '';
+    const result = Reports.computeCustomRows(spec, from, to);
+    if (!result.columns.length) { UI.toast('Select at least one column', 'error'); return; }
+
+    const wb = XLSX.utils.book_new();
+    const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
+
+    // Notes sheet: date range + both standing cancellation rules (identical wording to the
+    // Reports & Utilization export above) + this dataset's own duplication note, if it has one —
+    // the same note the modal shows as a preview footnote, never only shown in one of the two.
+    const notes = [
+      ['CUSTOM REPORT — ' + Reports.getCustomReportLabel(spec.entity)],
+      [''],
+      ['Date range', rangeLabel],
+      ['Exported', new Date().toLocaleString()],
+      [''],
+      ['Occupancy rule (Hours / Sessions / Bookings columns)'],
+      ['A cancelled booking releases its slot — the instrument or staff time was never actually spent — so cancelled bookings contribute zero to these columns, regardless of whether the cancellation charge was retained.'],
+      [''],
+      ['Money rule (Revenue / Cost / Total columns)'],
+      ["A booking's or entry's charge still counts unless it was BOTH cancelled AND the charge was waived — a cancelled-but-charged row still contributes money even though it contributes zero occupied hours."],
+      ['']
+    ];
+    const dsNotes = result.notes;
+    if (dsNotes.length) {
+      notes.push(['Dataset note (this entity repeats an entity across rows)']);
+      dsNotes.forEach((n) => notes.push([n]));
+      notes.push(['']);
+    }
+    notes.push(['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']);
+    const wsNotes = XLSX.utils.aoa_to_sheet(notes);
+    wsNotes['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
+
+    // Data sheet: header from the selected columns' labels, cells via the exact same
+    // Reports.formatCustomCellXlsx the modal's own export button triggers — no second formatting
+    // path to drift from the preview.
+    const header = result.columns.map((c) => c.label);
+    const dataRows = [header];
+    result.rows.forEach((r) => {
+      dataRows.push(result.columns.map((c) => Reports.formatCustomCellXlsx(c, r[c.key])));
+    });
+    const ws = XLSX.utils.aoa_to_sheet(dataRows);
+    ws['!cols'] = result.columns.map(() => ({ wch: 20 }));
+    XLSX.utils.book_append_sheet(wb, ws, 'Custom Report');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Custom-Report-${spec.entity}-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
+    UI.toast('Exported custom report to XLSX');
+  }
+
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx };
 
 })(window);

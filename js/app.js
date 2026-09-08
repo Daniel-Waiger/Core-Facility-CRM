@@ -1015,6 +1015,9 @@
       case 'rep-preset': return Reports.setPreset(el.dataset.range);
       case 'rep-toggle-lab-consults': { Reports.setLabConsultsEnabled(el.checked); refresh(); return; }
       case 'export-reports-xlsx': { const r = Reports.getRange(); return Exports.exportReportsXlsx(r.from, r.to); }
+      case 'rep-custom': return repCustom();
+      case 'rep-custom-run': return repCustomRun();
+      case 'rep-custom-export': return repCustomExport();
 
       // Milestones CRUD & Toggle
       case 'add-milestone': return addMilestone();
@@ -4339,6 +4342,145 @@
     const dims = document.querySelectorAll('.modal-dim');
     if (dims.length) UI.closeDim(dims[dims.length - 1]);
     refresh();
+  }
+
+  /* ---------------- Custom Report Generator (ROADMAP 3.6) ----------------
+     Entity + column definitions live in js/reports.js (Reports.getCustomReportEntities/Columns/
+     computeCustomRows) — this section only builds the modal UI around them and never invents a
+     field name of its own, so the preview table here and Exports.exportCustomXlsx can never
+     disagree about what a column means.
+
+     Persistence: only the last-used ENTITY + selected COLUMNS are remembered (UI.storage), per
+     this item's first rejection finding. The date range is NEVER persisted — every time this
+     modal opens it prefills from the Reports screen's OWN current Reports.getRange(), so the
+     custom report always starts scoped to whatever the user is already looking at. */
+  const CUSTOM_REPORT_PREFS_KEY = 'crm-custom-report-prefs';
+  function loadCustomReportPrefs() {
+    try {
+      const raw = UI.storage.getItem(CUSTOM_REPORT_PREFS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.entity !== 'string' || !Array.isArray(parsed.columns)) return null;
+      return parsed;
+    } catch (_) { return null; } // corrupt/foreign localStorage value — fall back to defaults
+  }
+  function saveCustomReportPrefs(entity, columns) {
+    try { UI.storage.setItem(CUSTOM_REPORT_PREFS_KEY, JSON.stringify({ entity, columns })); } catch (_) { /* storage unavailable/full — not fatal, just won't persist */ }
+  }
+
+  function customReportColumnsHtml(entityKey, checkedKeys) {
+    const cols = Reports.getCustomReportColumns(entityKey);
+    const checked = new Set(checkedKeys && checkedKeys.length ? checkedKeys : cols.map((c) => c.key));
+    return cols.map((c) => {
+      const isChecked = c.required || checked.has(c.key);
+      return `<label class="row" style="gap:8px;align-items:center;cursor:${c.required ? 'default' : 'pointer'}">
+        <input type="checkbox" class="custom-rep-col" value="${esc(c.key)}" ${isChecked ? 'checked' : ''} ${c.required ? 'disabled' : ''} />
+        <span class="small">${esc(c.label)}${c.required ? ' <span class="faint">(required)</span>' : ''}</span>
+      </label>`;
+    }).join('');
+  }
+
+  function customReportPreviewHtml(spec, from, to) {
+    const result = Reports.computeCustomRows(spec, from, to);
+    if (!result.columns.length) return `<div class="faint small">Select at least one column.</div>`;
+    const shown = result.rows.slice(0, 50);
+    const notesHtml = result.notes.length
+      ? `<div class="faint small mt-8">${result.notes.map((n) => esc(n)).join('<br/>')}</div>` : '';
+    return `
+      <div class="tbl-wrap" style="max-height:360px">
+        <table class="tbl">
+          <thead><tr>${result.columns.map((c) => `<th>${esc(c.label)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${!shown.length ? `<tr><td colspan="${result.columns.length}" class="faint small">No rows in this range.</td></tr>` : shown.map((r) => `
+              <tr>${result.columns.map((c) => `<td class="small">${Reports.formatCustomCellDisplay(c, r[c.key])}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${result.rows.length > shown.length ? `<div class="faint small mt-8">Showing the first ${shown.length} of ${result.rows.length} rows; the export includes all of them.</div>` : ''}
+      ${notesHtml}`;
+  }
+
+  function currentCustomReportSpec(m) {
+    const entity = m.querySelector('input[name="custom-rep-entity"]:checked').value;
+    const columns = Array.from(m.querySelectorAll('.custom-rep-col')).filter((el) => el.checked).map((el) => el.value);
+    return { entity, columns };
+  }
+
+  function repCustom() {
+    const prefs = loadCustomReportPrefs();
+    const entities = Reports.getCustomReportEntities();
+    const defaultEntity = (prefs && entities.some((e) => e.key === prefs.entity)) ? prefs.entity : entities[0].key;
+    // ALWAYS mirrors the screen's current range on open — never a persisted/stale range (this
+    // item's first rejection finding).
+    const range = Reports.getRange();
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('filter')} Custom Report</span></div>
+      <div class="body"><div class="stack">
+        <div class="field">
+          <label>Entity</label>
+          <div class="stack" id="custom-rep-entities" style="gap:4px">
+            ${entities.map((e) => `<label class="row" style="gap:8px;align-items:center;cursor:pointer">
+              <input type="radio" name="custom-rep-entity" value="${esc(e.key)}" ${e.key === defaultEntity ? 'checked' : ''} />
+              <span class="small">${esc(e.label)}</span>
+            </label>`).join('')}
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div class="field"><label>From</label><input type="date" class="input" id="custom-rep-from" value="${esc(range.from)}" /></div>
+          <div class="field"><label>To</label><input type="date" class="input" id="custom-rep-to" value="${esc(range.to)}" /></div>
+        </div>
+        <div class="field">
+          <label>Columns</label>
+          <div class="stack" id="custom-rep-columns" style="gap:4px">${customReportColumnsHtml(defaultEntity, prefs && prefs.entity === defaultEntity ? prefs.columns : null)}</div>
+        </div>
+        <div class="field">
+          <label>Preview</label>
+          <div id="custom-rep-preview"></div>
+        </div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Close</button>
+        <button class="btn btn-secondary" data-act="rep-custom-run">${ic('eye')} Preview</button>
+        <button class="btn btn-primary" data-act="rep-custom-export">${ic('file')} Export XLSX</button>
+      </div>`, (m) => {
+      const rerender = () => {
+        const spec = currentCustomReportSpec(m);
+        const from = m.querySelector('#custom-rep-from').value || '';
+        const to = m.querySelector('#custom-rep-to').value || '';
+        m.querySelector('#custom-rep-preview').innerHTML = customReportPreviewHtml(spec, from, to);
+      };
+      m.querySelectorAll('input[name="custom-rep-entity"]').forEach((r) => r.addEventListener('change', () => {
+        const entityKey = m.querySelector('input[name="custom-rep-entity"]:checked').value;
+        m.querySelector('#custom-rep-columns').innerHTML = customReportColumnsHtml(entityKey, null);
+        m.querySelectorAll('.custom-rep-col').forEach((cb) => cb.addEventListener('change', rerender));
+        rerender();
+      }));
+      m.querySelectorAll('.custom-rep-col').forEach((cb) => cb.addEventListener('change', rerender));
+      m.querySelector('#custom-rep-from').addEventListener('change', rerender);
+      m.querySelector('#custom-rep-to').addEventListener('change', rerender);
+      rerender();
+    });
+  }
+
+  function repCustomRun() {
+    const m = document.querySelector('.modal');
+    if (!m) return;
+    const spec = currentCustomReportSpec(m);
+    saveCustomReportPrefs(spec.entity, spec.columns);
+    const from = m.querySelector('#custom-rep-from').value || '';
+    const to = m.querySelector('#custom-rep-to').value || '';
+    m.querySelector('#custom-rep-preview').innerHTML = customReportPreviewHtml(spec, from, to);
+  }
+
+  function repCustomExport() {
+    const m = document.querySelector('.modal');
+    if (!m) return;
+    const spec = currentCustomReportSpec(m);
+    saveCustomReportPrefs(spec.entity, spec.columns);
+    const from = m.querySelector('#custom-rep-from').value || '';
+    const to = m.querySelector('#custom-rep-to').value || '';
+    Exports.exportCustomXlsx(Object.assign({}, spec, { from, to }));
   }
 
   function saveGrantDisplay() {

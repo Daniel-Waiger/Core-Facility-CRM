@@ -84,7 +84,7 @@
      booking modal uses for its own cost calculator, so the numbers can never drift apart. */
   function loadMeetingsInRange(from, to) {
     return DB.rows(`
-      SELECT mt.id, mt.project_id, mt.date, mt.start_time, mt.end_time, mt.group_org,
+      SELECT mt.id, mt.project_id, mt.title, mt.date, mt.start_time, mt.end_time, mt.group_org,
              mt.total_cost, mt.is_cancelled, mt.billing_retained, mt.category,
              p.code AS project_code, p.title AS project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
@@ -1042,6 +1042,336 @@
     return `${svg}<div class="mt-8">${legend}</div>`;
   }
 
+  /* ================================================================================
+     Row-level bookings (ROADMAP 3.6, "Bookings (row-level)" entity for the custom report
+     generator below). Unlike every aggregating card above, this is a raw listing — ONE ROW
+     PER BOOKING, cancelled bookings included (with their status carrying the fact) rather than
+     excluded outright, because a row-level export exists precisely so a user can see what was
+     cancelled, not just what wasn't. The occupancy and money rules still apply to the numeric
+     columns: a cancelled booking's Hours/Staff Hours are zeroed (it never held its slot) and its
+     Cost is zeroed unless the charge was retained — identical math to every other card, just
+     applied per-row instead of summed into a total. */
+  function loadBookingInstrumentNames(from, to) {
+    return DB.rows(`
+      SELECT mi.meeting_id, i.name AS instrument_name, i.is_retired AS instrument_retired
+      FROM meeting_instruments mi
+      JOIN instruments i ON i.id = mi.instrument_id
+      JOIN meetings mt ON mt.id = mi.meeting_id
+      WHERE ${RANGE_SQL}`, rangeParams(from, to));
+  }
+  function computeBookingRows(from, to) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    const meetings = loadMeetingsInRange(from, to);
+    const annotated = annotateMeetings(meetings);
+
+    const instrByMeeting = new Map(); // meeting_id -> [retired-suffixed name, ...]
+    loadBookingInstrumentNames(from, to).forEach((ln) => {
+      if (!instrByMeeting.has(ln.meeting_id)) instrByMeeting.set(ln.meeting_id, []);
+      instrByMeeting.get(ln.meeting_id).push(UI.retiredName(ln.instrument_name, ln.instrument_retired));
+    });
+
+    const staffByMeeting = new Map(); // meeting_id -> { names: [...], hours: number }
+    loadStaffLines(from, to).forEach((ln) => {
+      const mm = annotated.get(ln.meeting_id);
+      if (!mm) return;
+      if (!staffByMeeting.has(ln.meeting_id)) staffByMeeting.set(ln.meeting_id, { names: [], hours: 0 });
+      const entry = staffByMeeting.get(ln.meeting_id);
+      entry.names.push(UI.retiredName(ln.person_name, ln.person_retired));
+      // Same blank-window fallback as computeStaffRows/computeStaffInstrumentMatrix: a blank
+      // per-staff start/end means "the whole booking window", not zero.
+      const rawHours = (ln.start_time && ln.end_time) ? UI.hoursBetween(ln.start_time, ln.end_time) : mm.bookingHours;
+      entry.hours += rawHours;
+    });
+
+    const rows = meetings.map((m) => {
+      const mm = annotated.get(m.id);
+      const insts = instrByMeeting.get(m.id) || [];
+      const staffEntry = staffByMeeting.get(m.id) || { names: [], hours: 0 };
+      const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
+      return {
+        date: m.date || '',
+        title: m.title || '',
+        category: m.category || '',
+        project: m.project_id == null ? 'Facility-wide' : (m.project_code ? m.project_code + ' — ' + m.project_title : m.project_title),
+        lab: m.group_org || '',
+        instruments: insts.join(', '),
+        staff: staffEntry.names.join(', '),
+        hours: mm.occupancyCounts ? mm.bookingHours : 0,        // rule 1
+        staffHours: mm.occupancyCounts ? staffEntry.hours : 0,  // rule 1
+        status,
+        cost: mm.moneyCounts ? (m.total_cost || 0) : 0          // rule 2
+      };
+    });
+
+    return { rows };
+  }
+
+  /* ================================================================================
+     Custom report generator (ROADMAP 3.6)
+
+     ENTITY_DEFS is the single declarative field list this item's spec requires: one entry per
+     selectable entity, each carrying the columns available for it (label/key/type/required) and
+     a `buildRows(from,to)` that delegates to the existing compute* functions above — this file
+     never re-derives a number, it only re-shapes/re-flattens what compute* already produced.
+     Both the custom-report modal's preview table (app.js) and Exports.exportCustomXlsx read this
+     SAME map, so a column can never render differently in the two places.
+
+     FLATTENED-TABLE INTEGRITY: three of these entities emit one row per (discriminator x entity)
+     pair, where the same underlying entity is deliberately repeated across rows (mirroring what
+     exportReportsXlsx's own sheets already do for these same three cards):
+       - projects:     a booking's hours/cost appear once under its Project row AND once under
+                        its Lab/Group row — summing across both scopes double-counts every booking.
+       - consults:     the same consult count appears three times over (Total / By Instrument /
+                        By Period) — three different breakdowns of the same events, not three
+                        populations.
+       - stewardship:  a multi-supervisor instrument repeats — IDENTICAL bookings/hours/revenue —
+                        under every supervisor it's linked to (see computeStewardshipRows' header).
+       - activitymix:  the same period repeats once per category present in the data.
+     Each of those discriminator columns (scope / breakdown / supervisor / category) is marked
+     required:true below so it can never be unchecked into a sheet of silently double-countable
+     rows that look identical without it. computeCustomRows force-re-adds any required column the
+     caller omitted, and each entity's `notes` string is surfaced in both the modal's preview
+     footnote and the XLSX Notes sheet — never only one of the two. */
+  function ccol(key, label, type, get, opts) {
+    return Object.assign({ key, label, type, get, required: false }, opts || {});
+  }
+
+  const CUSTOM_REPORT_ENTITY_ORDER = ['instrument', 'staff', 'projects', 'consults', 'service', 'stewardship', 'activitymix', 'funnel', 'bookings'];
+
+  const ENTITY_DEFS = {
+    instrument: {
+      label: 'Instrument utilization',
+      notes: [],
+      buildRows: (from, to) => computeInstrumentRows(from, to).rows,
+      columns: [
+        ccol('name', 'Instrument', 'text', (r) => UI.retiredName(r.name, r.retired)),
+        ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
+        ccol('hours', 'Booked Hours', 'hours', (r) => r.hours),
+        ccol('revenue', 'Billed Revenue', 'money', (r) => r.revenue),
+        ccol('sharePct', 'Share of Total Hours %', 'number', (r) => Math.round(r.sharePct * 100) / 100)
+      ]
+    },
+    staff: {
+      label: 'Staff time',
+      notes: [],
+      buildRows: (from, to) => computeStaffRows(from, to).rows,
+      columns: [
+        ccol('name', 'Staff Member', 'text', (r) => UI.retiredName(r.name, r.retired)),
+        ccol('sessions', 'Sessions', 'number', (r) => r.sessions),
+        ccol('rawHours', 'Raw Hours', 'hours', (r) => r.rawHours),
+        ccol('billHours', 'Billed Hours', 'hours', (r) => r.billHours),
+        ccol('revenue', 'Staff Revenue', 'money', (r) => r.revenue)
+      ]
+    },
+    projects: {
+      label: 'Projects & groups',
+      notes: ['A booking contributes to both its Project row and its Lab/Group row — the Scope column is required so summing Hours/Total Cost across both scopes can never be mistaken for a single total (it would double every booking).'],
+      buildRows: (from, to) => {
+        const p = computeProjectRows(from, to);
+        const rows = [];
+        p.projects.forEach((r) => rows.push({ scope: 'Project', label: r.label, bookings: r.bookings, hours: r.hours, cost: r.cost }));
+        p.groups.forEach((r) => rows.push({ scope: 'Lab / Group', label: r.label, bookings: r.bookings, hours: r.hours, cost: r.cost }));
+        return rows;
+      },
+      columns: [
+        ccol('scope', 'Scope', 'text', (r) => r.scope, { required: true }),
+        ccol('label', 'Name', 'text', (r) => r.label),
+        ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
+        ccol('hours', 'Hours', 'hours', (r) => r.hours),
+        ccol('cost', 'Total Cost', 'money', (r) => r.cost)
+      ]
+    },
+    consults: {
+      label: 'Consults',
+      notes: ['The same consult count is reported three ways here (Total / By Instrument / By Period) — the Breakdown column is required so those three views are never summed together as if they were three different populations.'],
+      buildRows: (from, to) => {
+        const c = computeConsultRows(from, to);
+        const rows = [{ breakdown: 'Total', label: 'All', count: c.totalConsults }];
+        c.instrumentRows.forEach((r) => rows.push({ breakdown: 'By Instrument', label: UI.retiredName(r.name, r.retired), count: r.count }));
+        c.periodRows.forEach((r) => rows.push({ breakdown: 'By Period', label: r.period, count: r.count }));
+        return rows;
+      },
+      columns: [
+        ccol('breakdown', 'Breakdown', 'text', (r) => r.breakdown, { required: true }),
+        ccol('label', 'Instrument / Month', 'text', (r) => r.label),
+        ccol('count', 'Consults', 'number', (r) => r.count)
+      ]
+    },
+    service: {
+      label: 'Service entries',
+      notes: [],
+      buildRows: (from, to) => computeServiceEntryRows(from, to).rows,
+      columns: [
+        ccol('description', 'Description', 'text', (r) => r.description),
+        ccol('project', 'Project', 'text', (r) => r.project_id == null ? 'Facility-wide' : (r.project_code ? r.project_code + ' — ' + r.project_title : r.project_title)),
+        ccol('staff', 'Staff', 'text', (r) => r.person_name ? UI.retiredName(r.person_name, r.person_retired) : '—'),
+        ccol('instrument', 'Instrument', 'text', (r) => r.instrument_name ? UI.retiredName(r.instrument_name, r.instrument_retired) : '—'),
+        ccol('status', 'Status', 'text', (r) => r.is_cancelled ? (r.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active'),
+        ccol('date', 'Date', 'text', (r) => r.date || '—'),
+        ccol('qty', 'Qty', 'number', (r) => r.qty || 0),
+        ccol('unit', 'Unit', 'text', (r) => r.unit || '—'),
+        ccol('cost', 'Total', 'money', (r) => r.countedCost)
+      ]
+    },
+    stewardship: {
+      label: 'Stewardship',
+      notes: ['A multi-supervisor instrument is repeated under every supervisor it is linked to — the SAME bookings/hours/revenue on each repeated row (see computeStewardshipRows). The Supervisor column is required so those identical rows can never be silently double- (or triple-) counted as if they were separate instruments.'],
+      buildRows: (from, to) => {
+        const s = computeStewardshipRows(from, to);
+        const rows = [];
+        s.groups.forEach((g) => {
+          const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
+          g.rows.forEach((r) => rows.push({
+            supervisor: supLabel, name: r.name, retired: r.retired, bookings: r.bookings, hours: r.hours,
+            revenue: r.revenue, distinctUsers: r.distinctUsers, newUsers: r.newUsers,
+            projectsServed: r.projectsServed, facilityWideSessions: r.facilityWideSessions, consultCount: r.consultCount
+          }));
+        });
+        return rows;
+      },
+      columns: [
+        ccol('supervisor', 'Supervisor', 'text', (r) => r.supervisor, { required: true }),
+        ccol('name', 'Instrument', 'text', (r) => UI.retiredName(r.name, r.retired)),
+        ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
+        ccol('hours', 'Hours', 'hours', (r) => r.hours),
+        ccol('revenue', 'Revenue', 'money', (r) => r.revenue),
+        ccol('distinctUsers', 'Distinct Users', 'number', (r) => r.distinctUsers),
+        ccol('newUsers', 'New Users', 'number', (r) => r.newUsers),
+        ccol('projectsServed', 'Projects Served', 'number', (r) => r.projectsServed),
+        ccol('facilityWideSessions', 'Facility-Wide Sessions', 'number', (r) => r.facilityWideSessions),
+        ccol('consultCount', 'Consults', 'number', (r) => r.consultCount)
+      ]
+    },
+    activitymix: {
+      label: 'Activity mix',
+      notes: ['Each period repeats once per category present in the data — the Category column is required so hours from different categories in the same period are never mistaken for duplicate rows of the same total.'],
+      buildRows: (from, to) => {
+        const mix = computeActivityMixRows(from, to);
+        const rows = [];
+        mix.rows.forEach((r) => mix.categories.forEach((c) => rows.push({ period: r.period, category: c, hours: r.hours[c] || 0 })));
+        return rows;
+      },
+      columns: [
+        ccol('period', 'Month', 'text', (r) => r.period),
+        ccol('category', 'Category', 'text', (r) => r.category, { required: true }),
+        ccol('hours', 'Hours', 'hours', (r) => r.hours)
+      ]
+    },
+    funnel: {
+      label: 'Funnel',
+      // Static structural note (Stage discriminator) PLUS the data-dependent exclusion counts
+      // (completedNoDateCount, both medians' excludedNegative/sampleSize) that computeFunnelRows
+      // discloses precisely because item 3.3's honesty requirement forbids silently dropping
+      // them — the same counts exportReportsXlsx's own Notes sheet and Funnel sheet surface (see
+      // exports.js). A STATIC string array can't carry these, so this is computed per (from,to)
+      // instead of a plain `notes` array, and computeCustomRows below calls it that way.
+      buildNotes: (from, to) => {
+        const f = computeFunnelRows(from, to);
+        const notes = ['Each stage repeats the same underlying projects that reached it — the Stage column is required so summing Count across stages can never be mistaken for a count of distinct projects (it would double- or quadruple-count them). The two "Median" rows report days, not project counts, and share the Count column — with Stage visible they can still be told apart from the stage rows.'];
+        notes.push('"Completed" is dated by end_date (or archive date) when set; a completed project with neither date has no date to place in a bounded range and ' + (f.completedNoDateCount ? `is excluded here (${f.completedNoDateCount} completed project${f.completedNoDateCount === 1 ? '' : 's'} with no end/archive date).` : 'none are excluded in this range.'));
+        notes.push('Both medians exclude (but disclose) projects where the later event predates the earlier one — real for backfilled/imported data: '
+          + `${f.medians.createdToActive.excludedNegative} project${f.medians.createdToActive.excludedNegative === 1 ? '' : 's'} excluded from "created → first booking" (n=${f.medians.createdToActive.sampleSize}), `
+          + `${f.medians.activeToOutput.excludedNegative} project${f.medians.activeToOutput.excludedNegative === 1 ? '' : 's'} excluded from "first booking → first output" (n=${f.medians.activeToOutput.sampleSize}).`);
+        return notes;
+      },
+      buildRows: (from, to) => {
+        const f = computeFunnelRows(from, to);
+        const rows = f.stages.map((s) => ({ stage: s.label, count: s.count, conversionPct: s.conversionPct }));
+        rows.push({ stage: 'Median: created → first booking (days)', count: f.medians.createdToActive.days, conversionPct: null });
+        rows.push({ stage: 'Median: first booking → first output (days)', count: f.medians.activeToOutput.days, conversionPct: null });
+        return rows;
+      },
+      columns: [
+        ccol('stage', 'Stage', 'text', (r) => r.stage, { required: true }),
+        ccol('count', 'Count', 'number', (r) => r.count == null ? '' : r.count),
+        ccol('conversionPct', 'Conversion from Previous %', 'number', (r) => r.conversionPct == null ? '' : Math.round(r.conversionPct * 100) / 100)
+      ]
+    },
+    bookings: {
+      label: 'Bookings (row-level)',
+      notes: [],
+      buildRows: (from, to) => computeBookingRows(from, to).rows,
+      columns: [
+        ccol('date', 'Date', 'text', (r) => r.date || '—'),
+        ccol('title', 'Title', 'text', (r) => r.title || '—'),
+        ccol('category', 'Category', 'text', (r) => r.category || '—'),
+        ccol('project', 'Project', 'text', (r) => r.project),
+        ccol('lab', 'Lab / Group', 'text', (r) => r.lab || '—'),
+        ccol('instruments', 'Instruments', 'text', (r) => r.instruments || '—'),
+        ccol('staff', 'Staff', 'text', (r) => r.staff || '—'),
+        ccol('hours', 'Hours', 'hours', (r) => r.hours),
+        ccol('staffHours', 'Staff Hours', 'hours', (r) => r.staffHours),
+        ccol('status', 'Status', 'text', (r) => r.status),
+        ccol('cost', 'Cost', 'money', (r) => r.cost)
+      ]
+    }
+  };
+
+  // Ordered [{key,label}] for the modal's entity radio list — app.js never hardcodes this list.
+  function getCustomReportEntities() {
+    return CUSTOM_REPORT_ENTITY_ORDER.map((key) => ({ key, label: ENTITY_DEFS[key].label }));
+  }
+  // Column defs (key/label/type/required) for one entity's checkbox list — app.js renders these,
+  // never inventing its own field names.
+  function getCustomReportColumns(entityKey) {
+    const def = ENTITY_DEFS[entityKey];
+    return def ? def.columns.map((c) => ({ key: c.key, label: c.label, type: c.type, required: !!c.required })) : [];
+  }
+  // Notes for one entity, over an explicit (from,to) — most entities' notes are a fixed
+  // structural string, but an entity can instead define `buildNotes(from,to)` when its
+  // disclosure text is data-dependent (see the funnel entity's excludedNegative/
+  // completedNoDateCount counts above); both app.js's preview and Exports.exportCustomXlsx call
+  // this the same way, so the two can never disagree about what gets disclosed.
+  function getCustomReportNotes(entityKey, from, to) {
+    const def = ENTITY_DEFS[entityKey];
+    if (!def) return [];
+    return def.buildNotes ? def.buildNotes(from, to) : (def.notes || []);
+  }
+  function getCustomReportLabel(entityKey) {
+    const def = ENTITY_DEFS[entityKey];
+    return def ? def.label : entityKey;
+  }
+
+  /* spec = { entity: '<key>', columns: ['key1','key2',...] }. Takes explicit (from,to) — like
+     every compute* above — and never touches module state, so app.js's live preview and
+     Exports.exportCustomXlsx both call this the same way regardless of what the screen itself is
+     showing. Required columns are force-re-added even if the caller's spec omitted them (a stale
+     persisted column list from before a column became required, or a hand-built spec) — see the
+     FLATTENED-TABLE INTEGRITY note above for why that matters. */
+  function computeCustomRows(spec, from, to) {
+    const entity = spec && spec.entity;
+    const def = ENTITY_DEFS[entity];
+    if (!def) return { entity, columns: [], rows: [], notes: [] };
+    const requested = new Set((spec.columns || []).filter((k) => def.columns.some((c) => c.key === k)));
+    def.columns.forEach((c) => { if (c.required) requested.add(c.key); });
+    const columns = def.columns.filter((c) => requested.has(c.key));
+    const dataRows = def.buildRows(from, to);
+    const notes = def.buildNotes ? def.buildNotes(from, to) : (def.notes || []);
+    const rows = dataRows.map((r) => {
+      const out = {};
+      columns.forEach((c) => { out[c.key] = c.get(r); });
+      return out;
+    });
+    return { entity, columns, rows, notes };
+  }
+
+  // Shared cell formatting so the modal's preview table and Exports.exportCustomXlsx render the
+  // exact same column the exact same way (numbers rounded identically, text escaped identically).
+  function formatCustomCellDisplay(col, value) {
+    if (value === '' || value == null) return '<span class="faint">—</span>';
+    if (col.type === 'hours') return fmtHours(value);
+    if (col.type === 'money') return fmtMoney(value);
+    if (col.type === 'number') return esc(String(value));
+    return esc(String(value));
+  }
+  function formatCustomCellXlsx(col, value) {
+    if (value == null) return '';
+    if (col.type === 'hours' || col.type === 'money' || col.type === 'number') {
+      return value === '' ? '' : Math.round(Number(value) * 100) / 100;
+    }
+    return value;
+  }
+
   /* ---------------- Screen ---------------- */
   function render() {
     const { from, to } = getRange();
@@ -1066,6 +1396,7 @@
         <button class="btn btn-secondary btn-sm" data-act="rep-preset" data-range="year">This Year</button>
         <button class="btn btn-secondary btn-sm" data-act="rep-preset" data-range="all">All Time</button>
         <div class="grow"></div>
+        <button class="btn btn-secondary" data-act="rep-custom">${ic('filter')} Custom Report</button>
         <button class="btn btn-primary" data-act="export-reports-xlsx">${ic('file')} Export XLSX</button>
       </div>
     </div>
@@ -1415,8 +1746,17 @@
     computeBreadthRows,
     computeActivityMixRows,
     computeFunnelRows,
+    computeBookingRows,
     getLabConsultsEnabled,
-    setLabConsultsEnabled
+    setLabConsultsEnabled,
+    // Custom report generator (roadmap 3.6)
+    getCustomReportEntities,
+    getCustomReportColumns,
+    getCustomReportNotes,
+    getCustomReportLabel,
+    computeCustomRows,
+    formatCustomCellDisplay,
+    formatCustomCellXlsx
   };
 
 })(window);

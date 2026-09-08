@@ -35,6 +35,19 @@ This project uses [Semantic Versioning](https://semver.org/).
   the charts instantly with no re-render. Retired instrument names truncate the base name first
   and append the " (Retired)" suffix after truncating (never the reverse), and every bar/segment
   carries a `<title>` with the full, untruncated name. Display-only — no export changes.
+- **Custom report generator (roadmap 3.6).** Reports & Utilization gains a "Custom Report" button
+  opening a modal to pick an entity (Instrument Utilization, Staff Time, Projects & Groups,
+  Consults, Service Entries, Stewardship, Activity Mix, Funnel, or the new row-level Bookings
+  listing), a set of columns, and a date range, with a live preview table and its own "Export
+  XLSX" — all driven from one declarative column map per entity in `js/reports.js`
+  (`Reports.computeCustomRows`) so the preview and the export can never disagree. The date range
+  always prefills from the Reports screen's own current range on every open (never a stale
+  persisted value); only the last-used entity and column selection are remembered. Columns whose
+  dataset repeats the same underlying entity across rows (Projects & Groups' Scope, Consults'
+  Breakdown, Stewardship's Supervisor, Activity Mix's Category) render checked-and-disabled and
+  are force-re-added even if omitted, so a flattened dataset can never be summed as if its rows
+  were all distinct — each such dataset's duplication note appears in both the preview footnote
+  and the exported workbook's Notes sheet.
 
 ## [1.8.0] — 2026-09-08
 
