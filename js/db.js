@@ -1804,6 +1804,26 @@
       category: 'assisted session'
     });
 
+    // #11 — training category (roadmap 3.4 seed): no training-category booking existed before
+    // this, so the Activity Mix report's training segment would never have anything to show.
+    // category_policies seeds training with requires_staff=1, so this needs a staff assignee (Dr.
+    // Priya Anand, the Cryo-EM specialist) even though only her time — not the instrument — is
+    // billed at the training rate. day(-50) on the Zeiss Lightsheet Z.1 (instrument id 3) is a
+    // date+instrument combination no other seed booking touches (Z.1's only other booking is
+    // day(-30)), so this cannot overlap despite seed inserts bypassing the conflict gate.
+    seedBooking({
+      projectId: 3,
+      title: 'New User Training: Zeiss Lightsheet Z.1 Acquisition Basics',
+      date: day(-50), start: '09:00', end: '10:30',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [3, 7], // Sarah Lin, Priya Anand
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Walked Sarah through sample mounting, chamber refractive-index matching, and multi-view acquisition setup on the Z.1.',
+      actions: '',
+      category: 'training'
+    });
+
     // 8b. Standalone Service Entries (roadmap 2.3) — billable work logged outside any booking,
     // following the exact same Project Costs counting rule as a booking's cost snapshot. Priced
     // from the seeded people rows above, not invented numbers: Tom Alvarez (person id 8) is

@@ -10,6 +10,11 @@ This project uses [Semantic Versioning](https://semver.org/).
   grouped by supervising staff, showing per-instrument bookings, hours, revenue, distinct/new
   users, projects served, facility-wide sessions, and consults; exported to XLSX as a matching
   "Stewardship" sheet.
+- **Breadth and activity-mix views (roadmap 3.4).** Reports & Utilization gains a Breadth card
+  (distinct labs/people served and new labs onboarded per period, per instrument, occupancy-rule
+  scoped) with an opt-in, off-by-default per-lab consult attribution table, and an Activity Mix
+  card breaking down facility hours by booking category per period; both export to XLSX as
+  matching "Breadth" and "Activity Mix" sheets (the lab-consult sheet only when the toggle is on).
 
 ## [1.8.0] — 2026-09-08
 

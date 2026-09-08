@@ -1013,6 +1013,7 @@
       case 'export-pdf': return Exports.exportPdf(ctx.project);
       case 'export-all-xlsx': return Exports.exportAllXlsx();
       case 'rep-preset': return Reports.setPreset(el.dataset.range);
+      case 'rep-toggle-lab-consults': { Reports.setLabConsultsEnabled(el.checked); refresh(); return; }
       case 'export-reports-xlsx': { const r = Reports.getRange(); return Exports.exportReportsXlsx(r.from, r.to); }
 
       // Milestones CRUD & Toggle

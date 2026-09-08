@@ -909,6 +909,9 @@
     const stewardship = Reports.computeStewardshipRows(from, to);
     const consult = Reports.computeConsultRows(from, to);
     const svc = Reports.computeServiceEntryRows(from, to);
+    const breadth = Reports.computeBreadthRows(from, to);
+    const mix = Reports.computeActivityMixRows(from, to);
+    const labConsultsOn = Reports.getLabConsultsEnabled(); // mirror the on-screen opt-in toggle exactly
 
     const wb = XLSX.utils.book_new();
     const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
@@ -932,6 +935,17 @@
       [''],
       ['Instrument stewardship scorecard'],
       ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. Omitted on purpose (need data this app does not track yet): trained-user pool trend and downtime share.'],
+      [''],
+      ['Breadth'],
+      ['Distinct labs/people and new-lab counts exclude cancelled bookings entirely; a booking with no lab/group on file is omitted from lab counts. "New Labs" counts labs whose first-ever non-cancelled booking (checked across the facility’s whole history, not just the exported range) falls inside the exported dates.'],
+      [''],
+      ['Activity Mix'],
+      ['Hours booked per meetings.category per month, excluding cancelled bookings; a booking with no category on file is grouped under "(uncategorized)". Categories are read from the data, not a fixed list. Standalone service entries are not included — they are logged in units/quantity, not hours.'],
+      [''],
+      ['Per-Lab Consults'],
+      [labConsultsOn
+        ? 'Per-lab consult attribution was ON (opt-in) at export time — see the "Per-Lab Consults" sheet.'
+        : 'Per-lab consult attribution is OFF by default (opt-in, not a standing report column) — the "Per-Lab Consults" sheet is omitted from this export. Enable the checkbox on the Breadth card and re-export to include it.'],
       [''],
       ['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']
     ];
@@ -1020,6 +1034,36 @@
     const wsSvc = XLSX.utils.aoa_to_sheet(svcRows);
     wsSvc['!cols'] = [{ wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsSvc, 'Service Entries');
+
+    // Sheet 9: Breadth — distinct labs/people per period and per instrument, plus new-labs-onboarded
+    // per period. Fed from the exact same Reports.computeBreadthRows the screen renders from.
+    const breadthRows = [['Breakdown', 'Period / Instrument', 'Distinct Labs', 'Distinct People', 'New Labs']];
+    breadth.periodRows.forEach((r) => breadthRows.push(['By Period', r.period, r.distinctLabs, r.distinctPeople, r.newLabs]));
+    breadth.instrumentRows.forEach((r) => breadthRows.push(['By Instrument', UI.retiredName(r.name, r.retired), r.distinctLabs, r.distinctPeople, '']));
+    const wsBreadth = XLSX.utils.aoa_to_sheet(breadthRows);
+    wsBreadth['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 16 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsBreadth, 'Breadth');
+
+    // Sheet 10: Activity Mix — period x category hours matrix, fed from the exact same
+    // Reports.computeActivityMixRows the screen renders from. Wide (one column per category value
+    // actually present in the data) rather than the tall shape used elsewhere in this file, because
+    // this sheet is meant to feed a stacked chart (roadmap 3.5) directly.
+    const mixHeader = ['Month', ...mix.categories];
+    const mixRows = [mixHeader];
+    mix.rows.forEach((r) => mixRows.push([r.period, ...mix.categories.map((c) => round2(r.hours[c]))]));
+    const wsMix = XLSX.utils.aoa_to_sheet(mixRows);
+    wsMix['!cols'] = [{ wch: 10 }, ...mix.categories.map(() => ({ wch: 16 }))];
+    XLSX.utils.book_append_sheet(wb, wsMix, 'Activity Mix');
+
+    // Sheet 11 (opt-in only): Per-Lab Consults — mirrors the Breadth card's opt-in checkbox exactly;
+    // the sheet is omitted entirely when the toggle is off, same as the on-screen table.
+    if (labConsultsOn) {
+      const labConsultRows = [['Lab / Group', 'Consults']];
+      breadth.consultLabRows.forEach((r) => labConsultRows.push([r.lab, r.count]));
+      const wsLabConsult = XLSX.utils.aoa_to_sheet(labConsultRows);
+      wsLabConsult['!cols'] = [{ wch: 30 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, wsLabConsult, 'Per-Lab Consults');
+    }
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);

@@ -179,6 +179,37 @@
     });
     return counts;
   }
+  // Roadmap 3.4. (instrument, lab) pairs in range, occupancy-filtered — one row per meeting the
+  // instrument was on, carrying that meeting's group_org snapshot. Distinctness (a Set per
+  // instrument) is left to the caller, same pattern as loadAttendeeLines.
+  function loadInstrumentLabLines(from, to) {
+    return DB.rows(`
+      SELECT mi.instrument_id, mt.group_org
+      FROM meeting_instruments mi
+      JOIN meetings mt ON mt.id = mi.meeting_id
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+  }
+  // Roadmap 3.4. (date, person_id) pairs in range, occupancy-filtered, with NO instrument join —
+  // feeds the per-period distinct-people count, which is facility-wide, not instrument-scoped.
+  function loadPeriodPeopleLines(from, to) {
+    return DB.rows(`
+      SELECT mt.date, mp.person_id
+      FROM meetings mt
+      JOIN meeting_people mp ON mp.meeting_id = mt.id
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+  }
+  /* Roadmap 3.4. DELIBERATELY UNBOUNDED — same reasoning as loadFirstInstrumentUserDates above,
+     just keyed on group_org instead of instrument_id: to know whether a lab's booking in the
+     selected range was its FIRST EVER, the query must see the facility's entire booking history.
+     Feeds countNewInRange (the reusable helper already built for 3.2) below, bucketed by the
+     PERIOD of each lab's first-ever date rather than a single in/out-of-range count. */
+  function loadFirstLabDates() {
+    return DB.rows(`
+      SELECT group_org, MIN(date) AS first_date
+      FROM meetings
+      WHERE is_cancelled = 0 AND TRIM(COALESCE(group_org, '')) != ''
+      GROUP BY group_org`);
+  }
   function loadStaffLines(from, to) {
     // meeting_staff always names a facility-staff assignee, but a person's is_staff flag could in
     // theory have been unset after the fact (retiring doesn't do this, but be defensive) — join
@@ -532,6 +563,151 @@
     return { groups };
   }
 
+  /* ================================================================================
+     Card — Breadth (ROADMAP 3.4)
+     "How many distinct labs/people does the facility actually serve, and is that base
+     growing?" Per period (calendar month) and per instrument: distinct labs (meetings.group_org,
+     non-blank — a booking with no lab/group on file is omitted from lab counts, same precedent as
+     the Projects & Groups card), distinct people (meeting_people). "New labs onboarded" per
+     period reuses the exact countNewInRange helper built for 3.2, just keyed on group_org and
+     bucketed by the period of each lab's own first-ever booking (see loadFirstLabDates above).
+     Occupancy rule throughout — a cancelled booking never happened, so it can neither serve a lab
+     nor onboard one.
+
+     Per-lab consult attribution (consultLabRows) is OPT-IN, never a default column — see
+     getLabConsultsEnabled/setLabConsultsEnabled below. computeBreadthRows always computes it (it's
+     cheap, already has the filtered meetings in hand) so the toggle is a pure render/export
+     decision, not a second aggregation path that could drift from this one. */
+  function computeBreadthRows(from, to) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    const meetings = loadMeetingsInRange(from, to).filter((m) => !m.is_cancelled); // rule 1
+    const instrLines = loadInstrumentLines(from, to);
+    const instLabLines = loadInstrumentLabLines(from, to);
+    const attendeeLines = loadAttendeeLines(from, to); // already occupancy-filtered (instrument_id, person_id)
+    const periodPeopleLines = loadPeriodPeopleLines(from, to);
+
+    // Per instrument.
+    const instMeta = new Map(); // id -> {name, retired}
+    instrLines.forEach((ln) => instMeta.set(ln.instrument_id, { name: ln.instrument_name, retired: !!ln.instrument_retired }));
+    const labsByInstrument = new Map();   // instrument_id -> Set(lab)
+    instLabLines.forEach((ln) => {
+      const lab = (ln.group_org || '').trim();
+      if (!lab) return; // no lab/group on file — nothing to attribute (precedent: Projects & Groups card)
+      if (!labsByInstrument.has(ln.instrument_id)) labsByInstrument.set(ln.instrument_id, new Set());
+      labsByInstrument.get(ln.instrument_id).add(lab);
+    });
+    const peopleByInstrument = new Map(); // instrument_id -> Set(person_id)
+    attendeeLines.forEach((ln) => {
+      if (!peopleByInstrument.has(ln.instrument_id)) peopleByInstrument.set(ln.instrument_id, new Set());
+      peopleByInstrument.get(ln.instrument_id).add(ln.person_id);
+    });
+    const instrumentIds = new Set([...labsByInstrument.keys(), ...peopleByInstrument.keys()]);
+    const instrumentRows = Array.from(instrumentIds).map((id) => {
+      const meta = instMeta.get(id) || { name: '(unknown)', retired: false };
+      return {
+        id, name: meta.name, retired: meta.retired,
+        distinctLabs: (labsByInstrument.get(id) || new Set()).size,
+        distinctPeople: (peopleByInstrument.get(id) || new Set()).size
+      };
+    }).sort((a, b) => b.distinctPeople - a.distinctPeople);
+
+    // Per period.
+    const labsByPeriod = new Map();   // 'YYYY-MM' -> Set(lab)
+    const consultByLab = new Map();   // lab -> count (opt-in table; see file header above)
+    meetings.forEach((m) => {
+      const period = (m.date || '').slice(0, 7);
+      if (!period) return;
+      const lab = (m.group_org || '').trim();
+      if (lab) {
+        if (!labsByPeriod.has(period)) labsByPeriod.set(period, new Set());
+        labsByPeriod.get(period).add(lab);
+        if (m.category === 'consult') consultByLab.set(lab, (consultByLab.get(lab) || 0) + 1);
+      }
+    });
+    const peopleByPeriod = new Map(); // 'YYYY-MM' -> Set(person_id)
+    periodPeopleLines.forEach((ln) => {
+      const period = (ln.date || '').slice(0, 7);
+      if (!period) return;
+      if (!peopleByPeriod.has(period)) peopleByPeriod.set(period, new Set());
+      peopleByPeriod.get(period).add(ln.person_id);
+    });
+
+    // New labs per period: reuse countNewInRange verbatim, with groupId = the PERIOD of the lab's
+    // own unbounded first-ever date (not the instrument), entityId = the lab name.
+    const firstLabRows = loadFirstLabDates().map((r) => ({ groupId: (r.first_date || '').slice(0, 7), entityId: r.group_org, firstDate: r.first_date }));
+    const newLabsByPeriod = countNewInRange(firstLabRows, from, to);
+
+    const periodSet = new Set([...labsByPeriod.keys(), ...peopleByPeriod.keys(), ...newLabsByPeriod.keys()]);
+    const periodRows = Array.from(periodSet).sort().map((period) => ({
+      period,
+      distinctLabs: (labsByPeriod.get(period) || new Set()).size,
+      distinctPeople: (peopleByPeriod.get(period) || new Set()).size,
+      newLabs: newLabsByPeriod.get(period) || 0
+    }));
+
+    const consultLabRows = Array.from(consultByLab.entries())
+      .map(([lab, count]) => ({ lab, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return { periodRows, instrumentRows, consultLabRows };
+  }
+
+  // Module state for the opt-in per-lab consult attribution table (roadmap 3.4). Deliberately
+  // ephemeral (not DB.getConfig-backed) — this is a per-load reading choice, not a facility
+  // setting or a stored report column, per the roadmap's "opt-in, not a default column" rule.
+  // Defaults OFF on every fresh load.
+  let labConsultsEnabled = false;
+  function getLabConsultsEnabled() { return labConsultsEnabled; }
+  function setLabConsultsEnabled(v) { labConsultsEnabled = !!v; }
+
+  /* ================================================================================
+     Card — Activity mix (ROADMAP 3.4)
+     Facility hours split by meetings.category, per period — a period x category matrix, ordered
+     by period, designed so 3.5's stacked chart can consume it directly (one row per period, one
+     numeric column per category). The category vocabulary is READ FROM THE DATA, never
+     hardcoded — sync/consult/assisted session/training are today's built-ins but a facility can
+     add its own via the vocab picker, and this aggregation must pick those up automatically. A
+     blank category becomes an explicit "(uncategorized)" bucket rather than being silently
+     dropped or merged into another category. Hours use UI.hoursBetween exactly like every other
+     hour figure in this file (occupancy rule: cancelled bookings are excluded).
+
+     Standalone service entries (roadmap 2.3) are NOT part of this mix — they carry a qty/unit,
+     not a start/end time, so there are no hours to attribute; see the returned footnote text. */
+  function computeActivityMixRows(from, to) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    const meetings = loadMeetingsInRange(from, to).filter((m) => !m.is_cancelled); // rule 1
+
+    const byPeriod = new Map(); // 'YYYY-MM' -> Map(category -> hours)
+    const categorySet = new Set();
+    meetings.forEach((m) => {
+      const period = (m.date || '').slice(0, 7);
+      if (!period) return;
+      const category = (m.category || '').trim() || '(uncategorized)';
+      categorySet.add(category);
+      const hours = UI.hoursBetween(m.start_time, m.end_time);
+      if (!byPeriod.has(period)) byPeriod.set(period, new Map());
+      const catMap = byPeriod.get(period);
+      catMap.set(category, (catMap.get(category) || 0) + hours);
+    });
+
+    const periods = Array.from(byPeriod.keys()).sort();
+    // "(uncategorized)" sorted last rather than alphabetically wherever it would otherwise land,
+    // so real vocabulary terms lead the matrix and the fallback bucket reads as an appendix.
+    const categories = Array.from(categorySet).sort((a, b) => {
+      if (a === '(uncategorized)') return 1;
+      if (b === '(uncategorized)') return -1;
+      return a.localeCompare(b);
+    });
+    const rows = periods.map((period) => {
+      const catMap = byPeriod.get(period);
+      const row = { period, hours: {} };
+      categories.forEach((c) => { row.hours[c] = catMap.get(c) || 0; });
+      return row;
+    });
+
+    return { periods, categories, rows };
+  }
+
   /* ---------------- Small render helpers ---------------- */
   function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
   // Same configured symbol the booking modal and Project Costs use (Settings -> Billing Rates);
@@ -555,6 +731,9 @@
     const stewardship = computeStewardshipRows(from, to);
     const consult = computeConsultRows(from, to);
     const svc = computeServiceEntryRows(from, to);
+    const breadth = computeBreadthRows(from, to);
+    const mix = computeActivityMixRows(from, to);
+    const labConsultsOn = getLabConsultsEnabled();
 
     return `
     <div class="card mb-16">
@@ -779,6 +958,86 @@
         </table>
       </div>`}
       <div class="faint small mt-8">Standalone billable work logged outside any booking — technician time, sample prep, per-unit items. Follows the same money rule as bookings: a cancelled entry's charge counts only if it was retained rather than waived; there is no occupancy rule since an entry never held a schedule slot.</div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('users')} Breadth</span></div></div>
+      <div class="grid cols-2">
+        <div>
+          <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">By Period</div>
+          ${!breadth.periodRows.length ? global.Views.emptyState('calendar', 'No bookings in this range', '') : `
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Month</th><th>Distinct Labs</th><th>Distinct People</th><th>New Labs</th></tr></thead>
+              <tbody>
+                ${breadth.periodRows.map((r) => `
+                  <tr>
+                    <td style="font-weight:600">${esc(r.period)}</td>
+                    <td class="mono small">${r.distinctLabs}</td>
+                    <td class="mono small">${r.distinctPeople}</td>
+                    <td class="mono small">${r.newLabs}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`}
+        </div>
+        <div>
+          <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">By Instrument</div>
+          ${!breadth.instrumentRows.length ? global.Views.emptyState('cpu', 'No bookings in this range', '') : `
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th>Instrument</th><th>Distinct Labs</th><th>Distinct People</th></tr></thead>
+              <tbody>
+                ${breadth.instrumentRows.map((r) => `
+                  <tr class="${r.retired ? 'row-retired' : ''}">
+                    <td style="font-weight:600">${nameCell(r.name, r.retired)}</td>
+                    <td class="mono small">${r.distinctLabs}</td>
+                    <td class="mono small">${r.distinctPeople}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`}
+        </div>
+      </div>
+      <label class="row mt-16" style="gap:8px;align-items:center;cursor:pointer">
+        <input type="checkbox" data-act="rep-toggle-lab-consults" ${labConsultsOn ? 'checked' : ''} />
+        <span class="small">Show per-lab consult attribution (opt-in)</span>
+      </label>
+      ${labConsultsOn ? `
+      <div class="mt-8">
+        ${!breadth.consultLabRows.length ? global.Views.emptyState('tag', 'No consults with a lab on file in this range', '') : `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Lab / Group</th><th>Consults</th></tr></thead>
+            <tbody>
+              ${breadth.consultLabRows.map((r) => `
+                <tr>
+                  <td style="font-weight:600">${esc(r.lab)}</td>
+                  <td class="mono small">${r.count}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>` : ''}
+      <div class="faint small mt-8">Distinct labs/people and new-lab onboarding exclude cancelled bookings entirely (a cancelled booking never served anyone); a booking with no lab/group on file is omitted from lab counts. "New Labs" counts labs whose first-ever non-cancelled booking (checked across the facility's whole history, not just this range) falls inside the selected dates. Per-lab consult attribution is off by default — it stays a deliberate opt-in, not a standing report column, per the facility's per-person/per-lab tracking policy.</div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('layers')} Activity Mix</span></div></div>
+      ${!mix.periods.length ? global.Views.emptyState('layers', 'No bookings in this range', '') : `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Month</th>${mix.categories.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${mix.rows.map((r) => `
+              <tr>
+                <td style="font-weight:600">${esc(r.period)}</td>
+                ${mix.categories.map((c) => `<td class="mono small">${fmtHours(r.hours[c])}</td>`).join('')}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+      <div class="faint small mt-8">Hours booked per category per month, excluding cancelled bookings; a booking with no category on file is grouped under "(uncategorized)". Category values are read from the data (not a fixed list), so a facility-added category appears here automatically. Standalone service entries are not included — they're logged in units/quantity, not hours, so there's nothing to attribute here.</div>
     </div>`;
   }
 
@@ -796,7 +1055,11 @@
     computeProjectRows,
     computeStewardshipRows,
     computeConsultRows,
-    computeServiceEntryRows
+    computeServiceEntryRows,
+    computeBreadthRows,
+    computeActivityMixRows,
+    getLabConsultsEnabled,
+    setLabConsultsEnabled
   };
 
 })(window);
