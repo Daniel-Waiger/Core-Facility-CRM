@@ -245,7 +245,7 @@
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     // Research outputs (roadmap 3.3) — the funnel's exit stage. Cloned from the same
     // "load flat, query fresh, no denormalized name column" pattern as kv above.
-    const outputs = global.DB.rows('SELECT * FROM project_outputs WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
+    const outputs = global.DB.rows(`SELECT * FROM project_outputs WHERE project_id=? ORDER BY ${global.DB.outputEffDate()} DESC, id DESC`, [id]);
     const mtgs = global.DB.rows(`
       SELECT m.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
       FROM meetings m

@@ -73,7 +73,7 @@
       ORDER BY se.date DESC, se.id DESC`, [id]);
     const files = DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
-    const outputs = DB.rows('SELECT * FROM project_outputs WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
+    const outputs = DB.rows(`SELECT * FROM project_outputs WHERE project_id=? ORDER BY ${DB.outputEffDate()} DESC, id DESC`, [id]);
     const prog = DB.projectProgress(id);
 
     return { p, ppl, inst, ms, kv, mtgs, entries, files, outputs, prog };
@@ -936,7 +936,7 @@
       SELECT po.*, p.code as project_code, p.title as project_title
       FROM project_outputs po
       JOIN projects p ON p.id = po.project_id
-      ORDER BY po.date DESC, po.id DESC`).forEach((o) => {
+      ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`).forEach((o) => {
       outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date || '—', o.note || '']);
     });
     const wsOut = XLSX.utils.aoa_to_sheet(outRows);

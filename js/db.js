@@ -1940,6 +1940,26 @@
     markDirty();
   }
 
+  // The "effective date" of a research output: its own `date` when set, else the
+  // calendar day it was logged. `project_outputs.date` is OPTIONAL and the UI
+  // falls back to `created_at` when it is blank, so every ordering and range
+  // filter must use this expression -- otherwise a blank-dated output sorts to
+  // the bottom of a list that displays it with a recent timestamp.
+  //
+  // It lives here, not in reports.js, because views.js loads first and needs it
+  // too. One definition is what stops the funnel, the project screen and the
+  // three export paths from quietly disagreeing about the same rows -- the same
+  // reasoning that keeps UI.billableStaffHours out of app.js and reports.js.
+  //
+  // Same UTC/local caveat the funnel already documents: created_at is a UTC
+  // timestamp while `date` is a local calendar day, so at UTC+ offsets the
+  // fallback can read one day early. Ordering only, and strictly better than
+  // sorting every undated row last.
+  function outputEffDate(alias) {
+    const a = alias ? alias + '.' : '';
+    return `CASE WHEN TRIM(COALESCE(${a}date,'')) != '' THEN ${a}date ELSE date(${a}created_at) END`;
+  }
+
   global.DB = {
     boot,
     get memoryMode() { return memoryMode; },
@@ -1953,6 +1973,7 @@
     getAutoBackupDirHandle,
     clearAutoBackupDirHandle,
     rows,
+    outputEffDate,
     row,
     q,
     q1,

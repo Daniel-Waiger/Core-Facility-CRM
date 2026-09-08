@@ -779,7 +779,7 @@
     return DB.rows(`
       SELECT pr.id, pr.status, pr.is_archived, pr.created_at, pr.end_date, pr.archived_at,
         (SELECT MIN(mt.date) FROM meetings mt WHERE mt.project_id = pr.id AND mt.is_cancelled = 0) AS first_booking_date,
-        (SELECT MIN(CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END)
+        (SELECT MIN(${DB.outputEffDate('po')})
            FROM project_outputs po WHERE po.project_id = pr.id) AS first_output_date
       FROM projects pr`);
   }
@@ -791,11 +791,11 @@
   function loadOutputsInRange(from, to) {
     return DB.rows(`
       SELECT po.*, p.code AS project_code, p.title AS project_title,
-             CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END AS eff_date
+             ${DB.outputEffDate('po')} AS eff_date
       FROM project_outputs po
       JOIN projects p ON p.id = po.project_id
-      WHERE (? = '' OR CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END >= ?)
-        AND (? = '' OR CASE WHEN TRIM(COALESCE(po.date,'')) != '' THEN po.date ELSE date(po.created_at) END <= ?)
+      WHERE (? = '' OR ${DB.outputEffDate('po')} >= ?)
+        AND (? = '' OR ${DB.outputEffDate('po')} <= ?)
       ORDER BY eff_date DESC, po.id DESC`, rangeParams(from, to));
   }
   // 'YYYY-MM-DD' (or a longer datetime string, sliced) in-range check — '' on either bound means

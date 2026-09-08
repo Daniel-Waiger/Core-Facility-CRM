@@ -1,0 +1,102 @@
+{
+  "run": "CMA dashboard v2 + lessons + skill vendoring",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Survey repo: gitignore, python, .claude tracking, docs layout"
+    },
+    {
+      "id": "T2",
+      "title": "update.py \u2014 generalist driver, derived agent network, auto-seed"
+    },
+    {
+      "id": "T3",
+      "title": "index.html \u2014 template with agent-network SVG + warm/cold ledger"
+    },
+    {
+      "id": "T4",
+      "title": "Repo lessons file (docs/cma-lessons.md)"
+    },
+    {
+      "id": "T5",
+      "title": "Global lessons file (~/.claude/cma-lessons.md)"
+    },
+    {
+      "id": "T6",
+      "title": "Vendor cma-run skill into .claude/skills for the second account"
+    },
+    {
+      "id": "T7",
+      "title": "install.py \u2014 non-clobbering promote-to-global"
+    },
+    {
+      "id": "T8",
+      "title": "README + .gitignore wiring"
+    },
+    {
+      "id": "T9",
+      "title": "Adversarial verification of the whole toolchain"
+    },
+    {
+      "id": "T10",
+      "title": "Fix python3 -> python note in CLAUDE.md and AGENTS.md"
+    },
+    {
+      "id": "T11",
+      "title": "Branch and commit the CMA toolchain"
+    },
+    {
+      "id": "T12",
+      "title": "Live agent-network interaction: packets, halos, live-only motion"
+    }
+  ],
+  "batches": [
+    {
+      "name": "Context",
+      "tasks": [
+        "T1"
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "tasks": [
+        "T2",
+        "T3"
+      ]
+    },
+    {
+      "name": "Lessons",
+      "tasks": [
+        "T4",
+        "T5"
+      ]
+    },
+    {
+      "name": "Distribution",
+      "tasks": [
+        "T6",
+        "T7",
+        "T8"
+      ]
+    },
+    {
+      "name": "Verify",
+      "tasks": [
+        "T9"
+      ]
+    },
+    {
+      "name": "Follow-on",
+      "tasks": [
+        "T10",
+        "T11"
+      ]
+    },
+    {
+      "name": "Live network",
+      "tasks": [
+        "T12"
+      ]
+    }
+  ]
+}

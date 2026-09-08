@@ -25,7 +25,10 @@ This project uses [Semantic Versioning](https://semver.org/).
   but always counted and disclosed, in the card's own footnote and the exported "Notes"/"Funnel"
   sheets. Exported to XLSX as a matching "Funnel" sheet in the Reports export, an "Outputs" sheet
   in the per-project XLSX/DOCX/PDF exports, and a facility-wide "Research Outputs" listing sheet
-  in the all-projects XLSX export.
+  in the all-projects XLSX export. Every surface that lists outputs — the project screen, the
+  funnel, and all three export paths — orders them by that same effective date, defined once as
+  `DB.outputEffDate()`, so an output logged today with no date set sorts above an older dated one
+  rather than falling to the bottom of the list.
 - **Charts on the Reports screen (roadmap 3.5).** Instrument Utilisation, the Funnel, and Activity
   Mix cards each gain a hand-rolled inline SVG chart (horizontal bars, a stage funnel with
   conversion labels, and a stacked bar chart with legend) directly above their existing tables —
