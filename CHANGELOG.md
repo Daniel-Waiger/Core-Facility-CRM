@@ -3,6 +3,73 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] — 2026-09-08
+
+### Added
+- **Week calendar view (roadmap 1.1).** The Calendar screen gains a Month/Week toggle alongside
+  the existing Prev/Today/Next controls. Week mode shows an hourly grid (with an all-day lane for
+  milestones and untimed bookings) for the Monday–Sunday of the current week; clicking an hour
+  slot opens a new booking pre-filled with that hour's start/end. Month and Week share one
+  milestone/meeting fetch and one event-chip renderer so the two views can never disagree, and the
+  hour-grid layout math is factored out for reuse by the resource timeline (roadmap 1.3). Also
+  fixes cancelled bookings not rendering with the cancelled style on the calendar (the month query
+  was missing `is_cancelled`).
+- **Per-instrument booking constraints (roadmap 1.3).** Instruments gain optional min/max session
+  duration, minimum gap between bookings, and minimum advance notice fields on the Add/Edit
+  Instrument modal (0 = unconstrained). `findBookingConflicts` enforces all four alongside the
+  existing overlap checks, shared by the booking modal's live advisory and its save-time hard
+  block so the two can never disagree; advance notice is skipped for notes-only edits and
+  reinstating a cancelled booking so it can't retroactively fail a slot already locked in.
+- **Per-instrument resource timeline (roadmap 1.4).** The Calendar screen gains a Timeline mode
+  alongside Month/Week: one lane per instrument across the same Monday–Sunday week as Week mode,
+  with each booking rendered as a proportional block reusing the Week grid's time-layout helpers
+  at a percent-per-hour scale. Clicking an empty slot opens a new booking pre-filled with that
+  lane's instrument as well as the date/time; retired instruments still show their booking history
+  but are excluded from that pre-fill.
+- **Recurring bookings (roadmap 1.5).** The new-booking modal gains an optional "Repeat every N
+  week(s) until" field; saving generates one occurrence per date (same BOM/pricing snapshot for
+  all), checking every date's conflicts up front so the save is all-or-nothing, with a 52-occurrence
+  sanity cap on the schedule length.
+- **Configurable pricing tiers (roadmap 2.2).** Named pricing tiers (e.g. Internal / Academia /
+  Industry) replace the binary internal/external overhead pair: each is a named overhead percent,
+  assignable per group/lab from the Group Discounts editor, with optional per-instrument rate
+  overrides. The booking cost calculator resolves a group's assigned tier (falling back to the
+  legacy Internal+External overhead sum when none is assigned, so untouched facilities are
+  unaffected) and snapshots the resolved tier and percent onto the booking at save time so past
+  costs never recompute. Existing `overhead_internal`/`overhead_external` settings migrate once
+  into two default tiers.
+- **Standalone service entries (roadmap 2.3).** Billable work can now be logged outside any
+  booking — technician time, sample prep, per-unit items — as a new `service_entries` record
+  (project/grant/person/instrument attribution, qty × rate → a frozen cost snapshot). Entries
+  follow the same cancel-with-optional-billing-retained pattern as bookings, are counted into
+  Project Costs, Reports & Utilization (new Standalone Service Entries card), and the XLSX/DOCX/PDF
+  exports alongside meetings, and count toward person/instrument/project/grant reference checks so
+  a referenced record retires/archives instead of deleting.
+
+### Fixed
+- **Service Entries table columns aligned.** The Reports table's rows rendered quantity and unit
+  in one cell under separate Qty/Unit headers, shifting Total and Actions under the wrong headers.
+- **Retired timeline lanes no longer claim an instrument prefill.** An empty slot in a retired
+  instrument's lane now omits the instrument from the click-to-book shortcut's markup and tooltip,
+  matching the documented intent (the picker would exclude the retired instrument anyway).
+- **Editing a service entry keeps its date.** Clearing the Date field while editing stored an
+  empty date that fell outside every Reports date-range filter, hiding the entry from ranged
+  reports and exports; it now defaults to today, exactly as creating one does.
+- **Archive dialog no longer credits all billing to bookings.** The preserved-billing figure
+  includes service entries, and the copy now says so.
+- **The 23:00 calendar slot no longer prefills a 59-minute booking.** The last hour slot in the
+  week view and timeline leaves the end time blank instead of forcing 23:59, which could trip a
+  60-minute minimum-duration constraint before the user touched anything.
+- **Zero-length or inverted booking windows are rejected.** An end time at or before the start
+  slipped past every conflict and constraint check (nothing could overlap an empty window); the
+  live advisory and the save gate now flag it.
+- **Calendar hour slots are keyboard-accessible.** Week-view and timeline click-to-book slots take
+  focus, respond to Enter/Space, and carry accessible labels for screen readers. The week view's
+  all-day columns got the same treatment.
+- **Cancelling or reinstating a service entry closes the right modal.** Both flows closed the
+  first open overlay instead of the topmost one, which could dismiss a parent modal when dialogs
+  were stacked.
+
 ## [1.6.0] — 2026-09-07
 
 ### Added

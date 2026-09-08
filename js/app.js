@@ -868,6 +868,17 @@
 
   /* ---------------- Global Event Delegation ---------------- */
   function wireGlobal() {
+    // Keyboard parity for non-native data-act controls (e.g. the calendar hour slots, which are
+    // divs with role="button" tabindex="0"): Enter/Space activates them by re-dispatching a click
+    // into the delegated handler below. Native buttons/links fire click on Enter themselves and
+    // are skipped so they don't activate twice.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const el = e.target.closest('[role="button"][data-act]');
+      if (!el || el.matches('button, a, input, select, textarea')) return;
+      e.preventDefault();
+      el.click();
+    });
     document.addEventListener('click', (e) => {
       const goto = e.target.closest('[data-goto]');
       if (goto && !e.target.closest('[data-act]')) {
@@ -928,12 +939,21 @@
       case 'save-group-discounts': return saveGroupDiscounts();
       case 'rename-org': return renameOrgFromSettings();
       case 'save-grant-display': return saveGrantDisplay();
+
+      // Pricing Tiers CRUD (Settings)
+      case 'add-tier': return addPricingTier();
+      case 'pt-save': return ptSave();
+      case 'edit-tier': return editPricingTier(el.dataset.id);
+      case 'pt-edit-save': return ptEditSave(el.dataset.id);
+      case 'retire-tier': return retirePricingTier(el.dataset.id);
+      case 'restore-tier': return restorePricingTier(el.dataset.id);
       case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
       case 'disable-auto-backup-folder': return disableAutoBackupFolder();
       case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
       case 'cal-prev': return Views.navCalendar(-1);
       case 'cal-next': return Views.navCalendar(1);
-      case 'cal-today': return Views.navCalendar(0);
+      case 'cal-today': return Views.calToday();
+      case 'cal-mode': return Views.setCalMode(el.dataset.mode);
       case 'open-today-modal': return openTodayModal();
       case 'close': {
         // Close the TOPMOST modal (so a nested "+ Add New" / "Register person" modal
@@ -973,6 +993,14 @@
       case 'g-edit-save': return gEditSave(el.dataset.id);
       case 'retire-grant': return retireGrant(el.dataset.id);
       case 'restore-grant': return restoreGrant(el.dataset.id);
+
+      // Service Entries CRUD (roadmap 2.3)
+      case 'add-service-entry': return newServiceEntry(el.dataset.projectId || ctx.project);
+      case 'se-save': return seSave();
+      case 'edit-service-entry': return editServiceEntry(el.dataset.id);
+      case 'se-edit-save': return seEditSave(el.dataset.id);
+      case 'se-cancel': return cancelServiceEntry(el.dataset.id);
+      case 'se-reinstate': return reinstateServiceEntry(el.dataset.id);
 
       // Clipboard
       case 'copy': return UI.copyToClipboard(el.dataset.copy, el.dataset.copyLabel || 'Copied to clipboard');
@@ -1018,7 +1046,7 @@
       case 'restore-instrument': return restoreInstrument(el.dataset.id);
 
       // Bookings (Meetings) CRUD
-      case 'new-booking': return newBooking(el.dataset.date, ctx.project);
+      case 'new-booking': return newBooking(el.dataset.date, ctx.project, el.dataset.start, el.dataset.end, el.dataset.inst);
       case 'add-meeting': return newBooking(UI.today(), ctx.project);
       case 'booking-save': return bookingSave();
       case 'edit-booking': return editBooking(el.dataset.id);
@@ -1325,6 +1353,10 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
+      // service_entries.project_id normally carries ON DELETE SET NULL, but countProjectRefs now
+      // counts entries too, so this branch only runs when there are none anyway — the explicit
+      // delete is the same belt-and-suspenders convention every other delete path here follows.
+      DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
       DB.run('DELETE FROM projects WHERE id=?', [pid]);
       UI.toast('Project deleted');
       route('projects');
@@ -1337,9 +1369,10 @@
     if (refs.instruments) holds.push(plural(refs.instruments, 'assigned instrument'));
     if (refs.milestones) holds.push(plural(refs.milestones, 'milestone'));
     if (refs.bookings) holds.push(plural(refs.bookings, 'booking'));
+    if (refs.entries) holds.push(refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
     if (refs.files) holds.push(plural(refs.files, 'file'));
     if (refs.fields) holds.push(plural(refs.fields, 'custom field'));
-    const billed = refs.billed > 0 ? ` Its bookings account for ${fmtMoney(refs.billed)} of billing, which stays on the record.` : '';
+    const billed = refs.billed > 0 ? ` It carries ${fmtMoney(refs.billed)} of billing (bookings and service entries), which stays on the record.` : '';
 
     const ok = await UI.confirmModal(
       'Archive Project',
@@ -1705,6 +1738,11 @@
       // follows.
       DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
       DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
+      // service_entries.person_id is a soft link (no REFERENCES) like instrument_staff/grant_users
+      // above — a person with zero "real" refs (countPersonRefs now counts entries too, so this
+      // branch is only reached when there genuinely are none) can't hold one, but the explicit
+      // clear is the same belt-and-suspenders convention every delete path here follows.
+      DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
       DB.run('DELETE FROM people WHERE id=?', [id]);
       UI.toast('Person deleted');
       refresh();
@@ -1718,6 +1756,7 @@
     if (refs.milestones) where.push('owner of ' + plural(refs.milestones, 'milestone'));
     if (refs.bookings) where.push('an attendee on ' + plural(refs.bookings, 'booking'));
     if (refs.staffed) where.push('billable staff on ' + plural(refs.staffed, 'booking'));
+    if (refs.entries) where.push('performing staff on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
 
     const ok = await UI.confirmModal(
       'Retire Person',
@@ -1754,6 +1793,14 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="i-cost" placeholder="0" /></div>
           ${vocabField({ category: 'UNIT', id: 'i-cost-unit', label: 'Billed per', selected: 'time', placeholder: '-- Select Unit --' })}
         </div>
+        <div class="field"><label>Booking Constraints</label>
+          <div class="grid cols-4">
+            <div class="field"><label class="small">Min Duration (mins)</label><input type="number" min="0" step="1" class="input" id="i-min-duration" placeholder="0" data-tooltip="0 = no minimum" /></div>
+            <div class="field"><label class="small">Max Duration (mins)</label><input type="number" min="0" step="1" class="input" id="i-max-duration" placeholder="0" data-tooltip="0 = no maximum" /></div>
+            <div class="field"><label class="small">Min Gap (mins)</label><input type="number" min="0" step="1" class="input" id="i-min-gap" placeholder="0" data-tooltip="Minimum gap required before/after another booking on this instrument. 0 = no minimum" /></div>
+            <div class="field"><label class="small">Min Notice (hours)</label><input type="number" min="0" step="any" class="input" id="i-min-notice" placeholder="0" data-tooltip="Minimum advance notice required before a booking's start time. 0 = no minimum" /></div>
+          </div>
+        </div>
         ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
       </div></div>
       <div class="foot">
@@ -1768,9 +1815,11 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#i-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)',
+    DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
-       Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time']);
+       Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time',
+       Number(m.querySelector('#i-min-duration').value) || 0, Number(m.querySelector('#i-max-duration').value) || 0,
+       Number(m.querySelector('#i-min-gap').value) || 0, Number(m.querySelector('#i-min-notice').value) || 0]);
     const iid = DB.q1('SELECT last_insert_rowid()')[0];
     readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
     UI.closeDim(m.closest('.modal-dim'));
@@ -1778,10 +1827,37 @@
     refresh();
   }
 
+  // Admin-gated per-tier rate override table (roadmap 2.2), same admin-mode gate as the Group
+  // Discounts editor and the booking modal's manual discount override. "selectable" here isn't a
+  // picker rule (there's no join row to silently drop) — but a tier this instrument already has an
+  // override for stays listed even if it's since been retired, same union-with-current reasoning,
+  // so a retired tier's saved rate is still visible (and still an explicit blank-to-clear away from
+  // reverting to the plain Cost above) rather than just vanishing from the form.
+  function instrumentTierRatesHtml(inst) {
+    const overrides = DB.listInstrumentTierRates(inst.id);
+    const overrideMap = {};
+    overrides.forEach((o) => { overrideMap[o.tier_id] = o.cost; });
+    const overrideIds = Object.keys(overrideMap).map(Number);
+    const extraClause = overrideIds.length ? ` OR id IN (${overrideIds.map(() => '?').join(',')})` : '';
+    const tiers = DB.rows(`SELECT id, name, is_retired FROM pricing_tiers WHERE is_retired=0${extraClause} ORDER BY is_retired, name`, overrideIds);
+    if (!tiers.length) return '';
+    return `
+    <div class="field mt-8">
+      <label>Per-Tier Rate Overrides <span class="faint">(admin — blank uses the Cost above for that tier)</span></label>
+      ${tiers.map((t) => `
+        <div class="row mb-8" style="gap:8px;align-items:center">
+          <span class="grow small">${esc(UI.retiredName(t.name, t.is_retired))}</span>
+          <input type="number" min="0" step="any" class="input tier-rate-input" data-tier-id="${t.id}"
+            value="${overrideMap[t.id] != null ? overrideMap[t.id] : ''}" placeholder="Default: ${inst.cost || 0}" style="width:130px" />
+        </div>`).join('')}
+    </div>`;
+  }
+
   function editInstrument(id) {
     const inst = DB.row('SELECT * FROM instruments WHERE id=?', [id]);
     if (!inst) return;
     const currentSupervisors = DB.rows('SELECT person_id FROM instrument_staff WHERE instrument_id=?', [id]).map((r) => r.person_id);
+    const adminOn = UI.storage.getItem('admin-mode') === '1';
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Instrument</span></div>
@@ -1797,7 +1873,16 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="ie-cost" value="${inst.cost || 0}" /></div>
           ${vocabField({ category: 'UNIT', id: 'ie-cost-unit', label: 'Billed per', selected: inst.cost_unit || 'time', placeholder: '-- Select Unit --' })}
         </div>
+        <div class="field"><label>Booking Constraints</label>
+          <div class="grid cols-4">
+            <div class="field"><label class="small">Min Duration (mins)</label><input type="number" min="0" step="1" class="input" id="ie-min-duration" value="${inst.min_duration_mins || 0}" data-tooltip="0 = no minimum" /></div>
+            <div class="field"><label class="small">Max Duration (mins)</label><input type="number" min="0" step="1" class="input" id="ie-max-duration" value="${inst.max_duration_mins || 0}" data-tooltip="0 = no maximum" /></div>
+            <div class="field"><label class="small">Min Gap (mins)</label><input type="number" min="0" step="1" class="input" id="ie-min-gap" value="${inst.min_gap_mins || 0}" data-tooltip="Minimum gap required before/after another booking on this instrument. 0 = no minimum" /></div>
+            <div class="field"><label class="small">Min Notice (hours)</label><input type="number" min="0" step="any" class="input" id="ie-min-notice" value="${inst.min_notice_hours || 0}" data-tooltip="Minimum advance notice required before a booking's start time. 0 = no minimum" /></div>
+          </div>
+        </div>
         ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
+        ${adminOn ? instrumentTierRatesHtml(inst) : ''}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
@@ -1812,11 +1897,23 @@
     const m = document.querySelector('.modal');
     const name = m.querySelector('#ie-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=? WHERE id=?',
+    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
       [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
-       Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time', id]);
+       Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time',
+       Number(m.querySelector('#ie-min-duration').value) || 0, Number(m.querySelector('#ie-max-duration').value) || 0,
+       Number(m.querySelector('#ie-min-gap').value) || 0, Number(m.querySelector('#ie-min-notice').value) || 0, id]);
     DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
     readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
+    // Per-tier rate overrides — admin-gated, so these inputs simply don't exist in the DOM when
+    // admin mode is off, and this loop is then a no-op that leaves any existing overrides alone
+    // (unlike the supervisor picker above, this is NOT rebuilt-from-form on every save: a form
+    // that never shows the override rows to a non-admin editor must not be read as "no overrides").
+    m.querySelectorAll('.tier-rate-input').forEach((inp) => {
+      const tierId = Number(inp.dataset.tierId);
+      const v = inp.value.trim();
+      if (v === '') DB.deleteInstrumentTierRate(id, tierId);
+      else DB.setInstrumentTierRate(id, tierId, Number(v) || 0);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
     refresh();
@@ -1836,11 +1933,17 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
-      // instrument_staff isn't counted in countInstrumentRefs (supervision is current assignment,
-      // not history — see db.js), so an instrument with zero "real" refs can still have a
-      // supervisor. Cascade would catch this too, but the explicit delete is the
-      // belt-and-suspenders convention every other delete path here follows.
+      // instrument_staff and instrument_tier_rates aren't counted in countInstrumentRefs
+      // (supervision and per-tier rate overrides are current configuration, not history — see
+      // db.js), so an instrument with zero "real" refs can still have either. Cascade would catch
+      // this too, but the explicit delete is the belt-and-suspenders convention every other delete
+      // path here follows.
       DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+      DB.run('DELETE FROM instrument_tier_rates WHERE instrument_id=?', [id]);
+      // service_entries.instrument_id is a soft link (no REFERENCES), same reasoning as above —
+      // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
+      // but the explicit clear is the same belt-and-suspenders convention as every other field here.
+      DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
       DB.run('DELETE FROM instruments WHERE id=?', [id]);
       UI.toast('Instrument deleted');
       refresh();
@@ -1852,6 +1955,7 @@
     if (refs.projects) where.push('assigned to ' + plural(refs.projects, 'project'));
     if (refs.milestones) where.push('used by ' + plural(refs.milestones, 'milestone'));
     if (refs.bookings) where.push('booked on ' + plural(refs.bookings, 'booking'));
+    if (refs.entries) where.push('attributed on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
 
     const ok = await UI.confirmModal(
       'Retire Instrument',
@@ -2354,6 +2458,10 @@
     filterOwnerPickerByGroup(m, org, ids);
     m._bom.groupOrg = org || '';
     m._bom.groupPct = DB.getGroupDiscount(org);
+    // The group's pricing tier can override an assigned instrument's displayed per-unit rate
+    // (renderBomRows), not just the computed total (recomputeBomTotals) — re-render the rows so
+    // both agree whenever the group (and with it, the resolved tier) changes.
+    renderBomRows(m, ids);
     recomputeBomTotals(m, ids);
   }
 
@@ -2367,6 +2475,10 @@
     filterOwnerPickerByGroup(m, org, ids);
     m._bom.groupOrg = org || '';
     m._bom.groupPct = pct || 0;
+    // Same reasoning as offerGroupDiscount above: the initial refreshBom() ran before the group
+    // (and its tier, if any) was known, so the instrument rows still need to pick up any per-tier
+    // rate override before their displayed per-unit cost matches what recomputeBomTotals bills.
+    renderBomRows(m, ids);
     recomputeBomTotals(m, ids);
   }
 
@@ -2425,6 +2537,11 @@
     const staffIds = readTokenIds(m, 'staff');
     const instItems = instIds.length ? DB.rows(`SELECT id, name, cost, cost_unit FROM instruments WHERE id IN (${instIds.map(() => '?').join(',')})`, instIds) : [];
     const staffItems = staffIds.length ? DB.rows(`SELECT id, name, rate FROM people WHERE id IN (${staffIds.map(() => '?').join(',')})`, staffIds) : [];
+    // A per-tier instrument rate override (instrument_tier_rates), when the current group/lab is
+    // assigned a tier, replaces the instrument's own cost — same resolution recomputeBomTotals
+    // and seedBooking apply, so the displayed rate always matches what the line actually bills at.
+    const tierForCost = DB.getTierForOrg(m._bom.groupOrg);
+    if (tierForCost) instItems.forEach((it) => { it.cost = DB.resolveInstrumentCost(it.id, it.cost, tierForCost.tier_id); });
 
     // Drop stashed values for ids that are no longer selected (their row is gone); keep the
     // rest so amounts/partial-times typed for still-selected items survive this rebuild.
@@ -2472,21 +2589,31 @@
     const start = (m.querySelector('#' + ids.start) || {}).value || '';
     const end = (m.querySelector('#' + ids.end) || {}).value || '';
 
-    const instrumentsForCalc = instItems.map((it) => Object.assign({}, it, { amount: m._bom.instrAmounts[it.id] || 0 }));
+    // Resolve the ONE overhead percent that applies — the group/lab's assigned pricing tier, or
+    // (no tier assigned) the legacy Internal+External overhead sum — in this one caller, per
+    // CLAUDE.md/roadmap 2.2: computeBookingBOM itself just does arithmetic on whatever it's handed.
+    const resolvedOverhead = DB.resolveOverheadForOrg(m._bom.groupOrg);
+    const instrumentsForCalc = instItems.map((it) => Object.assign({}, it, {
+      amount: m._bom.instrAmounts[it.id] || 0,
+      cost: DB.resolveInstrumentCost(it.id, it.cost, resolvedOverhead.tierId)
+    }));
     const staffForCalc = staffItems.map((p) => {
       const win = m._bom.staffWindows[p.id] || {};
       return Object.assign({}, p, { start: win.start || '', end: win.end || '' });
     });
 
     const rates = {
-      ohInternal: DB.getConfigNum('overhead_internal', 0),
-      ohExternal: DB.getConfigNum('overhead_external', 0),
+      overheadPct: resolvedOverhead.overheadPct,
       taxPct: DB.getConfigNum('tax_pct', 0)
     };
     const bom = UI.computeBookingBOM({
       start, end, instruments: instrumentsForCalc, staff: staffForCalc,
       groupPct: m._bom.groupPct || 0, manualPct: m._bom.manualPct || 0, rates
     });
+    // Snapshot columns bookingSave/bookingEditSave/insertBookingRow write onto the meetings row
+    // alongside the money — null/null together means this booking priced via the legacy fallback.
+    bom.tierId = resolvedOverhead.tierId;
+    bom.tierOverheadPct = resolvedOverhead.tierOverheadPct;
     m._bom.last = bom; // read back at save time so the stored total matches what's on screen
 
     bom.instrumentLines.forEach((line) => {
@@ -2535,11 +2662,17 @@
         <span class="row" style="gap:8px;align-items:center">${groupControl}<span class="mono">−${fmtMoney(groupAmt)}</span></span>
       </div>`;
 
+      // Named tier when the group/lab has one assigned; otherwise this is the legacy
+      // Internal+External fallback sum, with nothing further to name.
+      const overheadLabel = bom.tierId
+        ? `Overhead (${esc(DB.tierLabel(bom.tierId))} tier, ${bom.overheadPct}%)`
+        : `Overhead (${bom.overheadPct}%)`;
+
       summaryEl.innerHTML =
         row('Subtotal', fmtMoney(bom.subtotal)) +
         groupRow +
         (bom.manualPct ? row(`Manual discount (${bom.manualPct}%)`, '−' + fmtMoney(manualAmt)) : '') +
-        row(`Overhead (${bom.ohInternal + bom.ohExternal}%)`, '+' + fmtMoney(bom.overheadAmt)) +
+        row(overheadLabel, '+' + fmtMoney(bom.overheadAmt)) +
         row('Before tax', fmtMoney(bom.beforeTax), { strong: true }) +
         row(`Tax (${bom.taxPct}%)`, '+' + fmtMoney(bom.taxAmt)) +
         row('Total', fmtMoney(bom.total), { strong: true, big: true });
@@ -2567,7 +2700,15 @@
     if (!start || !end) { host.innerHTML = ''; return; }
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
-    const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds });
+    // Mirror bookingEditSave's skipNotice exactly: a notes-only edit (date/start unchanged from
+    // what's stored) shouldn't show a notice-advisory warning that bookingEditSave itself won't
+    // enforce at save time either, or the advisory would drift from the hard gate.
+    let skipNotice = false;
+    if (ids.excludeId) {
+      const stored = DB.row('SELECT date, start_time FROM meetings WHERE id=?', [ids.excludeId]) || {};
+      skipNotice = stored.date === date && (stored.start_time || '') === start;
+    }
+    const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds, skipNotice });
     if (!conflicts.length) {
       host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>`;
       return;
@@ -2639,8 +2780,15 @@
   // strings, and lexical string comparison already sorts them chronologically, so no time
   // parsing is needed in the SQL itself: two windows overlap unless one ends at/before the
   // other starts.
-  function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds }) {
+  function findBookingConflicts({ date, start, end, excludeId, instrumentIds, staffIds, skipNotice }) {
     if (!start || !end) return [];
+    // An inverted or zero-length window would sail through every check below — the overlap SQL's
+    // NOT(end <= ? OR start >= ?) can't match against it and hoursBetween() reports 0 — so it has
+    // to be rejected here, where the advisory, both save gates, and reinstate all inherit it.
+    if (UI.timeToMinutes(end) != null && UI.timeToMinutes(start) != null &&
+        UI.timeToMinutes(end) <= UI.timeToMinutes(start)) {
+      return ['End time must be after the start time'];
+    }
     // is_cancelled=0: a cancelled booking has given its slot back, so it never blocks a new one.
     const overlapSql = `m.date = ? AND m.id != ? AND m.is_cancelled = 0 AND m.start_time != '' AND m.end_time != '' AND NOT (m.end_time <= ? OR m.start_time >= ?)`;
     const conflicts = [];
@@ -2660,12 +2808,64 @@
         [...staffIds, date, excludeId || 0, start, end]
       ).forEach((r) => conflicts.push(`${r.name} is already booked ${r.start_time}–${r.end_time} on "${r.title}"`));
     }
+
+    // Per-instrument booking constraints (min/max duration, minimum gap between bookings, minimum
+    // advance notice) — all zero = unconstrained. Duration and gap always apply; notice can be
+    // skipped for edits that don't touch date/time (see bookingEditSave/reinstateBooking) so
+    // history can still be annotated after the fact without retroactively failing a notice window.
+    if (instrumentIds && instrumentIds.length && date) {
+      const durationMins = UI.hoursBetween(start, end) * 60;
+      const rows = DB.rows(`
+        SELECT id, name, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours
+        FROM instruments WHERE id IN (${instrumentIds.map(() => '?').join(',')})`, instrumentIds);
+      rows.forEach((inst) => {
+        if (inst.min_duration_mins > 0 && durationMins < inst.min_duration_mins) {
+          conflicts.push(`${inst.name} requires a minimum booking duration of ${inst.min_duration_mins} minutes`);
+        }
+        if (inst.max_duration_mins > 0 && durationMins > inst.max_duration_mins) {
+          conflicts.push(`${inst.name} allows a maximum booking duration of ${inst.max_duration_mins} minutes`);
+        }
+        if (inst.min_gap_mins > 0) {
+          const neighbors = DB.rows(`
+            SELECT m.start_time, m.end_time
+            FROM meeting_instruments mi JOIN meetings m ON m.id = mi.meeting_id
+            WHERE mi.instrument_id = ? AND m.date = ? AND m.id != ? AND m.is_cancelled = 0
+              AND m.start_time != '' AND m.end_time != ''`,
+            [inst.id, date, excludeId || 0]);
+          const startMin = UI.timeToMinutes(start), endMin = UI.timeToMinutes(end);
+          const gapViolation = neighbors.some((n) => {
+            const nStart = UI.timeToMinutes(n.start_time), nEnd = UI.timeToMinutes(n.end_time);
+            if (nStart == null || nEnd == null || startMin == null || endMin == null) return false;
+            // Overlaps are already reported above; only flag a neighbor that's fully outside this
+            // window but too close on either side.
+            if (nEnd <= startMin && startMin - nEnd < inst.min_gap_mins) return true;
+            if (nStart >= endMin && nStart - endMin < inst.min_gap_mins) return true;
+            return false;
+          });
+          if (gapViolation) conflicts.push(`${inst.name} requires at least ${inst.min_gap_mins} minutes between bookings`);
+        }
+        if (!skipNotice && inst.min_notice_hours > 0) {
+          const t = /^\d{1,2}:\d{2}$/.test(start) ? start : '00:00';
+          const startDt = new Date(date + 'T' + (t.length === 4 ? '0' + t : t) + ':00');
+          if (!isNaN(startDt.getTime())) {
+            const noticeHours = (startDt.getTime() - Date.now()) / 3600000;
+            if (noticeHours < inst.min_notice_hours) {
+              conflicts.push(`${inst.name} requires at least ${inst.min_notice_hours} hours advance notice`);
+            }
+          }
+        }
+      });
+    }
+
     return conflicts;
   }
 
-  function newBooking(date, projectId = null) {
+  function newBooking(date, projectId = null, start = '', end = '', instrumentId = null) {
     const allProjects = DB.rows('SELECT id, title FROM projects ORDER BY title');
     const pid = projectId != null ? Number(projectId) : null;
+    // Clicking an empty slot in the resource timeline passes the lane's instrument through here
+    // so the new booking starts pre-locked to it (mountBookingModal -> opts.insts -> _setSelected).
+    const instId = instrumentId != null && instrumentId !== '' ? Number(instrumentId) : null;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
 
     UI.openModal(`
@@ -2674,8 +2874,18 @@
         <div class="field"><label>Title *</label><input class="input" id="bk-title" placeholder="e.g. Initial Image Analysis Pipeline Sync" /></div>
         <div class="grid cols-3">
           <div class="field"><label>Date</label><input type="date" class="input" id="bk-date" value="${esc(date || UI.today())}" /></div>
-          <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" /></div>
-          <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" /></div>
+          <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" value="${esc(start || '')}" /></div>
+          <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" value="${esc(end || '')}" /></div>
+        </div>
+        <div class="field">
+          <label>Repeat (optional)</label>
+          <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+            <span class="small">every</span>
+            <input type="number" class="input" id="bk-repeat-weeks" min="1" step="1" value="1" style="width:70px" />
+            <span class="small">week(s) until</span>
+            <input type="date" class="input" id="bk-repeat-until" style="width:170px" />
+            <span class="small faint">(blank = no repeat)</span>
+          </div>
         </div>
         <div class="grid cols-4">
           <div class="field">
@@ -2708,7 +2918,30 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' }, insts: instId ? [instId] : undefined }));
+  }
+
+  // Cap on how many occurrences a single "Repeat" save can create — a sanity backstop against a
+  // typo'd "until" date decades out, not a real product limit (~1 year of weekly bookings).
+  const MAX_RECURRING_OCCURRENCES = 52;
+
+  // Weekly/every-N-weeks occurrence dates from `startDate` (inclusive) through `untilDate`
+  // (inclusive), as local 'YYYY-MM-DD' strings. Built from parts (never `new Date('YYYY-MM-DD')`,
+  // which parses as UTC) and advanced with setDate — the safe way to add whole weeks across
+  // month/DST boundaries. Returns [startDate] when `untilDate` is blank (no repeat).
+  function computeRecurringDates(startDate, everyWeeks, untilDate) {
+    const dates = [startDate];
+    if (!untilDate) return dates;
+    const weeks = Math.max(1, parseInt(everyWeeks, 10) || 1);
+    const [y, mo, d] = startDate.split('-').map(Number);
+    let cur = new Date(y, mo - 1, d);
+    while (dates.length < MAX_RECURRING_OCCURRENCES + 1) {
+      cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 7 * weeks);
+      const next = UI.ymd(cur);
+      if (next > untilDate) break;
+      dates.push(next);
+    }
+    return dates;
   }
 
   function bookingSave() {
@@ -2732,8 +2965,40 @@
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
 
-    const conflicts = findBookingConflicts({ date, start, end, instrumentIds: instIds, staffIds });
-    if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
+    const repeatWeeksEl = m.querySelector('#bk-repeat-weeks');
+    const repeatUntilEl = m.querySelector('#bk-repeat-until');
+    const repeatUntil = repeatUntilEl ? repeatUntilEl.value || '' : '';
+    const repeatWeeks = repeatWeeksEl ? repeatWeeksEl.value : 1;
+
+    let dates;
+    if (repeatUntil) {
+      if (repeatUntil < date) { UI.toast('"Repeat until" date must be on or after the booking date', 'error'); return; }
+      dates = computeRecurringDates(date, repeatWeeks, repeatUntil);
+      if (dates.length > MAX_RECURRING_OCCURRENCES) {
+        UI.toast(`That repeat schedule would create ${dates.length} bookings — the max is ${MAX_RECURRING_OCCURRENCES}. Choose a shorter "until" date.`, 'error');
+        return;
+      }
+    } else {
+      dates = [date];
+    }
+
+    // All-or-nothing: every occurrence is conflict-checked (constraint checks included, via
+    // findBookingConflicts) BEFORE any row is inserted, so a conflict on occurrence #7 never
+    // leaves #1-6 half-created. Single (non-repeating) saves keep today's exact toast wording.
+    if (dates.length === 1) {
+      const conflicts = findBookingConflicts({ date: dates[0], start, end, instrumentIds: instIds, staffIds });
+      if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
+    } else {
+      const conflictsByDate = [];
+      dates.forEach((d) => {
+        const dConflicts = findBookingConflicts({ date: d, start, end, excludeId: 0, instrumentIds: instIds, staffIds });
+        if (dConflicts.length) conflictsByDate.push(`${d}: ${dConflicts.join('; ')}`);
+      });
+      if (conflictsByDate.length) {
+        UI.toast(`Conflicts on ${conflictsByDate.length} date(s) — ${conflictsByDate.join(' | ')}`, 'error');
+        return;
+      }
+    }
 
     const attendees = ownerIds.length
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
@@ -2743,22 +3008,28 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, grantId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
-    const inserted = DB.row('SELECT last_insert_rowid() as id');
-    const mid = inserted ? inserted.id : null;
-    if (mid) {
-      ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, oid]));
-      bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [mid, line.id, line.amount || 0, line.line]));
-      bom.staffLines.forEach((line) => {
-        const win = m._bom.staffWindows[line.id] || {};
-        DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [mid, line.id, win.start || '', win.end || '', line.line]);
-      });
+    // Same BOM snapshot (rates read once, at save time) for every occurrence — deliberate:
+    // identical recurring sessions are priced at today's rates, not recomputed per occurrence.
+    function insertBookingRow(dateStr) {
+      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct]);
+      const inserted = DB.row('SELECT last_insert_rowid() as id');
+      const mid = inserted ? inserted.id : null;
+      if (mid) {
+        ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, oid]));
+        bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [mid, line.id, line.amount || 0, line.line]));
+        bom.staffLines.forEach((line) => {
+          const win = m._bom.staffWindows[line.id] || {};
+          DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [mid, line.id, win.start || '', win.end || '', line.line]);
+        });
+      }
     }
 
+    dates.forEach((d) => insertBookingRow(d));
+
     UI.closeDim(m.closest('.modal-dim'));
-    UI.toast('Booking saved');
+    UI.toast(dates.length > 1 ? `${dates.length} bookings created` : 'Booking saved');
     refresh();
   }
 
@@ -2846,7 +3117,14 @@
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
 
-    const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds });
+    // A notes-only edit (date and start time both unchanged) shouldn't retroactively fail the
+    // minimum-advance-notice check — that constraint is about giving the facility warning before
+    // a NEW time is committed to, not about blocking edits to a booking whose slot was already
+    // locked in. Duration and gap constraints still apply regardless.
+    const stored = DB.row('SELECT date, start_time FROM meetings WHERE id=?', [id]) || {};
+    const skipNotice = stored.date === date && (stored.start_time || '') === start;
+
+    const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds, skipNotice });
     if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
 
     const attendees = ownerIds.length
@@ -2858,8 +3136,9 @@
     const bom = m._bom.last;
 
     DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
-              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, id]);
+              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
+              tier_id=?, tier_overhead_pct=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
@@ -2999,7 +3278,7 @@
     const staffIds = DB.rows('SELECT person_id FROM meeting_staff WHERE meeting_id=?', [id]).map((r) => r.person_id);
     const conflicts = findBookingConflicts({
       date: mt.date, start: mt.start_time, end: mt.end_time, excludeId: id,
-      instrumentIds: instIds, staffIds
+      instrumentIds: instIds, staffIds, skipNotice: true
     });
     if (conflicts.length) {
       UI.toast('Cannot reinstate — ' + conflicts.join('; '), 'error');
@@ -3282,14 +3561,15 @@
     refresh();
   }
 
+  // Overhead is no longer set here (roadmap 2.2 replaced the flat Internal/External pair with
+  // named Pricing Tiers, below) — this now only writes the two rates every booking still applies
+  // the same way regardless of tier: tax and the currency symbol. The legacy overhead_internal/
+  // overhead_external app_config keys are left exactly as migrate() found or seeded them; they're
+  // still read by DB.resolveOverheadForOrg as the fallback for any lab with no tier assigned.
   function saveBillingRates() {
-    const internalEl = document.getElementById('cfg-overhead-internal');
-    const externalEl = document.getElementById('cfg-overhead-external');
     const taxEl = document.getElementById('cfg-tax');
     const curEl = document.getElementById('cfg-currency');
-    if (!internalEl) return;
-    DB.setConfig('overhead_internal', Number(internalEl.value) || 0);
-    DB.setConfig('overhead_external', Number(externalEl.value) || 0);
+    if (!taxEl) return;
     DB.setConfig('tax_pct', Number(taxEl.value) || 0);
     DB.setConfig('currency', curEl.value.trim() || '$');
     UI.toast('Billing rates saved');
@@ -3311,11 +3591,18 @@
     refresh();
   }
 
+  // Saves both the standing discount inputs AND the per-org pricing-tier <select>s the Settings
+  // Group Discounts editor renders side by side (one button, one save, same as before this
+  // feature) — a blank tier selection clears the org's assignment (DB.setGroupTier deletes the
+  // row rather than storing a null, so it falls back to the legacy overhead sum, see db.js).
   function saveGroupDiscounts() {
     document.querySelectorAll('.group-discount-input').forEach((inp) => {
       DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0);
     });
-    UI.toast('Group discounts saved');
+    document.querySelectorAll('.group-tier-select').forEach((sel) => {
+      DB.setGroupTier(sel.dataset.org, sel.value ? Number(sel.value) : null);
+    });
+    UI.toast('Group discounts & tiers saved');
     refresh();
   }
 
@@ -3332,6 +3619,11 @@
         parts.push(targetExists
           ? `its discount row will be dropped — <strong>${esc(newName)}</strong> already has its own standing discount, which is kept`
           : `its standing discount row moves to <strong>${esc(newName)}</strong>`);
+      }
+      if (refs.hasTier) {
+        parts.push(targetExists
+          ? `its pricing tier assignment will be dropped — <strong>${esc(newName)}</strong> already has its own tier, which is kept`
+          : `its pricing tier assignment moves to <strong>${esc(newName)}</strong>`);
       }
       const m = UI.openModal(`
         <div class="head"><span class="t" style="font-weight:600">${targetExists ? 'Merge' : 'Rename'} Lab / Group?</span></div>
@@ -3371,6 +3663,8 @@
     const bits = [`${result.peopleCount} ${result.peopleCount === 1 ? 'person' : 'people'}`, `${result.bookingsCount} booking${result.bookingsCount === 1 ? '' : 's'}`];
     if (result.merged) bits.push('discount merged');
     else if (result.discountMoved) bits.push('discount moved');
+    if (result.tierMerged) bits.push('tier merged');
+    else if (result.tierMoved) bits.push('tier moved');
     UI.toast(`Renamed ${oldName} → ${newName}: ${bits.join(', ')}`);
     refresh();
   }
@@ -3515,6 +3809,10 @@
       // clause (matches the projects.pi_id precedent) so cascade wouldn't null it out anyway.
       DB.run('UPDATE meetings SET grant_id=NULL WHERE grant_id=?', [id]);
       DB.run('UPDATE projects SET grant_id=NULL WHERE grant_id=?', [id]);
+      // service_entries.grant_id is the same soft link (no REFERENCES) as the two columns above —
+      // countGrantRefs now counts entries too, so this only runs when there are none, but the
+      // explicit null-out is the same belt-and-suspenders convention as the rest of this branch.
+      DB.run('UPDATE service_entries SET grant_id=NULL WHERE grant_id=?', [id]);
       DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
       DB.run('DELETE FROM grants WHERE id=?', [id]);
       UI.toast('Grant deleted');
@@ -3526,6 +3824,7 @@
     const where = [];
     if (refs.projects) where.push('billed on ' + plural(refs.projects, 'project'));
     if (refs.bookings) where.push('billed on ' + plural(refs.bookings, 'booking'));
+    if (refs.entries) where.push('billed on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
 
     const ok = await UI.confirmModal(
       'Retire Grant',
@@ -3546,11 +3845,385 @@
     refresh();
   }
 
+  /* ---------------- Service Entries CRUD (roadmap 2.3) ----------------
+     A standalone billable line item outside any booking — technician time, sample prep, per-unit
+     items. Same Project Costs counting rule as a booking's cost snapshot (is_cancelled &&
+     !billing_retained ⇒ 0), but no denormalized display columns: every render resolves staff/
+     instrument/grant fresh via a join, same as a booking's grant_id. total_cost is a SNAPSHOT
+     (qty*rate at save time) computed here and in seedSampleData ONLY — never recomputed by
+     reports/exports, matching every other cost snapshot in this app. */
+
+  // Performing-staff <select> options: selectable = Facility Staff AND not retired, OR already
+  // the value on the entry being edited (`currentId`) — same "selectable = not retired OR already
+  // selected" rule as bkStaffItems, applied to a plain <select> since an entry has at most one
+  // performing staff member. data-rate on each option feeds the live rate prefill on selection.
+  function serviceStaffSelectOptions(currentId) {
+    return DB.rows(
+      `SELECT id, name, rate, is_retired, is_staff FROM people
+       WHERE (is_staff=1 AND is_retired=0) OR id=? ORDER BY is_retired, name`,
+      [currentId || 0]
+    );
+  }
+  function serviceStaffSelectField(id, selected) {
+    const opts = serviceStaffSelectOptions(selected);
+    return `<div class="field">
+      <label>Performing Staff</label>
+      <select class="input" id="${id}">
+        <option value="">-- None --</option>
+        ${opts.map((p) => `<option value="${p.id}" data-rate="${p.rate || 0}" ${p.id === selected ? 'selected' : ''}>${esc(UI.retiredName(p.name, p.is_retired))}${!p.is_staff && !p.is_retired ? ' (no longer Facility Staff)' : ''}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  // Same "not retired OR already selected" rule, applied to the optional Instrument <select>.
+  function serviceInstrumentSelectOptions(currentId) {
+    return DB.rows('SELECT id, name, is_retired FROM instruments WHERE is_retired=0 OR id=? ORDER BY is_retired, name', [currentId || 0]);
+  }
+  function serviceInstrumentSelectField(id, selected) {
+    const opts = serviceInstrumentSelectOptions(selected);
+    return `<div class="field">
+      <label>Instrument (optional)</label>
+      <select class="input" id="${id}">
+        <option value="">-- No Instrument --</option>
+        ${opts.map((i) => `<option value="${i.id}" ${i.id === selected ? 'selected' : ''}>${esc(UI.retiredName(i.name, i.is_retired))}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  function serviceEntryProjectOptions(selectedId) {
+    return DB.rows('SELECT id, title FROM projects ORDER BY title').map((p) =>
+      `<option value="${p.id}" ${selectedId === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('');
+  }
+
+  // Live total = qty * rate, and the Performing Staff select prefills Rate from that person's own
+  // rate whenever a different staff member is picked (people.rate — the simple, documented choice;
+  // see task notes for why a tier-resolved rate was not wired in here).
+  function recomputeServiceEntryTotal(m, prefix) {
+    const qty = Number((m.querySelector('#' + prefix + '-qty') || {}).value) || 0;
+    const rate = Number((m.querySelector('#' + prefix + '-rate') || {}).value) || 0;
+    const total = qty * rate;
+    const el = m.querySelector('#' + prefix + '-total');
+    if (el) el.textContent = fmtMoney(total);
+    return total;
+  }
+  function mountServiceEntryModal(m, prefix) {
+    const staffEl = m.querySelector('#' + prefix + '-staff');
+    const rateEl = m.querySelector('#' + prefix + '-rate');
+    const qtyEl = m.querySelector('#' + prefix + '-qty');
+    if (staffEl) staffEl.addEventListener('change', () => {
+      const opt = staffEl.options[staffEl.selectedIndex];
+      if (rateEl) rateEl.value = opt ? (opt.dataset.rate || 0) : 0;
+      recomputeServiceEntryTotal(m, prefix);
+    });
+    if (rateEl) rateEl.addEventListener('input', () => recomputeServiceEntryTotal(m, prefix));
+    if (qtyEl) qtyEl.addEventListener('input', () => recomputeServiceEntryTotal(m, prefix));
+    recomputeServiceEntryTotal(m, prefix);
+  }
+
+  // `projectId` prefills the project select — passed by the Project Costs card's own "+ Service
+  // Entry" button (data-project-id); the Reports screen's button omits it, so ctx.project (null
+  // there) leaves the entry facility-wide.
+  function newServiceEntry(projectId) {
+    const pid = projectId != null && projectId !== '' ? Number(projectId) : null;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('tag')} New Service Entry</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Description *</label><input class="input" id="se-desc" placeholder="e.g. Retroactive image analysis support" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Date</label><input type="date" class="input" id="se-date" value="${esc(UI.today())}" /></div>
+          ${serviceStaffSelectField('se-staff', null)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="se-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${serviceEntryProjectOptions(pid)}
+            </select>
+          </div>
+          ${grantSelectField('se-grant', null)}
+          ${serviceInstrumentSelectField('se-inst', null)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field"><label>Quantity</label><input type="number" min="0" step="any" class="input" id="se-qty" value="1" /></div>
+          ${vocabField({ category: 'SERVICE_UNIT', id: 'se-unit', label: 'Unit', selected: 'hour', placeholder: '-- Select Unit --' })}
+          <div class="field"><label>Rate</label><input type="number" min="0" step="any" class="input" id="se-rate" value="0" /></div>
+        </div>
+        <div class="field"><label>Total</label><div class="mono font-medium" id="se-total">${fmtMoney(0)}</div></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="se-save">Save Entry</button>
+      </div>`, (m) => mountServiceEntryModal(m, 'se'));
+  }
+
+  function seSave() {
+    const m = document.querySelector('.modal');
+    const desc = m.querySelector('#se-desc').value.trim();
+    if (!desc) { UI.toast('Description required', 'error'); return; }
+    const date = m.querySelector('#se-date').value || UI.today();
+    const staffVal = m.querySelector('#se-staff').value;
+    const personId = staffVal ? Number(staffVal) : null;
+    const projectVal = m.querySelector('#se-project').value;
+    const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#se-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
+    const instVal = m.querySelector('#se-inst').value;
+    const instrumentId = instVal ? Number(instVal) : null;
+    const qty = Number(m.querySelector('#se-qty').value) || 0;
+    const unit = m.querySelector('#se-unit').value || 'hour';
+    const rate = Number(m.querySelector('#se-rate').value) || 0;
+    const total = qty * rate;
+
+    DB.run(`INSERT INTO service_entries (project_id, grant_id, person_id, instrument_id, date, description, qty, unit, rate, total_cost)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Service entry saved');
+    refresh();
+  }
+
+  function editServiceEntry(id) {
+    const e = DB.row('SELECT * FROM service_entries WHERE id=?', [id]);
+    if (!e) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Service Entry</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Description *</label><input class="input" id="see-desc" value="${esc(e.description)}" /></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Date</label><input type="date" class="input" id="see-date" value="${esc(e.date || '')}" /></div>
+          ${serviceStaffSelectField('see-staff', e.person_id)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field">
+            <label>Project (optional)</label>
+            <select class="input" id="see-project">
+              <option value="">-- Facility-wide / No Project --</option>
+              ${serviceEntryProjectOptions(e.project_id)}
+            </select>
+          </div>
+          ${grantSelectField('see-grant', e.grant_id)}
+          ${serviceInstrumentSelectField('see-inst', e.instrument_id)}
+        </div>
+        <div class="grid cols-3">
+          <div class="field"><label>Quantity</label><input type="number" min="0" step="any" class="input" id="see-qty" value="${e.qty || 0}" /></div>
+          ${vocabField({ category: 'SERVICE_UNIT', id: 'see-unit', label: 'Unit', selected: e.unit || 'hour', placeholder: '-- Select Unit --' })}
+          <div class="field"><label>Rate</label><input type="number" min="0" step="any" class="input" id="see-rate" value="${e.rate || 0}" /></div>
+        </div>
+        <div class="field"><label>Total</label><div class="mono font-medium" id="see-total">${fmtMoney(e.total_cost || 0)}</div></div>
+      </div></div>
+      <div class="foot">
+        ${e.is_cancelled
+          ? `<button class="btn btn-secondary" data-act="se-reinstate" data-id="${e.id}" style="margin-right:auto">${ic('rocket')} Reinstate</button>`
+          : `<button class="btn btn-secondary" data-act="se-cancel" data-id="${e.id}" style="margin-right:auto">${ic('archive')} Cancel Entry</button>`}
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="se-edit-save" data-id="${e.id}">Save Changes</button>
+      </div>`, (m) => mountServiceEntryModal(m, 'see'));
+  }
+
+  function seEditSave(id) {
+    const m = document.querySelector('.modal');
+    const desc = m.querySelector('#see-desc').value.trim();
+    if (!desc) { UI.toast('Description required', 'error'); return; }
+    // Same default as seSave: a NULL date would drop out of Reports' date-range filters
+    // (se.date >= ?), silently hiding the entry from every ranged report and export.
+    const date = m.querySelector('#see-date').value || UI.today();
+    const staffVal = m.querySelector('#see-staff').value;
+    const personId = staffVal ? Number(staffVal) : null;
+    const projectVal = m.querySelector('#see-project').value;
+    const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#see-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
+    const instVal = m.querySelector('#see-inst').value;
+    const instrumentId = instVal ? Number(instVal) : null;
+    const qty = Number(m.querySelector('#see-qty').value) || 0;
+    const unit = m.querySelector('#see-unit').value || 'hour';
+    const rate = Number(m.querySelector('#see-rate').value) || 0;
+    const total = qty * rate;
+
+    DB.run(`UPDATE service_entries SET project_id=?, grant_id=?, person_id=?, instrument_id=?, date=?, description=?, qty=?, unit=?, rate=?, total_cost=? WHERE id=?`,
+      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total, id]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Service entry updated');
+    refresh();
+  }
+
+  // Two-way charge choice (no admin gate — entries carry no before/after-start timing rule to
+  // gate on in the first place), same red-Cancel-button convention and 3-button shape as
+  // chooseCancelBilling: the abort ("Keep Entry") is the safe way out, styled danger/red.
+  function chooseServiceEntryCancelBilling(desc, total) {
+    return new Promise((resolve) => {
+      const m = UI.openModal(`
+        <div class="head"><span class="t" style="font-weight:600">Cancel Service Entry</span></div>
+        <div class="body"><p class="mt-0 mb-8">"${esc(desc)}" stays on the record either way — does its ${esc(fmtMoney(total))} charge still count toward Project Costs?</p></div>
+        <div class="foot">
+          <button class="btn btn-danger" data-act="abort">Keep Entry</button>
+          <button class="btn btn-secondary" data-act="waive">Cancel &amp; Waive Charge</button>
+          <button class="btn btn-secondary" data-act="keep">Cancel &amp; Keep Charge</button>
+        </div>`, null, () => resolve(null));
+      const dim = m.closest('.modal-dim');
+      m.querySelector('[data-act="abort"]').onclick = () => { UI.closeDim(dim); resolve(null); };
+      m.querySelector('[data-act="waive"]').onclick = () => { UI.closeDim(dim); resolve('waive'); };
+      m.querySelector('[data-act="keep"]').onclick = () => { UI.closeDim(dim); resolve('keep'); };
+    });
+  }
+
+  /* Cancelling, not deleting — same reasoning as cancelBooking: the entry stays on the record
+     either way. Callable both from a list row (Project Costs / Reports — no modal open) and from
+     inside the edit modal's footer, so it closes whatever modal is open after acting, if any. */
+  async function cancelServiceEntry(id) {
+    const e = DB.row('SELECT id, description, total_cost, is_cancelled FROM service_entries WHERE id=?', [id]);
+    if (!e) return;
+    if (e.is_cancelled) { reinstateServiceEntry(id); return; }
+
+    const total = e.total_cost || 0;
+    let retained;
+    if (total > 0) {
+      const choice = await chooseServiceEntryCancelBilling(e.description, total);
+      if (!choice) return;
+      retained = choice === 'keep';
+    } else {
+      const ok = await UI.confirmModal(
+        'Cancel Service Entry',
+        `Cancel "${esc(e.description)}"? It stays on the record; there's no charge to reconcile.`,
+        { confirmText: 'Cancel Entry', cancelText: 'Keep Entry' }
+      );
+      if (!ok) return;
+      retained = false;
+    }
+    DB.setServiceEntryCancelled(id, true, retained);
+    UI.toast(retained ? 'Service entry cancelled — charge kept' : 'Service entry cancelled');
+    // Modals stack by appending dims, so the entry's own modal is the LAST one — closing the
+    // first could take down a parent modal underneath it.
+    const dims = document.querySelectorAll('.modal-dim');
+    if (dims.length) UI.closeDim(dims[dims.length - 1]);
+    refresh();
+  }
+
+  function reinstateServiceEntry(id) {
+    const e = DB.row('SELECT id FROM service_entries WHERE id=?', [id]);
+    if (!e) return;
+    DB.setServiceEntryCancelled(id, false, false);
+    UI.toast('Service entry reinstated');
+    // Topmost dim, as in cancelServiceEntry above.
+    const dims = document.querySelectorAll('.modal-dim');
+    if (dims.length) UI.closeDim(dims[dims.length - 1]);
+    refresh();
+  }
+
   function saveGrantDisplay() {
     const el = document.getElementById('cfg-grant-display');
     if (!el) return;
     DB.setConfig('grant_display', el.value === 'number' ? 'number' : 'name');
     UI.toast('Grant display setting saved');
+    refresh();
+  }
+
+  /* ---------------- Pricing Tiers CRUD (Settings) ----------------
+     A pricing tier is a named overhead percent (roadmap 2.2), replacing the old flat Internal/
+     External pair — a group/lab is assigned at most one (see the Group Discounts editor's tier
+     <select>, and saveGroupDiscounts above), and an instrument's rate can be overridden per tier
+     (see instrumentTierRatesHtml above). Like grants/people/instruments it is retired, not deleted,
+     once anything references it — see retirePricingTier below and DB.countTierRefs. */
+  function addPricingTier() {
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('tag')} Add Pricing Tier</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Tier Name *</label><input class="input" id="pt-name" placeholder="e.g. Internal" /></div>
+        <div class="field"><label>Overhead %</label><input type="number" min="0" step="any" class="input" id="pt-pct" value="0" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="pt-save">Save Tier</button>
+      </div>`);
+  }
+
+  function ptSave() {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#pt-name').value.trim();
+    if (!name) { UI.toast('Tier name required', 'error'); return; }
+    const pct = Number(m.querySelector('#pt-pct').value) || 0;
+    DB.run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', [name, pct]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Pricing tier added');
+    refresh();
+  }
+
+  function editPricingTier(id) {
+    const t = DB.row('SELECT * FROM pricing_tiers WHERE id=?', [id]);
+    if (!t) return;
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Pricing Tier</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Tier Name *</label><input class="input" id="pte-name" value="${esc(t.name)}" /></div>
+        <div class="field"><label>Overhead %</label><input type="number" min="0" step="any" class="input" id="pte-pct" value="${t.overhead_pct || 0}" /></div>
+        <div class="faint small">Renaming or re-percenting a tier does not touch bookings already billed under it — those keep the overhead percent snapshotted at save time (see a booking's Cost &amp; Time Breakdown).</div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="pt-edit-save" data-id="${t.id}">Save Changes</button>
+      </div>`);
+  }
+
+  function ptEditSave(id) {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#pte-name').value.trim();
+    if (!name) { UI.toast('Tier name required', 'error'); return; }
+    const pct = Number(m.querySelector('#pte-pct').value) || 0;
+    DB.run('UPDATE pricing_tiers SET name=?, overhead_pct=? WHERE id=?', [name, pct, id]);
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Pricing tier updated');
+    refresh();
+  }
+
+  /* Same reasoning as retireGrant above: a tier billed on real bookings, or still assigned to a
+     lab, must stay on those records — bookings keep their snapshotted tier_overhead_pct regardless
+     — so it's retired rather than deleted once anything references it. Zero references (a mistyped
+     entry, never assigned or billed) is the only case a real delete is offered. */
+  async function retirePricingTier(id) {
+    const t = DB.row('SELECT name FROM pricing_tiers WHERE id=?', [id]);
+    if (!t) return;
+    const refs = DB.countTierRefs(id);
+
+    if (!refs.total) {
+      const ok = await UI.confirmModal(
+        'Delete Pricing Tier',
+        `"${esc(t.name)}" isn't assigned to any lab or billed on any booking, so there's no history to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      // Explicit cleanup even though refs.total===0 already implies no group/booking points at
+      // this tier — instrument_tier_rates isn't counted in countTierRefs (a rate override is
+      // current pricing config, not history — same reasoning instrument_staff is excluded from
+      // countInstrumentRefs), so a rate-overridden-but-otherwise-unused tier can still have rows.
+      DB.run('DELETE FROM instrument_tier_rates WHERE tier_id=?', [id]);
+      DB.run('DELETE FROM pricing_tiers WHERE id=?', [id]);
+      UI.toast('Pricing tier deleted');
+      refresh();
+      return;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const where = [];
+    if (refs.groups) where.push('assigned to ' + plural(refs.groups, 'lab/group'));
+    if (refs.bookings) where.push('billed on ' + plural(refs.bookings, 'booking'));
+
+    const ok = await UI.confirmModal(
+      'Retire Pricing Tier',
+      `"${esc(t.name)}" is ${where.join(', ')}. Those bookings keep the overhead percent they were billed at exactly as saved — retiring only labels it "(Retired)" and stops it being offered for new group assignments. Nothing is deleted, and you can restore it at any time.`,
+      { confirmText: 'Retire' }
+    );
+    if (!ok) return;
+    DB.setRetired('pricing_tiers', id, true);
+    UI.toast(`${t.name} retired`);
+    refresh();
+  }
+
+  function restorePricingTier(id) {
+    const t = DB.row('SELECT name FROM pricing_tiers WHERE id=?', [id]);
+    if (!t) return;
+    DB.setRetired('pricing_tiers', id, false);
+    UI.toast(`${t.name} restored`);
     refresh();
   }
 

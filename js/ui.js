@@ -536,14 +536,16 @@
        4. Discounts — a standing per-lab percent plus a manual admin override, added together —
           apply ONLY to the time-billed instrument cost, never to staff time or to per-unit/
           per-weight instrument costs.
-       5. What's left after the discount then has BOTH overhead percentages (internal + external)
-          added on top of it — that "before tax" figure is what a facility would actually invoice
-          before any tax line — and finally the tax percentage is added on top of THAT to get the
-          final total. */
+       5. What's left after the discount then has ONE overhead percentage added on top of it — the
+          lab/group's assigned pricing tier when it has one, or (no tier assigned) the legacy
+          Internal+External overhead sum, resolved by the CALLER via DB.resolveOverheadForOrg
+          before this function ever runs, so this is just arithmetic on whatever number it's
+          handed — that "before tax" figure is what a facility would actually invoice before any
+          tax line — and finally the tax percentage is added on top of THAT to get the final
+          total. */
   function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates }) {
     const bookingHours = hoursBetween(start, end);
-    const ohInternal = (rates && rates.ohInternal) || 0;
-    const ohExternal = (rates && rates.ohExternal) || 0;
+    const overheadPct = (rates && rates.overheadPct) || 0;
     const taxPct = (rates && rates.taxPct) || 0;
 
     let instrTime = 0, instrAmount = 0;
@@ -567,7 +569,6 @@
     const discPct = Math.min(100, (groupPct || 0) + (manualPct || 0));
     const discountAmt = instrTime * (discPct / 100);
     const afterDiscount = subtotal - discountAmt;
-    const overheadPct = ohInternal + ohExternal;
     const overheadAmt = afterDiscount * (overheadPct / 100);
     const beforeTax = afterDiscount + overheadAmt;
     const taxAmt = beforeTax * (taxPct / 100);
@@ -576,7 +577,7 @@
     return {
       bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
       groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
-      ohInternal, ohExternal, overheadAmt, beforeTax, taxPct, taxAmt, total
+      overheadPct, overheadAmt, beforeTax, taxPct, taxAmt, total
     };
   }  /* A retired person/instrument keeps its real name in the database — the suffix is added at
      display time only, so historical records still read back exactly as they were entered. */

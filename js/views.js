@@ -249,6 +249,18 @@
       LEFT JOIN grants g ON g.id = m.grant_id
       WHERE m.project_id=?
       ORDER BY m.date DESC, m.id DESC`, [id]);
+    // Standalone service entries (roadmap 2.3) — no denormalized name columns, so staff/
+    // instrument/grant are joined fresh here, same as the bookings query above.
+    const entries = global.DB.rows(`
+      SELECT se.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
+             pe.name as person_name, pe.is_retired as person_retired,
+             i.name as instrument_name, i.is_retired as instrument_retired
+      FROM service_entries se
+      LEFT JOIN grants g ON g.id = se.grant_id
+      LEFT JOIN people pe ON pe.id = se.person_id
+      LEFT JOIN instruments i ON i.id = se.instrument_id
+      WHERE se.project_id=?
+      ORDER BY se.date DESC, se.id DESC`, [id]);
     const costCur = global.DB.getConfig('currency', '$');
     const files = global.DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     const prog = global.DB.projectProgress(p.id);
@@ -396,27 +408,36 @@
 
     <!-- Project Costs Card — a running list of every booking's stored cost snapshot (see
          computeBookingBOM in app.js for how each figure below was originally computed; these
-         are the numbers as saved at booking time, not recalculated live). -->
+         are the numbers as saved at booking time, not recalculated live) plus every standalone
+         service entry (roadmap 2.3), which follows the identical counting rule. -->
     <div class="card mb-16">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Project Costs</span></div>
-        <span class="mono font-medium">${esc(costCur)}${mtgs.reduce((s, m) => s + ((m.is_cancelled && !m.billing_retained) ? 0 : (m.total_cost || 0)), 0).toFixed(2)} total</span>
+        <span class="mono font-medium">${esc(costCur)}${(
+          mtgs.reduce((s, m) => s + ((m.is_cancelled && !m.billing_retained) ? 0 : (m.total_cost || 0)), 0) +
+          entries.reduce((s, e) => s + ((e.is_cancelled && !e.billing_retained) ? 0 : (e.total_cost || 0)), 0)
+        ).toFixed(2)} total</span>
+        <button class="btn btn-ghost btn-sm" data-act="add-service-entry" data-project-id="${p.id}" title="Log standalone billable work outside any booking">${ic('plus')} Service Entry</button>
       </div>
       <div class="card-body">
         ${mtgs.length ? `
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>Booking</th><th>Grant</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
+            <thead><tr><th>Booking</th><th>Grant</th><th>Tier</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
             <tbody>
               ${mtgs.map((m) => {
                 const waived = m.is_cancelled && !m.billing_retained;
                 const bookingGrantStr = m.grant_id
                   ? global.UI.retiredName(global.DB.grantLabel({ name: m.grant_name, number: m.grant_number }), m.grant_is_retired)
                   : '';
+                // Resolved fresh from the STORED tier_id (a snapshot column, like grant_id) —
+                // null/legacy bookings (priced via the Internal+External fallback) show '—'.
+                const tierStr = global.DB.tierLabel(m.tier_id);
                 return `
                 <tr class="${m.is_cancelled ? 'row-retired' : ''}">
                   <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
                   <td class="small">${bookingGrantStr ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
+                  <td class="small">${tierStr === '—' ? '<span class="faint">—</span>' : esc(tierStr)}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>
@@ -425,7 +446,39 @@
                 </tr>`; }).join('')}
             </tbody>
           </table>
-        </div>` : emptyState('tag', 'No bookings yet', 'Costs from instrument/staff bookings will appear here once you add one.')}
+        </div>` : ''}
+        ${entries.length ? `
+        <div class="tbl-wrap mt-16">
+          <table class="tbl">
+            <thead><tr><th>Service Entry</th><th>Staff</th><th>Instrument</th><th>Grant</th><th>Date</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Rate</th><th style="text-align:right">Total</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${entries.map((e) => {
+                const waived = e.is_cancelled && !e.billing_retained;
+                const entryGrantStr = e.grant_id
+                  ? global.UI.retiredName(global.DB.grantLabel({ name: e.grant_name, number: e.grant_number }), e.grant_is_retired)
+                  : '';
+                return `
+                <tr class="${e.is_cancelled ? 'row-retired' : ''}">
+                  <td class="font-medium small">${esc(e.description)}${e.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
+                  <td class="small">${e.person_name ? esc(global.UI.retiredName(e.person_name, e.person_retired)) : '<span class="faint">—</span>'}</td>
+                  <td class="small">${e.instrument_name ? esc(global.UI.retiredName(e.instrument_name, e.instrument_retired)) : '<span class="faint">—</span>'}</td>
+                  <td class="small">${entryGrantStr ? esc(entryGrantStr) : '<span class="faint">—</span>'}</td>
+                  <td class="mono small faint">${fmt(e.date)}</td>
+                  <td class="mono small" style="text-align:right">${e.qty || 0}</td>
+                  <td class="small">${esc(e.unit || '')}</td>
+                  <td class="mono small" style="text-align:right">${esc(costCur)}${(e.rate || 0).toFixed(2)}</td>
+                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(costCur)}${(e.total_cost || 0).toFixed(2)}</span>` : esc(costCur) + (e.total_cost || 0).toFixed(2)}</td>
+                  <td style="text-align:right">
+                    <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${e.id}" title="Edit entry">${ic('edit')}</button>
+                    ${e.is_cancelled
+                      ? `<button class="btn btn-ghost btn-xs" data-act="se-reinstate" data-id="${e.id}" title="Reinstate">${ic('rocket')}</button>`
+                      : `<button class="btn btn-ghost btn-xs" data-act="se-cancel" data-id="${e.id}" title="Cancel entry">${ic('archive')}</button>`}
+                  </td>
+                </tr>`; }).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}
+        ${(!mtgs.length && !entries.length) ? emptyState('tag', 'No bookings or service entries yet', 'Costs from instrument/staff bookings and standalone service entries will appear here once you add one.') : ''}
       </div>
     </div>
 
@@ -700,31 +753,66 @@
     </div>`;
   }
 
-  /* ---------------- Calendar (Fixed 7-Day Grid) ---------------- */
-  let calOffset = 0;
+  /* ---------------- Calendar (Month grid + Week hourly view + per-instrument Timeline) ---------------- */
+  let calOffset = 0; // Month mode: whole months. Week/Timeline mode: whole weeks. Reset on mode switch.
+  let calMode = 'month'; // 'month' | 'week' | 'timeline'
   function navCalendar(delta) { calOffset += delta; global.App.refresh(); }
-  function calendar() {
-    const base = new Date();
-    const shifted = new Date(base.getFullYear(), base.getMonth() + calOffset, 1);
-    const sy = shifted.getFullYear(), sm = shifted.getMonth();
-    const monthLabel = shifted.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  function calToday() { calOffset = 0; global.App.refresh(); }
+  function setCalMode(mode) {
+    if (mode !== 'month' && mode !== 'week' && mode !== 'timeline') return;
+    // calOffset's unit changes (months <-> weeks) when the mode changes, so a stale offset from
+    // the other mode would jump to the wrong month/week — reset it whenever the mode actually flips.
+    // Week and Timeline share the same unit (whole weeks), so hopping directly between those two
+    // keeps whatever week you were looking at instead of jumping back to the current one.
+    const sameUnit = (a, b) => (a === 'week' || a === 'timeline') && (b === 'week' || b === 'timeline');
+    if (mode !== calMode && !sameUnit(mode, calMode)) calOffset = 0;
+    calMode = mode;
+    global.App.refresh();
+  }
 
-    const firstDayOfMonth = new Date(sy, sm, 1);
-    const lastDayOfMonth = new Date(sy, sm + 1, 0);
+  // Shared toolbar for all three calendar renderers: Month/Week/Timeline toggle + prev/today/next.
+  function calToolbarHtml(label, unitLabel) {
+    return `
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('calendar')} ${label}</span></div>
+        <div class="row" style="gap:6px;flex-wrap:wrap">
+          <button class="btn ${calMode === 'month' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="month">Month</button>
+          <button class="btn ${calMode === 'week' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="week">Week</button>
+          <button class="btn ${calMode === 'timeline' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="timeline">Timeline</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous ${unitLabel}">${ic('chevron-left')} Prev</button>
+          <button class="btn btn-primary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next ${unitLabel}">Next ${ic('chevron-right')}</button>
+          <button class="btn btn-secondary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">${ic('clock')} Agenda</button>
+        </div>
+      </div>`;
+  }
 
-    // Calculate first Monday on or before the 1st
-    const start = new Date(firstDayOfMonth);
-    const dayOfWeek = (start.getDay() + 6) % 7;
-    start.setDate(start.getDate() - dayOfWeek);
+  // Monday..Sunday of (today + calOffset weeks) as local-midnight Date objects. Shared by Week
+  // mode and the Timeline (both are week-unit views over the same offset) so there's one date
+  // computation to keep right — see UI.ymd/issue #14 on why this never touches toISOString().
+  function calWeekDays() {
+    const now = new Date();
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // local midnight, no string parsing
+    base.setDate(base.getDate() + calOffset * 7);
+    const mondayOffset = (base.getDay() + 6) % 7; // Mon=0..Sun=6
+    const monday = new Date(base);
+    monday.setDate(monday.getDate() - mondayOffset);
 
-    // Calculate last Sunday on or after last day
-    const end = new Date(lastDayOfMonth);
-    const endDayOfWeek = (end.getDay() + 6) % 7;
-    end.setDate(end.getDate() + (6 - endDayOfWeek));
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(d.getDate() + i);
+      days.push(d);
+    }
+    return days;
+  }
 
-    const startStr = global.UI.ymd(start);
-    const endStr = global.UI.ymd(end);
-
+  // Milestones (by due_date) + meetings (by date) in [startStr, endStr] (inclusive, local
+  // 'YYYY-MM-DD' strings), bucketed by day string. Shared by the month and week renderers so
+  // there's one query pair to keep in sync — this used to omit m.is_cancelled from the meetings
+  // SELECT even though the chip renderer read mt.is_cancelled for the ev-cancelled style, so
+  // cancelled bookings never actually looked cancelled on the calendar. Fixed here, once.
+  function calFetchByDay(startStr, endStr) {
     const ms = global.DB.rows(`
       SELECT m.id, m.due_date, m.name, m.status, p.id as project_id, p.title as project_title
       FROM milestones m
@@ -732,7 +820,7 @@
       WHERE m.due_date >= ? AND m.due_date <= ?`, [startStr, endStr]);
 
     const mtgs = global.DB.rows(`
-      SELECT m.id, m.date, m.start_time, m.end_time, m.title, p.id as project_id, p.title as project_title
+      SELECT m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled, p.id as project_id, p.title as project_title
       FROM meetings m
       LEFT JOIN projects p ON p.id = m.project_id
       WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
@@ -771,6 +859,130 @@
         return at < bt ? -1 : at > bt ? 1 : 0;
       });
     }
+    return byDay;
+  }
+
+  // One event chip, shared by month cells (no styleAttr) and week event blocks (styleAttr carries
+  // the absolute top/height positioning from calEventBlockLayout).
+  function calEvChipHtml(e, styleAttr) {
+    return `
+      <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
+           style="${styleAttr || ''}"
+           data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
+           title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
+        ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+      </div>`;
+  }
+
+  /* ---- Hour-grid layout helpers ----
+     Shared by the week view below and (per the roadmap) the resource timeline that follows it:
+     turning an "HH:MM" time into a vertical pixel offset within a day column, and laying out a
+     timed event's block (top + height) from its start/end. hourPx is a parameter rather than
+     baked in so a denser timeline grid can reuse the same math at a different scale. */
+  const CAL_HOUR_PX = 48; // px per hour row at the week view's default scale
+  const CAL_DAY_HOURS = 24;
+  // The Timeline lays days out horizontally at whatever width the lane column happens to be, so
+  // "px per hour" doesn't apply — calTimeToPx/calEventBlockLayout's math is unit-agnostic (it's
+  // just mins/60*hourPx), so passing a "% per hour" scale instead reuses the exact same helpers
+  // to place a block as a percentage of the day-cell's width rather than a pixel height.
+  const CAL_TL_HOUR_PCT = 100 / CAL_DAY_HOURS;
+
+  function calTimeToPx(hhmm, hourPx) {
+    const mins = global.UI.timeToMinutes(hhmm);
+    return mins == null ? null : (mins / 60) * (hourPx || CAL_HOUR_PX);
+  }
+
+  // { top, height } in px for a timed event's block. A missing/unparsable/non-positive duration
+  // still gets a small fixed-height block so the event stays visible and clickable.
+  function calEventBlockLayout(start, end, hourPx) {
+    const px = hourPx || CAL_HOUR_PX;
+    const top = calTimeToPx(start, px);
+    if (top == null) return null;
+    const endPx = calTimeToPx(end, px);
+    const MIN_H = 20;
+    const height = (endPx != null && endPx > top) ? Math.max(MIN_H, endPx - top) : MIN_H;
+    return { top, height };
+  }
+
+  // Hour-label gutter markup (00:00, 01:00, ... 23:00), one row per hour at hourPx tall.
+  function calHourLabelsHtml(hourPx) {
+    const px = hourPx || CAL_HOUR_PX;
+    let out = '';
+    for (let h = 0; h < CAL_DAY_HOURS; h++) {
+      out += `<div class="cal-hour-row" style="height:${px}px"><span class="cal-hour-label">${String(h).padStart(2, '0')}:00</span></div>`;
+    }
+    return out;
+  }
+
+  // One day column's backing click-to-book layer: an hour-tall slot per hour, each pre-filling
+  // that hour as the new booking's start/end. Event blocks render on top of these (both are
+  // positioned, so they stack above in DOM order) and click dispatch resolves the nearest
+  // ancestor with data-act, so clicking an event still opens edit-booking/edit-milestone rather
+  // than falling through to the slot underneath it.
+  function calHourSlotsHtml(ds, hourPx) {
+    const px = hourPx || CAL_HOUR_PX;
+    let out = '';
+    for (let h = 0; h < CAL_DAY_HOURS; h++) {
+      const startHH = String(h).padStart(2, '0') + ':00';
+      // The 23:00 slot gets no end prefill: a hard-coded 23:59 would make a 59-minute booking
+      // that can trip a 60-minute min-duration constraint before the user has touched anything.
+      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '';
+      out += `
+        <div class="cal-hour-slot clickable" role="button" tabindex="0" style="height:${px}px"
+             data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}
+             aria-label="Add a booking at ${startHH} on ${ds}"
+             data-tooltip="Click to add a booking at ${startHH} on ${ds}"></div>`;
+    }
+    return out;
+  }
+
+  // Timeline's per-lane, per-day analog of calHourSlotsHtml: horizontal instead of vertical, so
+  // slots are equal-width percentages rather than fixed px, and each one also carries data-inst
+  // so a click prefills the lane's instrument alongside the date/time (see the new-booking
+  // dispatcher case and newBooking's optional instrumentId parameter).
+  function calTimelineHourSlotsHtml(ds, instId) {
+    let out = '';
+    for (let h = 0; h < CAL_DAY_HOURS; h++) {
+      const startHH = String(h).padStart(2, '0') + ':00';
+      // Same rule as calHourSlotsHtml: no 23:59 end prefill on the last slot.
+      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '';
+      out += `
+        <div class="cal-tl-hour-slot clickable" role="button" tabindex="0" style="width:${CAL_TL_HOUR_PCT}%"
+             data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}${instId ? ` data-inst="${instId}"` : ''}
+             aria-label="Add a booking at ${startHH} on ${ds}${instId ? ' for this instrument' : ''}"
+             data-tooltip="Click to add a booking at ${startHH} on ${ds}${instId ? ' for this instrument' : ''}"></div>`;
+    }
+    return out;
+  }
+
+  function calendar() {
+    if (calMode === 'week') return calendarWeek();
+    if (calMode === 'timeline') return calendarTimeline();
+    return calendarMonth();
+  }
+
+  function calendarMonth() {
+    const base = new Date();
+    const shifted = new Date(base.getFullYear(), base.getMonth() + calOffset, 1);
+    const sy = shifted.getFullYear(), sm = shifted.getMonth();
+    const monthLabel = shifted.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    const firstDayOfMonth = new Date(sy, sm, 1);
+    const lastDayOfMonth = new Date(sy, sm + 1, 0);
+
+    // Calculate first Monday on or before the 1st
+    const start = new Date(firstDayOfMonth);
+    const dayOfWeek = (start.getDay() + 6) % 7;
+    start.setDate(start.getDate() - dayOfWeek);
+
+    // Calculate last Sunday on or after last day
+    const end = new Date(lastDayOfMonth);
+    const endDayOfWeek = (end.getDay() + 6) % 7;
+    end.setDate(end.getDate() + (6 - endDayOfWeek));
+
+    const startStr = global.UI.ymd(start);
+    const endStr = global.UI.ymd(end);
+    const byDay = calFetchByDay(startStr, endStr);
 
     const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     let headerCells = dow.map((d) => `<div class="dow">${d}</div>`).join('');
@@ -798,12 +1010,7 @@
           ${isToday ? '<span class="today-tag">Today</span>' : ''}
         </div>
         <div class="cal-events">
-          ${evs.map((e) => `
-            <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
-                 data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
-                 title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
-              ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
-            </div>`).join('')}
+          ${evs.map((e) => calEvChipHtml(e)).join('')}
         </div>
       </div>`;
       cur.setDate(cur.getDate() + 1);
@@ -811,16 +1018,197 @@
 
     return `
     <div class="card">
-      <div class="row mb-8">
-        <div class="grow"><span class="card-title">${ic('calendar')} ${monthLabel}</span></div>
-        <div class="row" style="gap:6px">
-          <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous Month">${ic('chevron-left')} Prev</button>
-          <button class="btn btn-primary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">Today</button>
-          <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next Month">Next ${ic('chevron-right')}</button>
-        </div>
-      </div>
+      ${calToolbarHtml(monthLabel, 'Month')}
       <div class="cal-grid-header">${headerCells}</div>
       <div class="cal-grid">${cells}</div>
+    </div>`;
+  }
+
+  // Monday..Sunday of (today + calOffset weeks), hourly grid with an all-day lane above it for
+  // untimed events (milestones, and any booking saved without a start time).
+  function calendarWeek() {
+    const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const days = calWeekDays();
+
+    const startStr = global.UI.ymd(days[0]);
+    const endStr = global.UI.ymd(days[6]);
+    const byDay = calFetchByDay(startStr, endStr);
+    const todayStr = today();
+
+    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+    const dayInfos = days.map((d, i) => {
+      const ds = global.UI.ymd(d); // local calendar day, not toISOString() — see calFetchByDay/ymd comments
+      const evs = byDay[ds] || [];
+      return {
+        ds,
+        date: d,
+        dow: dow[i],
+        isToday: ds === todayStr,
+        allDay: evs.filter((e) => !e.start_time), // milestones + untimed bookings
+        timed: evs.filter((e) => e.start_time)
+      };
+    });
+
+    const headHtml = dayInfos.map((d) => `
+      <div class="cal-week-daycol-head ${d.isToday ? 'today' : ''}">
+        <span class="dow">${d.dow}</span><span class="num">${d.date.getDate()}</span>
+        ${d.isToday ? '<span class="today-tag">Today</span>' : ''}
+      </div>`).join('');
+
+    const alldayHtml = dayInfos.map((d) => `
+      <div class="cal-week-allday-col clickable" role="button" tabindex="0" data-act="new-booking" data-date="${d.ds}" aria-label="Add a booking on ${d.ds}" data-tooltip="Click to add a booking on ${d.ds}">
+        ${d.allDay.map((e) => calEvChipHtml(e)).join('')}
+      </div>`).join('');
+
+    const gridHeight = CAL_HOUR_PX * CAL_DAY_HOURS;
+    const bodyHtml = dayInfos.map((d) => `
+      <div class="cal-week-daycol" style="height:${gridHeight}px">
+        ${calHourSlotsHtml(d.ds, CAL_HOUR_PX)}
+        ${d.timed.map((e) => {
+          const layout = calEventBlockLayout(e.start_time, e.end_time, CAL_HOUR_PX);
+          if (!layout) return '';
+          return calEvChipHtml(e, `position:absolute;left:2px;right:2px;top:${layout.top}px;height:${layout.height}px`);
+        }).join('')}
+      </div>`).join('');
+
+    return `
+    <div class="card">
+      ${calToolbarHtml(weekLabel, 'Week')}
+      <div class="cal-week">
+        <div class="cal-week-header">
+          <div class="cal-week-gutter"></div>
+          ${headHtml}
+        </div>
+        <div class="cal-week-allday">
+          <div class="cal-week-gutter cal-week-allday-label">All day</div>
+          ${alldayHtml}
+        </div>
+        <div class="cal-week-scroll">
+          <div class="cal-week-body" style="height:${gridHeight}px">
+            <div class="cal-week-gutter cal-week-hours">${calHourLabelsHtml(CAL_HOUR_PX)}</div>
+            ${bodyHtml}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Per-instrument resource timeline: one lane (row) per instrument, the same Monday..Sunday
+  // week range as Week mode (calWeekDays, calOffset counted in weeks) across as columns. A
+  // booking renders as a proportional block inside its day cell — reusing calTimeToPx at a
+  // percent-per-hour scale (CAL_TL_HOUR_PCT) rather than a full 24-row hour axis, which would be
+  // too dense stacked one row per instrument. Cancelled bookings still render (styled via the
+  // shared .ev-cancelled class from calEvChipHtml) rather than disappearing from the lane.
+  function calendarTimeline() {
+    const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const days = calWeekDays();
+    const startStr = global.UI.ymd(days[0]);
+    const endStr = global.UI.ymd(days[6]);
+    const todayStr = today();
+
+    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+    // Lanes: every active instrument, plus any retired instrument booked somewhere in this
+    // range — history renders (labelled via UI.retiredName), it just doesn't clutter every other
+    // week once nothing in view still references it.
+    const instruments = global.DB.rows(`
+      SELECT id, name, is_retired FROM instruments
+      WHERE is_retired = 0
+         OR id IN (
+           SELECT DISTINCT mi.instrument_id FROM meeting_instruments mi
+           JOIN meetings m ON m.id = mi.meeting_id
+           WHERE m.date >= ? AND m.date <= ?
+         )
+      ORDER BY is_retired ASC, name ASC`, [startStr, endStr]);
+
+    // One row per (instrument, booking) via meeting_instruments — a multi-instrument booking
+    // appears in every one of its lanes, the same attribution rule reports.js documents for its
+    // per-instrument aggregations. is_cancelled is selected (not filtered out) so cancelled
+    // bookings still render, just styled via calEvChipHtml's ev-cancelled class.
+    const bookingRows = global.DB.rows(`
+      SELECT mi.instrument_id, m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled,
+             p.id as project_id, p.title as project_title
+      FROM meeting_instruments mi
+      JOIN meetings m ON m.id = mi.meeting_id
+      LEFT JOIN projects p ON p.id = m.project_id
+      WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
+
+    // "instrument_id|date" -> [events], mirroring calFetchByDay's per-day bucketing.
+    const byInstDay = {};
+    for (const r of bookingRows) {
+      const key = r.instrument_id + '|' + r.date;
+      (byInstDay[key] = byInstDay[key] || []).push({
+        id: r.id, name: r.title, kind: 'mt', cancelled: !!r.is_cancelled,
+        start_time: r.start_time || '', end_time: r.end_time || '',
+        project_id: r.project_id, project_title: r.project_title
+      });
+    }
+
+    const headHtml = days.map((d, i) => {
+      const ds = global.UI.ymd(d);
+      return `
+      <div class="cal-tl-daycol-head ${ds === todayStr ? 'today' : ''}">
+        <span class="dow">${dow[i]}</span><span class="num">${d.getDate()}</span>
+      </div>`;
+    }).join('');
+
+    const rowsHtml = instruments.map((inst) => {
+      const label = global.UI.retiredName(inst.name, !!inst.is_retired);
+      const dayCells = days.map((d) => {
+        const ds = global.UI.ymd(d);
+        const evs = byInstDay[inst.id + '|' + ds] || [];
+        const blocksHtml = evs.map((e) => {
+          // Reuses calTimeToPx (the same time→position math the Week grid uses) at a % scale —
+          // see CAL_TL_HOUR_PCT. calEventBlockLayout's own MIN_H clamp assumes px, so its 20px
+          // floor isn't reused verbatim here: at a % width, a 20% minimum would make short
+          // bookings look hours long, so a small % floor (MIN_W) is applied directly instead.
+          const leftPct = calTimeToPx(e.start_time, CAL_TL_HOUR_PCT);
+          if (leftPct == null) {
+            // Untimed booking (saved without a start_time) — still shown, as a full-width strip,
+            // rather than silently vanishing from the lane.
+            return calEvChipHtml(e, 'position:absolute;left:2px;right:2px;top:2px;bottom:2px');
+          }
+          const endPct = calTimeToPx(e.end_time, CAL_TL_HOUR_PCT);
+          const MIN_W = 4;
+          const widthPct = (endPct != null && endPct > leftPct) ? Math.max(MIN_W, endPct - leftPct) : MIN_W;
+          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px`);
+        }).join('');
+        // A retired instrument's lane still shows its history, but an empty slot in it should not
+        // pre-lock a brand-new booking to a resource that's no longer available for new work —
+        // omit data-inst there so the click still opens New Booking (date/time prefilled) without
+        // the instrument. mountTokenPicker's own dropdown would exclude a retired instrument from
+        // a new booking anyway; this just keeps the timeline's shortcut consistent with that.
+        return `
+          <div class="cal-tl-daycell ${ds === todayStr ? 'today' : ''}">
+            ${calTimelineHourSlotsHtml(ds, inst.is_retired ? '' : inst.id)}
+            ${blocksHtml}
+          </div>`;
+      }).join('');
+      return `
+        <div class="cal-tl-row">
+          <div class="cal-tl-lane-label" title="${esc(label)}">${esc(label)}</div>
+          ${dayCells}
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="card">
+      ${calToolbarHtml(weekLabel, 'Week')}
+      ${instruments.length === 0
+        ? `<div class="faint small" style="padding:16px 4px">No instruments to show.</div>`
+        : `
+      <div class="cal-tl">
+        <div class="cal-tl-header">
+          <div class="cal-tl-lane-label cal-tl-lane-label-head">Instrument</div>
+          ${headHtml}
+        </div>
+        <div class="cal-tl-body">
+          ${rowsHtml}
+        </div>
+      </div>`}
     </div>`;
   }
 
@@ -839,6 +1227,10 @@
       SELECT g.*, (SELECT COUNT(*) FROM grant_users gu WHERE gu.grant_id = g.id) as user_count
       FROM grants g ORDER BY g.is_retired ASC, g.name ASC`);
     const grantDisplay = global.DB.getConfig('grant_display', 'name');
+    const tiers = global.DB.rows(`
+      SELECT t.*, (SELECT COUNT(*) FROM group_tiers gt WHERE gt.tier_id = t.id) as group_count,
+             (SELECT COUNT(*) FROM meetings m WHERE m.tier_id = t.id) as booking_count
+      FROM pricing_tiers t ORDER BY t.is_retired ASC, t.name ASC`);
 
     return `
     <div class="card mb-16">
@@ -940,14 +1332,43 @@
     <div class="card mb-16">
       <div class="card-title">${ic('tag')} Billing Rates</div>
       <div class="card-body">
-        <div class="faint small mb-8">These apply to every booking's cost breakdown: both overhead percentages are added together, then tax is applied on top of that. See a booking's "Cost &amp; Time Breakdown" for the full walkthrough.</div>
-        <div class="grid cols-4">
-          <div class="field"><label>Internal Overhead %</label><input type="number" min="0" step="any" class="input" id="cfg-overhead-internal" value="${esc(global.DB.getConfigNum('overhead_internal', 0))}" /></div>
-          <div class="field"><label>External Overhead %</label><input type="number" min="0" step="any" class="input" id="cfg-overhead-external" value="${esc(global.DB.getConfigNum('overhead_external', 0))}" /></div>
+        <div class="faint small mb-8">Tax is applied on top of a booking's after-overhead total. Overhead itself is set per Pricing Tier below — a lab/group with no tier assigned (Admin Mode &gt; Group Discounts) prices at the legacy Internal + External overhead sum this app used before named tiers existed. See a booking's "Cost &amp; Time Breakdown" for the full walkthrough.</div>
+        <div class="grid cols-2">
           <div class="field"><label>Tax %</label><input type="number" min="0" step="any" class="input" id="cfg-tax" value="${esc(global.DB.getConfigNum('tax_pct', 0))}" /></div>
           <div class="field"><label>Currency Symbol</label><input class="input" id="cfg-currency" value="${esc(global.DB.getConfig('currency', '$'))}" maxlength="4" /></div>
         </div>
         <button class="btn btn-primary btn-sm mt-8" data-act="save-billing-rates">${ic('check')} Save Rates</button>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('tag')} Pricing Tiers</span></div>
+        <button class="btn btn-primary btn-sm" data-act="add-tier">${ic('plus')} Add Tier</button>
+      </div>
+      <div class="card-body">
+        <div class="faint small mb-8">Named overhead tiers a lab/group can be assigned to (see the Group Discounts editor under Admin Mode below), replacing the old flat Internal/External overhead split. An instrument's own rate can also be overridden per tier from its Edit Instrument screen (Admin Mode).</div>
+        ${tiers.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Name</th><th>Overhead %</th><th title="Labs/groups assigned this tier">Groups</th><th title="Bookings billed under this tier">Bookings</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${tiers.map((t) => `
+                <tr class="${t.is_retired ? 'row-retired' : ''}">
+                  <td style="font-weight:600">${esc(global.UI.retiredName(t.name, t.is_retired))}</td>
+                  <td class="mono small">${esc(t.overhead_pct)}%</td>
+                  <td><span class="badge neutral">${t.group_count}</span></td>
+                  <td><span class="badge neutral">${t.booking_count}</span></td>
+                  <td style="text-align:right;white-space:nowrap">
+                    <button class="btn btn-ghost btn-xs" data-act="edit-tier" data-id="${t.id}" title="Edit Tier">${ic('edit')}</button>
+                    ${t.is_retired
+                      ? `<button class="btn btn-ghost btn-xs" data-act="restore-tier" data-id="${t.id}" title="Restore — make available for new group assignments again">${ic('rocket')}</button>`
+                      : `<button class="btn btn-ghost btn-xs" data-act="retire-tier" data-id="${t.id}" title="Retire — keeps every group/booking billed under it">${ic('archive')}</button>`}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('tag', 'No pricing tiers yet', 'Add a tier to assign labs a named overhead rate instead of the legacy Internal/External split.')}
       </div>
     </div>
 
@@ -1031,18 +1452,25 @@
         </div>
         ${adminOn ? `
         <div class="divider"></div>
-        <div style="font-weight:600" class="mb-8">Group (Lab / Organization) Discounts</div>
-        <div class="faint small mb-8">A standing discount percent per lab, auto-applied on a booking whose project's PI belongs to that lab (see the booking's Cost &amp; Time Breakdown). Applies to time-billed instrument cost only.</div>
-        ${orgs.length ? orgs.map((org) => `
-          <div class="row mb-8" style="gap:8px;align-items:center">
+        <div style="font-weight:600" class="mb-8">Group (Lab / Organization) Discounts &amp; Pricing Tiers</div>
+        <div class="faint small mb-8">A standing discount percent per lab, auto-applied on a booking whose project's PI belongs to that lab (see the booking's Cost &amp; Time Breakdown) — applies to time-billed instrument cost only. The tier picks which overhead percent that same booking uses; "No tier (legacy)" keeps pricing at the Internal + External overhead sum from Billing Rates above.</div>
+        ${orgs.length ? orgs.map((org) => {
+          const currentTierId = global.DB.getGroupTierId(org);
+          const tierOpts = global.DB.rows('SELECT id, name, is_retired FROM pricing_tiers WHERE is_retired=0 OR id=? ORDER BY is_retired, name', [currentTierId || 0]);
+          return `
+          <div class="row mb-8" style="gap:8px;align-items:center;flex-wrap:wrap">
             <span class="grow small">${esc(org)}</span>
-            <input type="number" min="0" max="100" step="1" class="input group-discount-input" data-org="${esc(org)}" value="${esc(global.DB.getGroupDiscount(org))}" style="width:90px" />
-            <span class="faint small">%</span>
-          </div>`).join('') : '<div class="faint small">No labs/organizations on record yet — add people with a Lab / Group / Company to set discounts for them.</div>'}
-        ${orgs.length ? `<button class="btn btn-primary btn-sm mt-8" data-act="save-group-discounts">${ic('check')} Save Group Discounts</button>` : ''}
+            <select class="input group-tier-select" data-org="${esc(org)}" style="width:170px" data-tooltip="Pricing tier — decides this lab's overhead percent">
+              <option value="">-- No tier (legacy) --</option>
+              ${tierOpts.map((t) => `<option value="${t.id}" ${t.id === currentTierId ? 'selected' : ''}>${esc(global.UI.retiredName(t.name, t.is_retired))}</option>`).join('')}
+            </select>
+            <input type="number" min="0" max="100" step="1" class="input group-discount-input" data-org="${esc(org)}" value="${esc(global.DB.getGroupDiscount(org))}" style="width:80px" data-tooltip="Standing discount %" />
+            <span class="faint small">% disc</span>
+          </div>`; }).join('') : '<div class="faint small">No labs/organizations on record yet — add people with a Lab / Group / Company to set discounts and tiers for them.</div>'}
+        ${orgs.length ? `<button class="btn btn-primary btn-sm mt-8" data-act="save-group-discounts">${ic('check')} Save Group Discounts &amp; Tiers</button>` : ''}
         <div class="divider"></div>
         <div style="font-weight:600" class="mb-8">Rename / Merge Lab</div>
-        <div class="faint small mb-8">Labs are free-text names, so a typo forks a duplicate with its own discount row and Reports line. Rename one everywhere at once — or merge it into an existing name if that name is already in use.</div>
+        <div class="faint small mb-8">Labs are free-text names, so a typo forks a duplicate with its own discount row, pricing tier assignment and Reports line. Rename one everywhere at once — or merge it into an existing name if that name is already in use.</div>
         ${renameOrgs.length ? `
         <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
           <div class="field" style="margin:0">
@@ -1090,10 +1518,23 @@
     instruments,
     setInstrumentFilter,
     calendar,
+    setCalMode,
     settings,
     emptyState,
     navCalendar,
-    statusBadge
+    calToday,
+    statusBadge,
+    // Hour-grid layout helpers factored out of the week calendar, reused by the per-instrument
+    // resource timeline (calendarTimeline, roadmap 1.4): time->px, an event's {top,height} block,
+    // and hour-row markup.
+    calLayout: {
+      HOUR_PX: CAL_HOUR_PX,
+      DAY_HOURS: CAL_DAY_HOURS,
+      timeToPx: calTimeToPx,
+      eventBlockLayout: calEventBlockLayout,
+      hourLabelsHtml: calHourLabelsHtml,
+      hourSlotsHtml: calHourSlotsHtml
+    }
   };
 
 })(window);

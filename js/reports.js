@@ -103,6 +103,23 @@
       JOIN meetings mt ON mt.id = mi.meeting_id
       WHERE ${RANGE_SQL}`, rangeParams(from, to));
   }
+  // Standalone service entries (roadmap 2.3) in range, joined fresh (no denormalized name
+  // columns) — same shape/precedent as loadMeetingsInRange above, just keyed off se.date instead
+  // of mt.date since entries have no alias in RANGE_SQL.
+  function loadServiceEntriesInRange(from, to) {
+    return DB.rows(`
+      SELECT se.*, p.code AS project_code, p.title AS project_title,
+             pe.name AS person_name, pe.is_retired AS person_retired,
+             i.name AS instrument_name, i.is_retired AS instrument_retired,
+             g.name AS grant_name, g.number AS grant_number, g.is_retired AS grant_is_retired
+      FROM service_entries se
+      LEFT JOIN projects p ON p.id = se.project_id
+      LEFT JOIN people pe ON pe.id = se.person_id
+      LEFT JOIN instruments i ON i.id = se.instrument_id
+      LEFT JOIN grants g ON g.id = se.grant_id
+      WHERE (? = '' OR se.date >= ?) AND (? = '' OR se.date <= ?)
+      ORDER BY se.date DESC, se.id DESC`, rangeParams(from, to));
+  }
   function loadStaffLines(from, to) {
     // meeting_staff always names a facility-staff assignee, but a person's is_staff flag could in
     // theory have been unset after the fact (retiring doesn't do this, but be defensive) — join
@@ -258,20 +275,25 @@
   function computeProjectRows(from, to) {
     if (from === undefined) { from = state.from; to = state.to; }
     const meetings = loadMeetingsInRange(from, to);
+    const entries = loadServiceEntriesInRange(from, to);
 
     const byProject = new Map(); // key (project_id or 'facility') -> row
     const byGroup = new Map();   // key (group_org or '(none)') -> row
+    function projectRow(projectId, projectCode, projectTitle) {
+      const pKey = projectId == null ? 'facility' : String(projectId);
+      let prow = byProject.get(pKey);
+      if (!prow) {
+        prow = { key: pKey, label: projectId == null ? 'Facility-wide' : (projectCode ? projectCode + ' — ' + projectTitle : projectTitle), bookings: 0, hours: 0, cost: 0 };
+        byProject.set(pKey, prow);
+      }
+      return prow;
+    }
     meetings.forEach((m) => {
       const bookingHours = UI.hoursBetween(m.start_time, m.end_time);
       const occupancyCounts = !m.is_cancelled;                          // rule 1
       const moneyCounts = !(m.is_cancelled && !m.billing_retained);     // rule 2
 
-      const pKey = m.project_id == null ? 'facility' : String(m.project_id);
-      let prow = byProject.get(pKey);
-      if (!prow) {
-        prow = { key: pKey, label: m.project_id == null ? 'Facility-wide' : (m.project_code ? m.project_code + ' — ' + m.project_title : m.project_title), bookings: 0, hours: 0, cost: 0 };
-        byProject.set(pKey, prow);
-      }
+      const prow = projectRow(m.project_id, m.project_code, m.project_title);
       if (occupancyCounts) { prow.bookings += 1; prow.hours += bookingHours; }
       if (moneyCounts) prow.cost += (m.total_cost || 0);
 
@@ -285,9 +307,36 @@
       }
     });
 
+    // Service entries (roadmap 2.3) add revenue-only rows here — they carry no start/end times
+    // (no hours to attribute) and no group_org column, so they only ever touch the project side of
+    // this aggregation, under the identical money-counting rule as a booking.
+    entries.forEach((e) => {
+      const moneyCounts = !(e.is_cancelled && !e.billing_retained); // rule 2
+      if (!moneyCounts) return;
+      const prow = projectRow(e.project_id, e.project_code, e.project_title);
+      prow.cost += (e.total_cost || 0);
+    });
+
     const projects = Array.from(byProject.values()).sort((a, b) => b.hours - a.hours);
     const groups = Array.from(byGroup.values()).sort((a, b) => b.hours - a.hours);
     return { projects, groups };
+  }
+
+  /* ================================================================================
+     Card 6 — Standalone service entries (roadmap 2.3)
+     Billable work logged outside any booking (technician time, sample prep, per-unit items).
+     No occupancy rule applies here (an entry has no start/end time, so it never held a slot) —
+     only the money rule, identical to a booking's: a row counts unless it was BOTH cancelled AND
+     the charge was waived.
+     ================================================================================ */
+  function computeServiceEntryRows(from, to) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    const rows = loadServiceEntriesInRange(from, to).map((r) => {
+      const moneyCounts = !(r.is_cancelled && !r.billing_retained);
+      return Object.assign({}, r, { moneyCounts, countedCost: moneyCounts ? (r.total_cost || 0) : 0 });
+    });
+    const totalRevenue = rows.reduce((s, r) => s + r.countedCost, 0);
+    return { rows, totalRevenue };
   }
 
   /* ================================================================================
@@ -351,6 +400,7 @@
     const matrix = computeStaffInstrumentMatrix(from, to);
     const proj = computeProjectRows(from, to);
     const consult = computeConsultRows(from, to);
+    const svc = computeServiceEntryRows(from, to);
 
     return `
     <div class="card mb-16">
@@ -511,6 +561,42 @@
         </div>
       </div>
       <div class="faint small mt-8">Counts bookings tagged Category = "consult", excluding cancelled bookings (a cancelled consult never happened). A consult with no instrument assigned counts toward the period total but has nothing to attribute an instrument row to.</div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('tag')} Service Entries</span></div>
+        <span class="mono font-medium">${fmtMoney(svc.totalRevenue)} total</span>
+        <button class="btn btn-primary btn-sm" data-act="add-service-entry" title="Log standalone billable work outside any booking">${ic('plus')} Service Entry</button>
+      </div>
+      ${!svc.rows.length ? global.Views.emptyState('tag', 'No service entries in this range', 'Log standalone billable work — technician time, sample prep, per-unit items — outside any booking.') : `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Description</th><th>Project</th><th>Staff</th><th>Instrument</th><th>Date</th><th style="text-align:right">Qty</th><th>Unit</th><th style="text-align:right">Total</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${svc.rows.map((r) => {
+              const waived = r.is_cancelled && !r.billing_retained;
+              return `
+              <tr class="${r.is_cancelled ? 'row-retired' : ''}">
+                <td class="font-medium small">${esc(r.description)}${r.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped' : 'Cancelled — charge stands'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
+                <td class="small">${r.project_id == null ? 'Facility-wide' : esc(r.project_code ? r.project_code + ' — ' + r.project_title : r.project_title)}</td>
+                <td class="small">${r.person_name ? nameCell(r.person_name, r.person_retired) : '<span class="faint">—</span>'}</td>
+                <td class="small">${r.instrument_name ? nameCell(r.instrument_name, r.instrument_retired) : '<span class="faint">—</span>'}</td>
+                <td class="mono small faint">${esc(r.date || '—')}</td>
+                <td class="mono small" style="text-align:right">${r.qty || 0}</td>
+                <td class="small">${esc(r.unit || '—')}</td>
+                <td class="mono small" style="text-align:right">${fmtMoney(r.countedCost)}</td>
+                <td style="text-align:right">
+                  <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${r.id}" title="Edit entry">${ic('edit')}</button>
+                  ${r.is_cancelled
+                    ? `<button class="btn btn-ghost btn-xs" data-act="se-reinstate" data-id="${r.id}" title="Reinstate">${ic('rocket')}</button>`
+                    : `<button class="btn btn-ghost btn-xs" data-act="se-cancel" data-id="${r.id}" title="Cancel entry">${ic('archive')}</button>`}
+                </td>
+              </tr>`; }).join('')}
+          </tbody>
+        </table>
+      </div>`}
+      <div class="faint small mt-8">Standalone billable work logged outside any booking — technician time, sample prep, per-unit items. Follows the same money rule as bookings: a cancelled entry's charge counts only if it was retained rather than waived; there is no occupancy rule since an entry never held a schedule slot.</div>
     </div>`;
   }
 
@@ -526,7 +612,8 @@
     computeStaffRows,
     computeStaffInstrumentMatrix,
     computeProjectRows,
-    computeConsultRows
+    computeConsultRows,
+    computeServiceEntryRows
   };
 
 })(window);

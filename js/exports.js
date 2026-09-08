@@ -59,10 +59,22 @@
       LEFT JOIN grants g ON g.id = m.grant_id
       WHERE m.project_id=?
       ORDER BY m.date DESC, m.id DESC`, [id]);
+    // Standalone service entries (roadmap 2.3) — no denormalized name columns, joined fresh here
+    // same as mtgs' grant join above.
+    const entries = DB.rows(`
+      SELECT se.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
+             pe.name as person_name, pe.is_retired as person_retired,
+             i.name as instrument_name, i.is_retired as instrument_retired
+      FROM service_entries se
+      LEFT JOIN grants g ON g.id = se.grant_id
+      LEFT JOIN people pe ON pe.id = se.person_id
+      LEFT JOIN instruments i ON i.id = se.instrument_id
+      WHERE se.project_id=?
+      ORDER BY se.date DESC, se.id DESC`, [id]);
     const files = DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     const prog = DB.projectProgress(id);
 
-    return { p, ppl, inst, ms, kv, mtgs, files, prog };
+    return { p, ppl, inst, ms, kv, mtgs, entries, files, prog };
   }
 
   function blobDownload(blob, filename) {
@@ -298,17 +310,34 @@
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
-    const mtRows = [['Meeting Title', 'Grant', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
+    const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, grantLabelFor(m), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
+
+    // Sheet 5b: Service Entries (roadmap 2.3) — standalone billable work outside any booking.
+    const seRows = [['Description', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
+    d.entries.forEach((e) => {
+      const status = e.is_cancelled ? (e.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active';
+      const counts = !(e.is_cancelled && !e.billing_retained);
+      seRows.push([
+        e.description,
+        e.person_name ? UI.retiredName(e.person_name, e.person_retired) : '—',
+        e.instrument_name ? UI.retiredName(e.instrument_name, e.instrument_retired) : '—',
+        grantLabelFor(e), status, e.date || '—', e.qty || 0, e.unit || '—', e.rate || 0,
+        counts ? (e.total_cost || 0) : 0
+      ]);
+    });
+    const ws5b = XLSX.utils.aoa_to_sheet(seRows);
+    ws5b['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws5b, 'Service Entries');
 
     // Sheet 6: Files
     const fRows = [['File Name', 'Kind', 'Path / Link', 'Logged At']];
@@ -405,10 +434,27 @@
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
-        if (m.total_cost) children.push(new Paragraph({ text: `Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, bold: true }));
+        if (m.total_cost) {
+          if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id)}`, italics: true }));
+          children.push(new Paragraph({ text: `Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, bold: true }));
+        }
       });
     } else {
       children.push(new Paragraph({ text: 'No meetings logged.' }));
+    }
+
+    // Service Entries (roadmap 2.3)
+    children.push(new Paragraph({ text: 'Service Entries', heading: HeadingLevel.HEADING_2 }));
+    if (d.entries.length) {
+      d.entries.forEach((e) => {
+        children.push(new Paragraph({ text: `${UI.fmtDate(e.date)}: ${e.description}${bookingStatusSuffix(e)}`, heading: HeadingLevel.HEADING_3 }));
+        if (e.person_name) children.push(new Paragraph({ text: `Staff: ${UI.retiredName(e.person_name, e.person_retired)}`, italics: true }));
+        if (e.instrument_name) children.push(new Paragraph({ text: `Instrument: ${UI.retiredName(e.instrument_name, e.instrument_retired)}`, italics: true }));
+        if (e.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(e)}`, italics: true }));
+        children.push(new Paragraph({ text: `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${e.rate || 0}   |   Total: ${e.total_cost || 0}`, bold: true }));
+      });
+    } else {
+      children.push(new Paragraph({ text: 'No service entries recorded.' }));
     }
 
     const doc = new Document({
@@ -608,12 +654,52 @@
           y += 5;
         }
         if (m.total_cost) {
+          if (m.tier_id) {
+            checkPage(5);
+            pdf.setFontSize(8);
+            pdf.setTextColor(100, 116, 139);
+            pdf.text(`Tier: ${DB.tierLabel(m.tier_id)}`, margin + 4, y);
+            pdf.setTextColor(20, 20, 20);
+            pdf.setFontSize(9);
+            y += 4;
+          }
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
           pdf.text(`Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
+        y += 2;
+      });
+    }
+
+    // Service Entries (roadmap 2.3)
+    if (d.entries.length) {
+      addHeading('Service Entries');
+      pdf.setFontSize(9);
+      d.entries.forEach((e) => {
+        checkPage(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(`${UI.fmtDate(e.date)}: ${e.description}${bookingStatusSuffix(e)}`, margin, y);
+        pdf.setFont('helvetica', 'normal');
+        y += 5;
+        const bits = [];
+        if (e.person_name) bits.push(`Staff: ${UI.retiredName(e.person_name, e.person_retired)}`);
+        if (e.instrument_name) bits.push(`Instrument: ${UI.retiredName(e.instrument_name, e.instrument_retired)}`);
+        if (e.grant_id) bits.push(`Grant: ${grantLabelFor(e)}`);
+        if (bits.length) {
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text(bits.join('   |   '), margin + 4, y);
+          pdf.setTextColor(20, 20, 20);
+          pdf.setFontSize(9);
+          y += 4;
+        }
+        checkPage(6);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(`Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${e.rate || 0}   |   Total: ${e.total_cost || 0}`, margin + 4, y);
+        pdf.setFont('helvetica', 'normal');
+        y += 5;
         y += 2;
       });
     }
@@ -738,7 +824,7 @@
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
     // computeBookingBOM in app.js at the time the booking was saved).
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
@@ -752,7 +838,7 @@
       // the facility actually bills; the Status column says why.
       const counts = !(m.is_cancelled && !m.billing_retained);
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m),
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
@@ -760,8 +846,37 @@
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
+
+    // Sheet 7: Service Entries (roadmap 2.3) — standalone billable work outside any booking,
+    // across every project plus facility-wide (project-less) entries, same shape as the Meetings
+    // sheet above.
+    const seRows = [['Project Code', 'Project', 'Description', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
+    DB.rows(`
+      SELECT se.*, p.code as project_code, p.title as project_title,
+             pe.name as person_name, pe.is_retired as person_retired,
+             i.name as instrument_name, i.is_retired as instrument_retired,
+             g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
+      FROM service_entries se
+      LEFT JOIN projects p ON p.id = se.project_id
+      LEFT JOIN people pe ON pe.id = se.person_id
+      LEFT JOIN instruments i ON i.id = se.instrument_id
+      LEFT JOIN grants g ON g.id = se.grant_id
+      ORDER BY se.date DESC, se.id DESC`).forEach((e) => {
+      const counts = !(e.is_cancelled && !e.billing_retained);
+      seRows.push([
+        e.project_code || '—', e.project_title || 'Facility-wide', e.description,
+        e.person_name ? UI.retiredName(e.person_name, e.person_retired) : '—',
+        e.instrument_name ? UI.retiredName(e.instrument_name, e.instrument_retired) : '—',
+        grantLabelFor(e),
+        e.is_cancelled ? (e.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active',
+        e.date || '—', e.qty || 0, e.unit || '—', e.rate || 0, counts ? (e.total_cost || 0) : 0
+      ]);
+    });
+    const wsSe = XLSX.utils.aoa_to_sheet(seRows);
+    wsSe['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, wsSe, 'Service Entries');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
@@ -792,6 +907,7 @@
     const matrix = Reports.computeStaffInstrumentMatrix(from, to);
     const proj = Reports.computeProjectRows(from, to);
     const consult = Reports.computeConsultRows(from, to);
+    const svc = Reports.computeServiceEntryRows(from, to);
 
     const wb = XLSX.utils.book_new();
     const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
@@ -868,6 +984,22 @@
     const wsConsult = XLSX.utils.aoa_to_sheet(consultRows);
     wsConsult['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsConsult, 'Consults');
+
+    // Sheet 7: Service Entries — standalone billable work outside any booking, fed from the exact
+    // same Reports.computeServiceEntryRows the screen renders from.
+    const svcRows = [['Description', 'Project', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
+    svc.rows.forEach((r) => {
+      const status = r.is_cancelled ? (r.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active';
+      svcRows.push([
+        r.description, r.project_id == null ? 'Facility-wide' : (r.project_code ? r.project_code + ' — ' + r.project_title : r.project_title),
+        r.person_name ? UI.retiredName(r.person_name, r.person_retired) : '—',
+        r.instrument_name ? UI.retiredName(r.instrument_name, r.instrument_retired) : '—',
+        grantLabelFor(r), status, r.date || '—', r.qty || 0, r.unit || '—', r.rate || 0, round2(r.countedCost)
+      ]);
+    });
+    const wsSvc = XLSX.utils.aoa_to_sheet(svcRows);
+    wsSvc['!cols'] = [{ wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, wsSvc, 'Service Entries');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
