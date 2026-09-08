@@ -2162,7 +2162,7 @@
     return `<div class="field"><label>${label}</label>
       <div class="token-picker" data-kind="${kind}" data-add="${esc(addLabel)}">
         <div class="token-list"></div>
-        <input type="text" class="input token-search" placeholder="Type to filter…" autocomplete="off" hidden />
+        <input type="text" class="input token-search" placeholder="Type to filter…" aria-label="Filter the ${esc(label)} list by name or lab" autocomplete="off" hidden />
         <select class="input token-select"></select>
       </div></div>`;
   }
@@ -2247,6 +2247,7 @@
     let filterFn = null; // narrows the dropdown only — an already-picked badge never disappears
     let singleInstrumentLock = false; // 'inst' picker only — set once the user confirms one instrument is enough
     let searchTerm = ''; // type-to-search text, ANDed with filterFn — narrows the dropdown only
+    let lastNotifiedSelection = null; // last selection signature onChange fired for (null ⇒ fire on first render)
     // Always shown: the box is harmless even on a short list (a few extra pixels), and any
     // fixed item-count threshold ends up hiding it on real data — the shipped demo dataset's
     // own People/Instruments/Staff pickers all sit at or under 8 items, which a `> 8` gate
@@ -2273,8 +2274,12 @@
       sel.value = '';
       sel.disabled = singleInstrumentLock;
       // Cost-relevant pickers (instruments/staff) pass this so the BOM re-renders whenever the
-      // selection itself changes; the attendees picker doesn't bother — it isn't billed.
-      if (onChange) onChange();
+      // SELECTION itself changes — not on every render: search typing re-renders the dropdown
+      // many times a second, and recomputing the BOM + conflict check per keystroke would lag on
+      // larger datasets. The signature check keeps the first render firing (mount-time init)
+      // and any _setSelected/add/remove, while pure dropdown refreshes stay silent.
+      const selSig = [...selected].join(',');
+      if (onChange && selSig !== lastNotifiedSelection) { lastNotifiedSelection = selSig; onChange(); }
     }
     if (search) {
       search.addEventListener('input', () => { searchTerm = search.value || ''; render(); });

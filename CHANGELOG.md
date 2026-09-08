@@ -27,6 +27,9 @@ This project uses [Semantic Versioning](https://semver.org/).
 - **Training's disabled Staff % no longer masquerades as the applied rate.** While "Same as
   assisted session" is on, the Category Billing row shows a live hint with the assisted-session
   percent that actually bills, updating as that value is edited.
+- **Typing in a picker's search box no longer recomputes the booking cost per keystroke.** The
+  cost breakdown and conflict advisory now refresh only when the actual selection changes; the
+  search input also carries an accessible label.
 
 ## [1.7.0] — 2026-09-08
 
