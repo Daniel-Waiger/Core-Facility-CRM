@@ -23,6 +23,11 @@ This project uses [Semantic Versioning](https://semver.org/).
   the font-size picker, keeping only the bullet-list button; existing notes with that formatting
   still render and export unchanged.
 
+### Fixed
+- **Training's disabled Staff % no longer masquerades as the applied rate.** While "Same as
+  assisted session" is on, the Category Billing row shows a live hint with the assisted-session
+  percent that actually bills, updating as that value is edited.
+
 ## [1.7.0] — 2026-09-08
 
 ### Added

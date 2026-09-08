@@ -1386,15 +1386,16 @@
             <span class="small font-medium" style="min-width:130px">${esc(p.category)}</span>
             <div class="field" style="margin:0">
               <label class="small faint">Staff %</label>
-              <input type="number" min="0" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} />
+              <input type="number" min="0" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} ${p.category === 'assisted session' ? 'oninput="window.App && App.syncCategoryBillingHints && App.syncCategoryBillingHints()"' : ''} />
             </div>
             <label class="row small" style="gap:6px;align-items:center;cursor:pointer">
               <input type="checkbox" class="cat-requires-staff" ${p.requires_staff ? 'checked' : ''} /> Requires facility staff
             </label>
             ${p.category === 'training' ? `
             <label class="row small" style="gap:6px;align-items:center;cursor:pointer">
-              <input type="checkbox" class="cat-follow-assisted" ${p.follow_assisted ? 'checked' : ''} onchange="this.closest('.cat-policy-row').querySelector('.cat-staff-pct').disabled = this.checked" /> Same as assisted session
-            </label>` : ''}
+              <input type="checkbox" class="cat-follow-assisted" ${p.follow_assisted ? 'checked' : ''} onchange="window.App && App.syncCategoryBillingHints && App.syncCategoryBillingHints()" /> Same as assisted session
+            </label>
+            <span class="cat-follow-hint small faint" ${p.follow_assisted ? '' : 'hidden'}>→ billing at assisted session's ${esc((categoryPolicies.find((q) => q.category === 'assisted session') || { staff_pct: 100 }).staff_pct)}% (the disabled value above is ignored)</span>` : ''}
           </div>`).join('')}
         <button class="btn btn-primary btn-sm mt-8" data-act="save-category-policies">${ic('check')} Save Category Billing</button>
       </div>

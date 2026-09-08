@@ -16,6 +16,7 @@
     get autoBackupFolderStatus() { return autoBackupFolderStatus; },
     onSaving() { UI.setSavedState('pending'); },
     onSaved() { UI.setSavedState('saved'); },
+    syncCategoryBillingHints: syncCategoryBillingHints,
   };
 
   const TITLES = {
@@ -3698,6 +3699,29 @@
     });
     UI.toast('Category billing policies saved');
     refresh();
+  }
+
+  // Keeps the training row honest while "Same as assisted session" is checked: the disabled %
+  // input still shows training's own STORED value, but the percent actually billed comes from the
+  // assisted-session row — so a visible hint mirrors that effective percent live (updated from
+  // both the checkbox and the assisted row's % input) without ever changing the stored value.
+  function syncCategoryBillingHints() {
+    const rows = [...document.querySelectorAll('.cat-policy-row')];
+    const assistedRow = rows.find((r) => r.dataset.category === 'assisted session');
+    const trainingRow = rows.find((r) => r.dataset.category === 'training');
+    if (!trainingRow) return;
+    const followEl = trainingRow.querySelector('.cat-follow-assisted');
+    const pctEl = trainingRow.querySelector('.cat-staff-pct');
+    const hintEl = trainingRow.querySelector('.cat-follow-hint');
+    const on = !!(followEl && followEl.checked);
+    if (pctEl) pctEl.disabled = on;
+    if (hintEl) {
+      hintEl.hidden = !on;
+      if (on) {
+        const assistedPct = assistedRow ? Number((assistedRow.querySelector('.cat-staff-pct') || {}).value) || 0 : 100;
+        hintEl.textContent = `→ billing at assisted session's ${assistedPct}% (the disabled value above is ignored)`;
+      }
+    }
   }
 
   // Rename/merge a lab name everywhere it appears (people.organization, meetings.group_org, and
