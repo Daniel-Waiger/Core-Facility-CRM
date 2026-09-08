@@ -205,7 +205,7 @@
          stale twice, which is exactly the kind of thing not worth remembering by hand. -->
     <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">1.7.0 finishes the roadmap's scheduling and billing tiers. The calendar grows an hourly <strong>week view</strong> and a per-instrument <strong>timeline</strong>; instruments get real booking rules &mdash; minimum and maximum duration, gaps, advance notice &mdash; enforced by the same check that warns you as you type; a booking can <strong>repeat weekly</strong> with every occurrence checked before anything is saved. On the money side, named <strong>pricing tiers</strong> replace the one-size overhead pair, and <strong>service entries</strong> finally let technician time and sample prep be billed outside any booking.</p>
+    <p class="lede">1.8.0 is a booking-form quality release, driven directly by user feedback. The people and instrument pickers get a <strong>type-to-search box</strong> &mdash; no more scanning dozens of names &mdash; and booking categories get <strong>billing semantics</strong>: each category sets what percent of a staff member's rate it bills, so a consult can be free while an assisted session bills in full, and training sessions can insist on a facility staff member. Plus small polish: an aligned Category field and a notes toolbar trimmed to what actually gets used.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="manual/">User Manual</a>
@@ -219,14 +219,12 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.7.0.</p>
+    <p class="section-sub">What changed in 1.8.0.</p>
     <div class="cards">
-      <div class="card"><div class="ic">📅</div><h3>A week, hour by hour</h3><p>The Calendar gains a Month / Week / Timeline toggle. Week mode is an hourly grid &mdash; clicking an empty hour opens New Booking with the date <em>and</em> that hour already filled in.</p></div>
-      <div class="card"><div class="ic">🛤️</div><h3>One lane per instrument</h3><p>Timeline mode shows where every machine is busy across the week &mdash; a booking on two instruments appears in both lanes, and clicking a free slot pre-selects that instrument too.</p></div>
-      <div class="card"><div class="ic">📏</div><h3>Instruments set their own rules</h3><p>Minimum and maximum session length, a required gap between bookings, and minimum advance notice &mdash; per instrument, enforced by the same check behind the as-you-type warning and the save button, so they can never disagree.</p></div>
-      <div class="card"><div class="ic">🔁</div><h3>Repeat weekly, checked first</h3><p>A new booking can repeat every N weeks until a date. Every occurrence is conflict- and rule-checked <em>before anything saves</em> &mdash; all or nothing, no half-created series &mdash; and each one stays an ordinary booking you can edit or cancel alone.</p></div>
-      <div class="card"><div class="ic">🏷️</div><h3>Pricing tiers</h3><p>Named price lists &mdash; internal, academia, industry &mdash; with per-tier overhead and optional per-tier instrument rates, assigned per lab. Labs without a tier keep pricing exactly as before, and existing bookings never recompute.</p></div>
-      <div class="card"><div class="ic">🧰</div><h3>Billable work outside a booking</h3><p>Service entries: technician time, sample prep, per-unit items &mdash; logged with staff, instrument, project and grant, counted into Project Costs, Reports and every export under the same rules as bookings.</p></div>
+      <div class="card"><div class="ic">🔎</div><h3>Find people by typing</h3><p>Every assignment picker &mdash; people, facility staff, instruments, supervisors &mdash; takes a search box that filters by name <em>or</em> lab as you type, and clears after each pick. Asked for by a facility running dozens of researchers per booking.</p></div>
+      <div class="card"><div class="ic">🏷️</div><h3>Categories carry billing</h3><p>Settings &rarr; Category Billing: each booking category bills a configurable percent of staff rates &mdash; sync 0%, consult whatever your policy says, assisted 100%. Staff stay properly assigned; only the billing changes. Instrument time is untouched.</p></div>
+      <div class="card"><div class="ic">🎓</div><h3>Training equals assisted &mdash; by link</h3><p>Training and assisted sessions cost the same but mean different things, so training has a &ldquo;Same as assisted session&rdquo; switch that tracks the assisted rate live &mdash; and both categories now require a facility staff member on the booking.</p></div>
+      <div class="card"><div class="ic">🧹</div><h3>Modal polish</h3><p>The Category field lines up with its neighbors instead of sitting lower, and the notes toolbar is down to bullets and normal text &mdash; the broken font-size menu and the rarely-used styling buttons are gone. Old formatted notes still render and export.</p></div>
     </div>
   </div>
 </section>
@@ -238,7 +236,48 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>The calendar learns hours: week view <span class="tag">new</span></h3>
+        <h3>Pickers you can type into <span class="tag">new</span></h3>
+        <p>A facility's people list grows for years, and the booking form asked you to scan all of it in one dropdown. Every token picker &mdash; Assign People, Assign Facility Staff, Assign Instruments, an instrument's supervisors &mdash; now has a search box: type a fragment of a name <em>or a lab</em>, the list narrows as you type, and the box clears after each pick so the next search starts fresh. It stacks with the existing group filtering, and someone retired-but-already-assigned still keeps their badge.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/62-picker-search.png" alt="Assign People picker with a search box narrowing the dropdown as text is typed" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/62-picker-search.png</code></span></div>
+        <figcaption>Type a name or a lab &mdash; the list narrows; pick someone and the search resets.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>What a consult costs is now your call <span class="tag">new</span></h3>
+        <p>A consult and an assisted session both put a staff member on a booking, but most facilities bill them differently &mdash; often not at all for the consult. Category Billing makes that a setting: each category bills a chosen percent of the staff member's normal rate (after the usual 1-hour floor), applied to staff time only &mdash; instrument pricing already has tiers and discounts and is untouched. Set consult to 0% and the conversation is recorded, attributed, and free, with no zero-rate duplicate people or other workarounds.</p>
+        <ul>
+          <li>Training&rsquo;s &ldquo;Same as assisted session&rdquo; is a live link &mdash; change the assisted rate and training follows, with a hint showing the percent that actually applies.</li>
+          <li>Training and assisted sessions require a facility staff member at save (per-category checkbox); old bookings&rsquo; notes stay editable.</li>
+          <li>A booking keeps its saved price until it is edited and re-saved &mdash; like every other rate in the app.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/63-category-billing.png" alt="Category Billing settings card with per-category staff percentages, requires-staff checkboxes, and training linked to assisted" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/63-category-billing.png</code></span></div>
+        <figcaption>Consult at 0%, training linked to assisted &mdash; billing policy per category, staff time only.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>A tidier booking form <span class="tag">new</span></h3>
+        <p>Two small irritations, fixed: the Category select sat visibly lower than its neighbors because its &ldquo;Add New&rdquo; button padded the row &mdash; it lines up now &mdash; and the notes editor&rsquo;s toolbar shrank to a bullet-list button and plain text. The font-size menu didn&rsquo;t work, and bold/italic belong in the report you export, not the note you jot; notes written with the old formatting keep rendering and exporting exactly as before.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/64-booking-modal-polish.png" alt="Booking modal with the Category select aligned to its sibling fields and a minimal bullets-only notes toolbar" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/64-booking-modal-polish.png</code></span></div>
+        <figcaption>Category aligned with its row; notes down to bullets and plain text.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>The calendar learns hours: week view <span class="tag">1.7.0</span></h3>
         <p>The month grid answers &ldquo;what&rsquo;s happening this month?&rdquo; but not &ldquo;is Tuesday 10&ndash;12 free?&rdquo;. Week mode does: a Month / Week / Timeline toggle in the calendar header, an hourly grid with each booking block positioned at its time, and an all-day lane on top for milestones and untimed entries. Clicking an empty hour opens New Booking with the date <em>and</em> that hour prefilled &mdash; and the live conflict advisory from 1.6.0 reacts immediately.</p>
         <p>Every slot is keyboard-reachable too &mdash; tab to an hour and press Enter.</p>
       </div>
@@ -251,7 +290,7 @@
 
     <div class="feature reverse">
       <div class="txt">
-        <h3>Timeline: where every machine is busy <span class="tag">new</span></h3>
+        <h3>Timeline: where every machine is busy <span class="tag">1.7.0</span></h3>
         <p>The third calendar mode turns the same week sideways: one lane per instrument, booking blocks where it&rsquo;s held. A session on two instruments appears in both lanes &mdash; both were genuinely occupied &mdash; and a retired instrument keeps its lane while it still has history in view. Clicking a free slot opens New Booking with the date, the hour, <em>and that instrument</em> already selected.</p>
       </div>
       <figure class="shot">
@@ -263,7 +302,7 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>Instruments set their own booking rules <span class="tag">new</span></h3>
+        <h3>Instruments set their own booking rules <span class="tag">1.7.0</span></h3>
         <p>A cryo-scope that needs a day&rsquo;s notice, a screening system nobody should book for ten minutes, a laser that wants a cool-down gap &mdash; each instrument now carries its own rules: minimum and maximum session length, minimum gap between bookings, minimum advance notice. They live inside the <em>same</em> conflict check that powers the as-you-type warning and the save button, so the advisory, the hard gate, and reinstating a cancelled booking all enforce them identically.</p>
         <p>Editing an old booking without touching its schedule still saves &mdash; the notice rule guards new scheduling, not history.</p>
       </div>
@@ -276,7 +315,7 @@
 
     <div class="feature reverse">
       <div class="txt">
-        <h3>Recurring bookings, checked before they exist <span class="tag">new</span></h3>
+        <h3>Recurring bookings, checked before they exist <span class="tag">1.7.0</span></h3>
         <p>A weekly imaging slot is one form now: &ldquo;repeat every N week(s) until&rdquo; a date. Every occurrence is conflict- and constraint-checked <em>before anything is saved</em> &mdash; if week 3 collides, the whole series is refused with the date named, so a half-created series can&rsquo;t happen. Deliberately, there is no &ldquo;series&rdquo; object: each occurrence is an ordinary booking you edit, cancel, or reinstate on its own, under the same billing rules as any other.</p>
       </div>
       <figure class="shot">
@@ -288,7 +327,7 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>Pricing tiers replace the one-size overhead <span class="tag">new</span></h3>
+        <h3>Pricing tiers replace the one-size overhead <span class="tag">1.7.0</span></h3>
         <p>Until now every booking paid the same overhead &mdash; the internal and external percentages, summed. Facilities don&rsquo;t price that way: internal labs, academia, and industry each get their own list. Pricing tiers are named lists with their own overhead percentage, assigned per lab; an instrument can carry a different hourly rate per tier. The old percentages migrate into two default tiers, and a lab with <em>no</em> tier assigned prices exactly as before &mdash; nothing changes until you say so.</p>
         <p>Money already billed is untouched: cost snapshots are frozen at save, and each booking records which tier priced it, so history stays auditable.</p>
       </div>
@@ -301,7 +340,7 @@
 
     <div class="feature reverse">
       <div class="txt">
-        <h3>Service entries: billable work without a booking <span class="tag">new</span></h3>
+        <h3>Service entries: billable work without a booking <span class="tag">1.7.0</span></h3>
         <p>Technician time, sample prep, a per-unit charge &mdash; real facility work that never held an instrument slot had nowhere to be billed. Service entries fix that: staff, optional instrument and project, grant, quantity &times; rate, logged from a project&rsquo;s Costs card or facility-wide from Reports. They follow the same money rule as bookings &mdash; a cancelled entry&rsquo;s charge counts only if it was retained &mdash; and appear in Project Costs, Reports, and every XLSX/DOCX/PDF export.</p>
       </div>
       <figure class="shot">
