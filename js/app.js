@@ -2747,7 +2747,18 @@
     // before it has times at all, so this renders (or stays silent) regardless of the early
     // return just below.
     const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
-    const advisory = categoryStaffAdvisory(categoryEl ? categoryEl.value || '' : '', staffIds);
+    const currentCategory = categoryEl ? categoryEl.value || '' : '';
+    // Mirror bookingEditSave's skipRequiresStaffCheck exactly: a legacy booking saved with this
+    // same category and no staff, still with no staff selected, saves fine (notes-only edits of
+    // history must not be bricked) — so the advisory must not warn about it either, or it drifts
+    // from the gate it exists to preview.
+    let suppressStaffAdvisory = false;
+    if (ids.excludeId && staffIds.length === 0) {
+      const storedCat = DB.row('SELECT category FROM meetings WHERE id=?', [ids.excludeId]);
+      const storedStaff = DB.row('SELECT COUNT(*) AS n FROM meeting_staff WHERE meeting_id=?', [ids.excludeId]);
+      suppressStaffAdvisory = !!storedCat && (storedCat.category || '') === currentCategory && !!storedStaff && storedStaff.n === 0;
+    }
+    const advisory = suppressStaffAdvisory ? '' : categoryStaffAdvisory(currentCategory, staffIds);
     const advisoryHtml = advisory ? `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} ${esc(advisory)}</span></div>` : '';
 
     if (!start || !end) { host.innerHTML = advisoryHtml; return; }

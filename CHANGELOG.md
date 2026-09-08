@@ -32,6 +32,9 @@ This project uses [Semantic Versioning](https://semver.org/).
   search input also carries an accessible label.
 - **Category staff percentages can't go negative.** The policy is clamped to zero at save and at
   read, so a stray minus sign can't produce negative staff lines or booking totals.
+- **The requires-staff advisory honors the legacy-edit bypass.** Editing an old booking that was
+  saved with a requires-staff category and no staff no longer shows a warning the save gate
+  itself waives for notes-only edits.
 
 ## [1.7.0] — 2026-09-08
 
