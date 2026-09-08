@@ -225,11 +225,22 @@
     billing_retained INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS project_outputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    type TEXT NOT NULL DEFAULT 'publication',
+    title TEXT NOT NULL DEFAULT '',
+    reference TEXT DEFAULT '',
+    date TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
   CREATE INDEX IF NOT EXISTS ix_files_project ON files(project_id);
   CREATE INDEX IF NOT EXISTS ix_kv_project ON kv(project_id);
   CREATE INDEX IF NOT EXISTS ix_service_entries_project ON service_entries(project_id);
+  CREATE INDEX IF NOT EXISTS ix_project_outputs_project ON project_outputs(project_id);
   `;
 
   /* ---------------- sql.js bootstrap ---------------- */
@@ -517,6 +528,27 @@
     } catch (_) {}
     seedDefaultCategoryPolicies();
     try { db.exec('ALTER TABLE meetings ADD COLUMN category_staff_pct REAL'); } catch (_) {}
+
+    // Project outputs (roadmap 3.3) — the funnel's exit stage (publication/acknowledgement/
+    // dataset/other). A data table, not a settings table, so it belongs in clearAllData() and
+    // the ref-counters, not the org-keyed-settings exemption list above. CREATE TABLE IF NOT
+    // EXISTS here (idempotent, same pattern as category_policies above) covers every DB that
+    // migrated before this table existed; the SCHEMA string above covers a brand-new DB.
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project_outputs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          type TEXT NOT NULL DEFAULT 'publication',
+          title TEXT NOT NULL DEFAULT '',
+          reference TEXT DEFAULT '',
+          date TEXT DEFAULT '',
+          note TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS ix_project_outputs_project ON project_outputs(project_id);
+      `);
+    } catch (_) {}
   }
 
   // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
@@ -1118,15 +1150,17 @@
       (SELECT COUNT(*) FROM service_entries WHERE project_id=?) AS entries,
       (SELECT COUNT(*) FROM files WHERE project_id=?) AS files,
       (SELECT COUNT(*) FROM kv WHERE project_id=?) AS fields,
+      (SELECT COUNT(*) FROM project_outputs WHERE project_id=?) AS outputs,
       (SELECT COALESCE(SUM(total_cost),0) FROM meetings WHERE project_id=?) AS billed,
       (SELECT COALESCE(SUM(total_cost),0) FROM service_entries WHERE project_id=?) AS entriesBilled`,
-      [id, id, id, id, id, id, id, id, id]) || {};
+      [id, id, id, id, id, id, id, id, id, id]) || {};
     const parts = {
       team: r.team || 0, instruments: r.instruments || 0, milestones: r.milestones || 0,
       bookings: r.bookings || 0, entries: r.entries || 0, files: r.files || 0, fields: r.fields || 0,
+      outputs: r.outputs || 0,
       billed: (Number(r.billed) || 0) + (Number(r.entriesBilled) || 0)
     };
-    parts.total = parts.team + parts.instruments + parts.milestones + parts.bookings + parts.entries + parts.files + parts.fields;
+    parts.total = parts.team + parts.instruments + parts.milestones + parts.bookings + parts.entries + parts.files + parts.fields + parts.outputs;
     return parts;
   }
   /* What a booking carries: billing line items, its saved total, and the people recorded as
@@ -1318,6 +1352,7 @@
       DELETE FROM grants;
       DELETE FROM files;
       DELETE FROM kv;
+      DELETE FROM project_outputs;
       DELETE FROM projects;
       DELETE FROM people;
       DELETE FROM instruments;
@@ -1326,7 +1361,7 @@
       // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
       // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
-      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries')");
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries','project_outputs')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     markDirty();
   }
@@ -1552,6 +1587,23 @@
       day(-70),
       'Full organ clearing, refractive index matching, and complete volumetric islet distribution mapping completed successfully.'
     ]);
+
+    // 3b. Backdated created_at (roadmap 3.3 funnel — see the rejection note this fixes below).
+    // Every INSERT above stamped created_at at datetime('now') (the schema default), which would
+    // put each project's "created" event AFTER its own first booking below (bookings are dated
+    // day(-100)..day(-1), i.e. in the past) — a negative created->first-booking delta on every
+    // single seed project. That's honest for a truly backfilled/imported project, but it would
+    // leave the funnel's median time-in-stage permanently empty on fresh sample data, which is
+    // its own kind of misleading demo. So each project's created_at is set here to a few days
+    // BEFORE its own first seed booking (see the day() offsets on each seedBooking() call below):
+    // project 1's first booking is day(-95), project 2's is day(-70), project 3's is day(-100).
+    // Uses UPDATE (not a column on the INSERT above) so the offset stays visibly tied to the
+    // booking dates it has to precede, rather than a second copy of "day(-100)" duplicated with
+    // no visible connection between the two. Does not touch any booking, so seed booking #1's
+    // cost triple is unaffected.
+    run(`UPDATE projects SET created_at = ? WHERE id = 1`, [day(-100) + ' 09:00:00']);
+    run(`UPDATE projects SET created_at = ? WHERE id = 2`, [day(-75) + ' 09:00:00']);
+    run(`UPDATE projects SET created_at = ? WHERE id = 3`, [day(-105) + ' 09:00:00']);
 
     // 4. Project People Mappings
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 1, "Principal Investigator")');
@@ -1804,6 +1856,41 @@
       category: 'assisted session'
     });
 
+    // #11 — training category (roadmap 3.4 seed): no training-category booking existed before
+    // this, so the Activity Mix report's training segment would never have anything to show.
+    // category_policies seeds training with requires_staff=1, so this needs a staff assignee (Dr.
+    // Priya Anand, the Cryo-EM specialist) even though only her time — not the instrument — is
+    // billed at the training rate. day(-50) on the Zeiss Lightsheet Z.1 (instrument id 3) is a
+    // date+instrument combination no other seed booking touches (Z.1's only other booking is
+    // day(-30)), so this cannot overlap despite seed inserts bypassing the conflict gate.
+    seedBooking({
+      projectId: 3,
+      title: 'New User Training: Zeiss Lightsheet Z.1 Acquisition Basics',
+      date: day(-50), start: '09:00', end: '10:30',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [3, 7], // Sarah Lin, Priya Anand
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Walked Sarah through sample mounting, chamber refractive-index matching, and multi-view acquisition setup on the Z.1.',
+      actions: '',
+      category: 'training'
+    });
+
+    // #12 — facility-wide (project_id NULL) CONSULT: the seed dataset previously had a
+    // facility-wide booking (#6) but it was tagged 'assisted session', not 'consult', so
+    // Consult Volume / computeFunnelRows' consult stage had no fixture demonstrating that a
+    // facility-wide consult (never linked to any project) still counts toward volume. day(-20)
+    // with no instrument/staff line avoids any overlap with existing seed bookings.
+    seedBooking({
+      projectId: null,
+      title: 'Walk-in Consult: Choosing an Imaging Modality for a New Grant',
+      date: day(-20), start: '11:00', end: '11:30',
+      peopleIds: [6], // David Kim
+      note: 'General walk-in consult with a PI who has not yet started a project, discussing which core instrument would suit a planned new grant.',
+      actions: 'Sent follow-up reading on confocal vs. lightsheet tradeoffs; no project opened yet.',
+      category: 'consult'
+    });
+
     // 8b. Standalone Service Entries (roadmap 2.3) — billable work logged outside any booking,
     // following the exact same Project Costs counting rule as a booking's cost snapshot. Priced
     // from the seeded people rows above, not invented numbers: Tom Alvarez (person id 8) is
@@ -1840,7 +1927,37 @@
     run('INSERT INTO files (project_id, name, kind, path) VALUES (2, "STED_Resolution_Calibration_Guide.pdf", "link", "https://core-facility.internal/docs/sted-calib.pdf")');
     run('INSERT INTO files (project_id, name, kind, path) VALUES (3, "Pancreatic_Islets_3D_Summary.xlsx", "link", "https://core-facility.internal/reports/islets-2026.xlsx")');
 
+    // 11. Project Outputs (roadmap 3.3) — the funnel's exit stage. Project 3 (Completed, first
+    // booking day(-100)) gets a publication and a later acknowledgement, so both the
+    // first-booking->first-output median and the "output" stage itself have something real to
+    // show. Project 1 (still Active) gets a dataset deposit — outputs aren't only for finished
+    // projects. Project 2 deliberately gets none, so the funnel's created->output conversion is
+    // visibly less than 100%, same as any honest funnel.
+    run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (3, 'publication', 'Volumetric mapping of pancreatic islet distribution in cleared murine tissue', 'J. Endocrine Imaging 12(3):200-214', ?)`, [day(-40)]);
+    run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (3, 'acknowledgement', 'Core facility acknowledged in State Health Initiative renewal report', 'State Health Initiative #4401 — Year 2 progress report', ?)`, [day(-10)]);
+    run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (1, 'dataset', 'Intravital CAR-T 4D time-lapse volumes (raw + segmented)', 'NAS-Bioimaging-Vol4 dataset DOI pending', ?)`, [day(-1)]);
+
     markDirty();
+  }
+
+  // The "effective date" of a research output: its own `date` when set, else the
+  // calendar day it was logged. `project_outputs.date` is OPTIONAL and the UI
+  // falls back to `created_at` when it is blank, so every ordering and range
+  // filter must use this expression -- otherwise a blank-dated output sorts to
+  // the bottom of a list that displays it with a recent timestamp.
+  //
+  // It lives here, not in reports.js, because views.js loads first and needs it
+  // too. One definition is what stops the funnel, the project screen and the
+  // three export paths from quietly disagreeing about the same rows -- the same
+  // reasoning that keeps UI.billableStaffHours out of app.js and reports.js.
+  //
+  // Same UTC/local caveat the funnel already documents: created_at is a UTC
+  // timestamp while `date` is a local calendar day, so at UTC+ offsets the
+  // fallback can read one day early. Ordering only, and strictly better than
+  // sorting every undated row last.
+  function outputEffDate(alias) {
+    const a = alias ? alias + '.' : '';
+    return `CASE WHEN TRIM(COALESCE(${a}date,'')) != '' THEN ${a}date ELSE date(${a}created_at) END`;
   }
 
   global.DB = {
@@ -1856,6 +1973,7 @@
     getAutoBackupDirHandle,
     clearAutoBackupDirHandle,
     rows,
+    outputEffDate,
     row,
     q,
     q1,

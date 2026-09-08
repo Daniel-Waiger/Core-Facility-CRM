@@ -243,6 +243,9 @@
       ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
 
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
+    // Research outputs (roadmap 3.3) — the funnel's exit stage. Cloned from the same
+    // "load flat, query fresh, no denormalized name column" pattern as kv above.
+    const outputs = global.DB.rows(`SELECT * FROM project_outputs WHERE project_id=? ORDER BY ${global.DB.outputEffDate()} DESC, id DESC`, [id]);
     const mtgs = global.DB.rows(`
       SELECT m.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
       FROM meetings m
@@ -370,6 +373,29 @@
               <button class="btn btn-ghost btn-sm" data-act="remove-project-person" data-id="${r.id}" title="Remove member">${ic('trash')}</button>
             </div>`).join('') : emptyState('users', 'No team members', 'Add collaborators, PIs, or technicians to this project.')}
         </div>
+      </div>
+    </div>
+
+    <!-- Research Outputs Card (roadmap 3.3) — cloned from the Custom Fields card's add/edit/
+         delete pattern above; the funnel's exit stage lives here per-project. -->
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('tag')} Research Outputs</span></div>
+        <button class="btn btn-ghost btn-sm" data-act="output-add" data-project-id="${p.id}">${ic('plus')} Add Output</button>
+      </div>
+      <div class="card-body">
+        ${outputs.length ? `
+        <div class="kv">
+          ${outputs.map((o) => `
+            <div class="kv-row">
+              <span class="k"><span class="badge neutral" style="text-transform:capitalize">${esc(o.type)}</span> ${esc(o.title)}</span>
+              <span class="v">${o.reference ? esc(o.reference) + ' — ' : ''}${o.date ? fmt(o.date) : fmt(o.created_at)}</span>
+              <div class="row" style="gap:4px">
+                <span class="del" role="button" tabindex="0" aria-label="Edit output" data-act="output-edit" data-id="${o.id}" title="Edit output">${ic('edit')}</span>
+                <span class="del" role="button" tabindex="0" aria-label="Delete output" data-act="output-del" data-id="${o.id}" title="Delete output">${ic('x')}</span>
+              </div>
+            </div>`).join('')}
+        </div>` : emptyState('tag', 'No research outputs yet', 'Log a publication, acknowledgement, dataset, or other output once this project produces one.')}
       </div>
     </div>
 

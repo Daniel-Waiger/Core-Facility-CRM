@@ -1,5 +1,5 @@
 /* consts.js — shared vocabularies (keep in sync with UI) */
-window.APP_VERSION = '1.8.0';
+window.APP_VERSION = '1.9.0';
 window.CONST = {
   // A lab→facility review/billing workflow by default; facilities can add their own via the
   // "+ Add New" vocab flow (DB.vocabList/addVocab), same as every other list here.
@@ -23,4 +23,7 @@ window.CONST = {
   // rate is price-per-unit. Distinct from instruments' UNIT (which describes how an INSTRUMENT is
   // priced) since an entry's unit is a literal quantity label shown next to Qty, not a pricing mode.
   SERVICE_UNIT: ['hour', 'sample', 'unit', 'day', 'other'],
+  // Research output type on project_outputs (roadmap 3.3) — the funnel's exit stage. Facilities
+  // can add their own via the "+ Add New" vocab flow, same as every other list here.
+  OUTPUT_TYPE: ['publication', 'acknowledgement', 'dataset', 'other'],
 };

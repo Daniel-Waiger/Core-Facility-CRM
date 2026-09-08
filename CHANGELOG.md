@@ -3,6 +3,62 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-09-08
+
+### Added
+- **Instrument stewardship scorecard (roadmap 3.2).** Reports & Utilization gains a new card,
+  grouped by supervising staff, showing per-instrument bookings, hours, revenue, distinct/new
+  users, projects served, facility-wide sessions, and consults; exported to XLSX as a matching
+  "Stewardship" sheet.
+- **Breadth and activity-mix views (roadmap 3.4).** Reports & Utilization gains a Breadth card
+  (distinct labs/people served and new labs onboarded per period, per instrument, occupancy-rule
+  scoped) with an opt-in, off-by-default per-lab consult attribution table, and an Activity Mix
+  card breaking down facility hours by booking category per period; both export to XLSX as
+  matching "Breadth" and "Activity Mix" sheets (the lab-consult sheet only when the toggle is on).
+- **Funnel analysis with project outputs (roadmap 3.3).** A new `project_outputs` entity
+  (publication/acknowledgement/dataset/other, with a "Research Outputs" card and add/edit/delete
+  modals on the project detail screen) backs a new Reports & Utilization "Funnel: Consult to
+  Output" card — consult volume, project created, active (first booking), milestones progressing,
+  completed, and research output, with adjacent conversion % and a median time-in-stage for
+  created→first-booking and first-booking→first-output. Negative day-deltas (the later event
+  predating the earlier one — real for backfilled/imported projects) are excluded from the median
+  but always counted and disclosed, in the card's own footnote and the exported "Notes"/"Funnel"
+  sheets. Exported to XLSX as a matching "Funnel" sheet in the Reports export, an "Outputs" sheet
+  in the per-project XLSX/DOCX/PDF exports, and a facility-wide "Research Outputs" listing sheet
+  in the all-projects XLSX export. Every surface that lists outputs — the project screen, the
+  funnel, and all three export paths — orders them by that same effective date, defined once as
+  `DB.outputEffDate()`, so an output logged today with no date set sorts above an older dated one
+  rather than falling to the bottom of the list.
+- **Charts on the Reports screen (roadmap 3.5).** Instrument Utilisation, the Funnel, and Activity
+  Mix cards each gain a hand-rolled inline SVG chart (horizontal bars, a stage funnel with
+  conversion labels, and a stacked bar chart with legend) directly above their existing tables —
+  no chart library, and each chart reads the exact same `Reports.compute*` result the table below
+  it renders from, so a chart can never disagree with its own table. Colors come from six new
+  `--chart-1`..`--chart-6` CSS custom properties (light/dark themed), so switching themes recolors
+  the charts instantly with no re-render. Retired instrument names truncate the base name first
+  and append the " (Retired)" suffix after truncating (never the reverse), and every bar/segment
+  carries a `<title>` with the full, untruncated name. Display-only — no export changes.
+- **Custom report generator (roadmap 3.6).** Reports & Utilization gains a "Custom Report" button
+  opening a modal to pick an entity (Instrument Utilization, Staff Time, Projects & Groups,
+  Consults, Service Entries, Stewardship, Activity Mix, Funnel, or the new row-level Bookings
+  listing), a set of columns, and a date range, with a live preview table and its own "Export
+  XLSX" — all driven from one declarative column map per entity in `js/reports.js`
+  (`Reports.computeCustomRows`) so the preview and the export can never disagree. The date range
+  always prefills from the Reports screen's own current range on every open (never a stale
+  persisted value); only the last-used entity and column selection are remembered. Columns whose
+  dataset repeats the same underlying entity across rows (Projects & Groups' Scope, Consults'
+  Breakdown, Stewardship's Supervisor, Activity Mix's Category) render checked-and-disabled and
+  are force-re-added even if omitted, so a flattened dataset can never be summed as if its rows
+  were all distinct — each such dataset's duplication note appears in both the preview footnote
+  and the exported workbook's Notes sheet.
+
+### Fixed
+- **Exported Research Outputs show the date they sort by.** Undated outputs displayed "—" while
+  ordering (and range reasoning) used their effective date; every export path now carries that
+  effective date. The two XLSX sheets mark a fallback row with "*", explained in the column header;
+  the per-project DOCX and PDF write it as "(date, logged)", prose having no header to carry a
+  legend.
+
 ## [1.8.0] — 2026-09-08
 
 ### Added

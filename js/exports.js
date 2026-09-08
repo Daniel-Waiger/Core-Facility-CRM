@@ -72,9 +72,13 @@
       WHERE se.project_id=?
       ORDER BY se.date DESC, se.id DESC`, [id]);
     const files = DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
+    // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
+    // eff_date is exported as the row's Date: the same effective date the ordering (and any
+    // date-range reasoning) uses, so an undated output can't sort as recent while displaying '—'.
+    const outputs = DB.rows(`SELECT *, ${DB.outputEffDate()} AS eff_date FROM project_outputs WHERE project_id=? ORDER BY ${DB.outputEffDate()} DESC, id DESC`, [id]);
     const prog = DB.projectProgress(id);
 
-    return { p, ppl, inst, ms, kv, mtgs, entries, files, prog };
+    return { p, ppl, inst, ms, kv, mtgs, entries, files, outputs, prog };
   }
 
   function blobDownload(blob, filename) {
@@ -348,6 +352,17 @@
     ws6['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 40 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws6, 'Files');
 
+    // Sheet 7: Research Outputs (roadmap 3.3) — the funnel's exit stage. The Date column is the
+    // EFFECTIVE date (explicit date, else the record-creation day) — the same value the ordering
+    // uses — with a * marking the fallback so a backfilled row is distinguishable.
+    const outRows = [['Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
+    d.outputs.forEach((o) => {
+      outRows.push([o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
+    });
+    const ws7 = XLSX.utils.aoa_to_sheet(outRows);
+    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, ws7, 'Research Outputs');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${d.p.code}_${d.p.title.replace(/[^a-z0-9_-]/gi, '_')}.xlsx`);
     UI.toast('Exported XLSX report');
@@ -455,6 +470,25 @@
       });
     } else {
       children.push(new Paragraph({ text: 'No service entries recorded.' }));
+    }
+
+    // Research Outputs (roadmap 3.3)
+    children.push(new Paragraph({ text: 'Research Outputs', heading: HeadingLevel.HEADING_2 }));
+    if (d.outputs.length) {
+      d.outputs.forEach((o) => {
+        children.push(new Paragraph({
+          children: [
+            new TextRun({ text: `[${o.type.toUpperCase()}] `, bold: true }),
+            new TextRun({ text: `${o.title} `, bold: true }),
+            new TextRun({ text: o.date ? `(${UI.fmtDate(o.date)}) `
+              : (o.eff_date ? `(${UI.fmtDate(o.eff_date)}, logged) ` : '') }),
+            new TextRun({ text: o.reference ? `${o.reference} ` : '', italics: true }),
+            new TextRun({ text: o.note ? `— ${o.note}` : '' }),
+          ]
+        }));
+      });
+    } else {
+      children.push(new Paragraph({ text: 'No research outputs recorded.' }));
     }
 
     const doc = new Document({
@@ -704,6 +738,32 @@
       });
     }
 
+    // Research Outputs (roadmap 3.3)
+    if (d.outputs.length) {
+      addHeading('Research Outputs');
+      pdf.setFontSize(9);
+      d.outputs.forEach((o) => {
+        checkPage(12);
+        pdf.setFont('helvetica', 'bold');
+        // Matches the XLSX sheets' effective-date convention; spelled out as
+        // ', logged' because prose has no header legend to carry a '*'.
+        const when = o.date ? ' (' + UI.fmtDate(o.date) + ')'
+          : (o.eff_date ? ' (' + UI.fmtDate(o.eff_date) + ', logged)' : '');
+        pdf.text(`[${o.type.toUpperCase()}] ${o.title}${when}`, margin, y);
+        pdf.setFont('helvetica', 'normal');
+        y += 5;
+        if (o.reference || o.note) {
+          const detail = [o.reference, o.note].filter(Boolean).join(' — ');
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text(detail, margin + 4, y);
+          pdf.setTextColor(20, 20, 20);
+          pdf.setFontSize(9);
+          y += 5;
+        }
+      });
+    }
+
     // Custom Metadata
     if (d.kv.length) {
       addHeading('Custom Metadata Fields');
@@ -878,6 +938,22 @@
     wsSe['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsSe, 'Service Entries');
 
+    // Sheet 8: Research Outputs (roadmap 3.3) — across every project, same "Project Code /
+    // Project" leading columns as the Meetings/Service Entries sheets above.
+    // Date column = the effective date the ordering uses (explicit date, else creation day),
+    // * marking the fallback — same convention as the per-project outputs sheet.
+    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
+    DB.rows(`
+      SELECT po.*, p.code as project_code, p.title as project_title, ${DB.outputEffDate('po')} AS eff_date
+      FROM project_outputs po
+      JOIN projects p ON p.id = po.project_id
+      ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`).forEach((o) => {
+      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
+    });
+    const wsOut = XLSX.utils.aoa_to_sheet(outRows);
+    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 30 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
   }
@@ -906,8 +982,13 @@
     const staff = Reports.computeStaffRows(from, to);
     const matrix = Reports.computeStaffInstrumentMatrix(from, to);
     const proj = Reports.computeProjectRows(from, to);
+    const stewardship = Reports.computeStewardshipRows(from, to);
     const consult = Reports.computeConsultRows(from, to);
     const svc = Reports.computeServiceEntryRows(from, to);
+    const breadth = Reports.computeBreadthRows(from, to);
+    const mix = Reports.computeActivityMixRows(from, to);
+    const funnel = Reports.computeFunnelRows(from, to);
+    const labConsultsOn = Reports.getLabConsultsEnabled(); // mirror the on-screen opt-in toggle exactly
 
     const wb = XLSX.utils.book_new();
     const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
@@ -928,6 +1009,26 @@
       [''],
       ['Staff x Instrument attribution'],
       ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total.'],
+      [''],
+      ['Instrument stewardship scorecard'],
+      ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. Omitted on purpose (need data this app does not track yet): trained-user pool trend and downtime share.'],
+      [''],
+      ['Breadth'],
+      ['Distinct labs/people and new-lab counts exclude cancelled bookings entirely; a booking with no lab/group on file is omitted from lab counts. "New Labs" counts labs whose first-ever non-cancelled booking (checked across the facility’s whole history, not just the exported range) falls inside the exported dates.'],
+      [''],
+      ['Activity Mix'],
+      ['Hours booked per meetings.category per month, excluding cancelled bookings; a booking with no category on file is grouped under "(uncategorized)". Categories are read from the data, not a fixed list. Standalone service entries are not included — they are logged in units/quantity, not hours.'],
+      [''],
+      ['Per-Lab Consults'],
+      [labConsultsOn
+        ? 'Per-lab consult attribution was ON (opt-in) at export time — see the "Per-Lab Consults" sheet.'
+        : 'Per-lab consult attribution is OFF by default (opt-in, not a standing report column) — the "Per-Lab Consults" sheet is omitted from this export. Enable the checkbox on the Breadth card and re-export to include it.'],
+      [''],
+      ['Funnel: Consult to Output'],
+      ['Stages count different kinds of things (consult/output are events, milestones are edits, the rest are projects) — read the counts as facility activity over the period, not one population literally narrowing. Consult volume includes facility-wide (project-less) consults, which cannot feed any later stage. "Milestones Progressing" counts any milestone edited in the period (updated_at moves on any edit), not a status change specifically. "Completed" is count-only via status=\'Completed\' or archived, dated by end_date (or archive date) as a labeled proxy when set; with neither date available a completed project is excluded from a bounded range' + (funnel.completedNoDateCount ? ` (${funnel.completedNoDateCount} such project${funnel.completedNoDateCount === 1 ? '' : 's'} excluded from this export\'s range).` : ' (none excluded in this export\'s range).')],
+      ['Both time-in-stage medians (created->first booking, first booking->first output) exclude negative day-deltas — the later event predating the earlier one, real for backfilled/imported data — from the median itself, but every excluded project is counted here: '
+        + `${funnel.medians.createdToActive.excludedNegative} project${funnel.medians.createdToActive.excludedNegative === 1 ? '' : 's'} excluded: first booking predates the project record. `
+        + `${funnel.medians.activeToOutput.excludedNegative} project${funnel.medians.activeToOutput.excludedNegative === 1 ? '' : 's'} excluded: first output predates the first booking.`],
       [''],
       ['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']
     ];
@@ -974,7 +1075,23 @@
     wsPg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, wsPg, 'Projects & Groups');
 
-    // Sheet 6: Consults — bookings tagged Category = "consult", counted per instrument and per
+    // Sheet 6: Instrument stewardship scorecard — flat row per supervisor x instrument, same
+    // pattern as the Staff x Instrument sheet above (a wide grid would grow unboundedly with
+    // supervisor count). Fed from the exact same Reports.computeStewardshipRows the screen
+    // renders from. A shared instrument repeats under every supervisor it's linked to — see the
+    // Notes sheet for why that's intentional.
+    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Revenue', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
+    stewardship.groups.forEach((g) => {
+      const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
+      g.rows.forEach((r) => {
+        stewardRows.push([supLabel, UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), r.distinctUsers, r.newUsers, r.projectsServed, r.facilityWideSessions, r.consultCount]);
+      });
+    });
+    const wsSteward = XLSX.utils.aoa_to_sheet(stewardRows);
+    wsSteward['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsSteward, 'Stewardship');
+
+    // Sheet 7: Consults — bookings tagged Category = "consult", counted per instrument and per
     // calendar-month period. Fed from the exact same Reports.computeConsultRows the screen
     // renders from, so this sheet can never disagree with what's on screen.
     const consultRows = [['Breakdown', 'Instrument / Month', 'Consults']];
@@ -985,7 +1102,7 @@
     wsConsult['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsConsult, 'Consults');
 
-    // Sheet 7: Service Entries — standalone billable work outside any booking, fed from the exact
+    // Sheet 8: Service Entries — standalone billable work outside any booking, fed from the exact
     // same Reports.computeServiceEntryRows the screen renders from.
     const svcRows = [['Description', 'Project', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
     svc.rows.forEach((r) => {
@@ -1001,6 +1118,48 @@
     wsSvc['!cols'] = [{ wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsSvc, 'Service Entries');
 
+    // Sheet 9: Breadth — distinct labs/people per period and per instrument, plus new-labs-onboarded
+    // per period. Fed from the exact same Reports.computeBreadthRows the screen renders from.
+    const breadthRows = [['Breakdown', 'Period / Instrument', 'Distinct Labs', 'Distinct People', 'New Labs']];
+    breadth.periodRows.forEach((r) => breadthRows.push(['By Period', r.period, r.distinctLabs, r.distinctPeople, r.newLabs]));
+    breadth.instrumentRows.forEach((r) => breadthRows.push(['By Instrument', UI.retiredName(r.name, r.retired), r.distinctLabs, r.distinctPeople, '']));
+    const wsBreadth = XLSX.utils.aoa_to_sheet(breadthRows);
+    wsBreadth['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 16 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsBreadth, 'Breadth');
+
+    // Sheet 10: Activity Mix — period x category hours matrix, fed from the exact same
+    // Reports.computeActivityMixRows the screen renders from. Wide (one column per category value
+    // actually present in the data) rather than the tall shape used elsewhere in this file, because
+    // this sheet is meant to feed a stacked chart (roadmap 3.5) directly.
+    const mixHeader = ['Month', ...mix.categories];
+    const mixRows = [mixHeader];
+    mix.rows.forEach((r) => mixRows.push([r.period, ...mix.categories.map((c) => round2(r.hours[c]))]));
+    const wsMix = XLSX.utils.aoa_to_sheet(mixRows);
+    wsMix['!cols'] = [{ wch: 10 }, ...mix.categories.map(() => ({ wch: 16 }))];
+    XLSX.utils.book_append_sheet(wb, wsMix, 'Activity Mix');
+
+    // Sheet 11 (opt-in only): Per-Lab Consults — mirrors the Breadth card's opt-in checkbox exactly;
+    // the sheet is omitted entirely when the toggle is off, same as the on-screen table.
+    if (labConsultsOn) {
+      const labConsultRows = [['Lab / Group', 'Consults']];
+      breadth.consultLabRows.forEach((r) => labConsultRows.push([r.lab, r.count]));
+      const wsLabConsult = XLSX.utils.aoa_to_sheet(labConsultRows);
+      wsLabConsult['!cols'] = [{ wch: 30 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, wsLabConsult, 'Per-Lab Consults');
+    }
+
+    // Sheet 12: Funnel: Consult to Output — fed from the exact same Reports.computeFunnelRows
+    // the screen renders from. Both medians and their disclosed negative-delta exclusion counts
+    // are repeated here (not just in the Notes sheet) so the sheet is self-explanatory on its own.
+    const funnelRows = [['Stage', 'Count', 'Conversion from Previous %']];
+    funnel.stages.forEach((s) => funnelRows.push([s.label, s.count, s.conversionPct == null ? '' : round2(s.conversionPct)]));
+    funnelRows.push(['', '', '']);
+    funnelRows.push(['Median: created -> first booking (days)', funnel.medians.createdToActive.days == null ? '' : round2(funnel.medians.createdToActive.days), `n=${funnel.medians.createdToActive.sampleSize}, excluded (negative delta)=${funnel.medians.createdToActive.excludedNegative}`]);
+    funnelRows.push(['Median: first booking -> first output (days)', funnel.medians.activeToOutput.days == null ? '' : round2(funnel.medians.activeToOutput.days), `n=${funnel.medians.activeToOutput.sampleSize}, excluded (negative delta)=${funnel.medians.activeToOutput.excludedNegative}`]);
+    const wsFunnel = XLSX.utils.aoa_to_sheet(funnelRows);
+    wsFunnel['!cols'] = [{ wch: 36 }, { wch: 12 }, { wch: 50 }];
+    XLSX.utils.book_append_sheet(wb, wsFunnel, 'Funnel');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
     UI.toast('Exported Reports & Utilization to XLSX');
@@ -1009,6 +1168,71 @@
   // 1.9999999999998) showing up in a spreadsheet cell.
   function round2(n) { return Math.round((n || 0) * 100) / 100; }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx };
+  /* Custom report generator (roadmap 3.6). spec = { entity, columns: ['key',...], from, to } —
+     built by app.js from the Custom Report modal's current selection; from/to are always the
+     explicit range the modal is showing (mirrors the screen's Reports.getRange() at open time —
+     see js/app.js's rep-custom case), never module state. Single-sheet workbook (plus the
+     standing Notes sheet every export in this file carries) built from the EXACT SAME
+     Reports.computeCustomRows the modal's own preview table renders from, via the same
+     aoa_to_sheet pattern as every other sheet above, so the exported numbers can never disagree
+     with what the user previewed before exporting. */
+  function exportCustomXlsx(spec) {
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    const Reports = global.Reports;
+    if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
+
+    const from = spec.from || '', to = spec.to || '';
+    const result = Reports.computeCustomRows(spec, from, to);
+    if (!result.columns.length) { UI.toast('Select at least one column', 'error'); return; }
+
+    const wb = XLSX.utils.book_new();
+    const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
+
+    // Notes sheet: date range + both standing cancellation rules (identical wording to the
+    // Reports & Utilization export above) + this dataset's own duplication note, if it has one —
+    // the same note the modal shows as a preview footnote, never only shown in one of the two.
+    const notes = [
+      ['CUSTOM REPORT — ' + Reports.getCustomReportLabel(spec.entity)],
+      [''],
+      ['Date range', rangeLabel],
+      ['Exported', new Date().toLocaleString()],
+      [''],
+      ['Occupancy rule (Hours / Sessions / Bookings columns)'],
+      ['A cancelled booking releases its slot — the instrument or staff time was never actually spent — so cancelled bookings contribute zero to these columns, regardless of whether the cancellation charge was retained.'],
+      [''],
+      ['Money rule (Revenue / Cost / Total columns)'],
+      ["A booking's or entry's charge still counts unless it was BOTH cancelled AND the charge was waived — a cancelled-but-charged row still contributes money even though it contributes zero occupied hours."],
+      ['']
+    ];
+    const dsNotes = result.notes;
+    if (dsNotes.length) {
+      notes.push(['Dataset note (this entity repeats an entity across rows)']);
+      dsNotes.forEach((n) => notes.push([n]));
+      notes.push(['']);
+    }
+    notes.push(['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']);
+    const wsNotes = XLSX.utils.aoa_to_sheet(notes);
+    wsNotes['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
+
+    // Data sheet: header from the selected columns' labels, cells via the exact same
+    // Reports.formatCustomCellXlsx the modal's own export button triggers — no second formatting
+    // path to drift from the preview.
+    const header = result.columns.map((c) => c.label);
+    const dataRows = [header];
+    result.rows.forEach((r) => {
+      dataRows.push(result.columns.map((c) => Reports.formatCustomCellXlsx(c, r[c.key])));
+    });
+    const ws = XLSX.utils.aoa_to_sheet(dataRows);
+    ws['!cols'] = result.columns.map(() => ({ wch: 20 }));
+    XLSX.utils.book_append_sheet(wb, ws, 'Custom Report');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Custom-Report-${spec.entity}-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
+    UI.toast('Exported custom report to XLSX');
+  }
+
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx };
 
 })(window);
