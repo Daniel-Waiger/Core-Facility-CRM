@@ -1056,7 +1056,7 @@
       </div>`).join('');
 
     const alldayHtml = dayInfos.map((d) => `
-      <div class="cal-week-allday-col clickable" data-act="new-booking" data-date="${d.ds}" data-tooltip="Click to add a booking on ${d.ds}">
+      <div class="cal-week-allday-col clickable" role="button" tabindex="0" data-act="new-booking" data-date="${d.ds}" data-tooltip="Click to add a booking on ${d.ds}">
         ${d.allDay.map((e) => calEvChipHtml(e)).join('')}
       </div>`).join('');
 

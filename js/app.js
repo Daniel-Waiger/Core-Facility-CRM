@@ -4093,8 +4093,10 @@
     }
     DB.setServiceEntryCancelled(id, true, retained);
     UI.toast(retained ? 'Service entry cancelled — charge kept' : 'Service entry cancelled');
-    const dim = document.querySelector('.modal-dim');
-    if (dim) UI.closeDim(dim);
+    // Modals stack by appending dims, so the entry's own modal is the LAST one — closing the
+    // first could take down a parent modal underneath it.
+    const dims = document.querySelectorAll('.modal-dim');
+    if (dims.length) UI.closeDim(dims[dims.length - 1]);
     refresh();
   }
 
@@ -4103,8 +4105,9 @@
     if (!e) return;
     DB.setServiceEntryCancelled(id, false, false);
     UI.toast('Service entry reinstated');
-    const dim = document.querySelector('.modal-dim');
-    if (dim) UI.closeDim(dim);
+    // Topmost dim, as in cancelServiceEntry above.
+    const dims = document.querySelectorAll('.modal-dim');
+    if (dims.length) UI.closeDim(dims[dims.length - 1]);
     refresh();
   }
 

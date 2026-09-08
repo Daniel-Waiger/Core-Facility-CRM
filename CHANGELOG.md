@@ -64,7 +64,11 @@ This project uses [Semantic Versioning](https://semver.org/).
   slipped past every conflict and constraint check (nothing could overlap an empty window); the
   live advisory and the save gate now flag it.
 - **Calendar hour slots are keyboard-accessible.** Week-view and timeline click-to-book slots take
-  focus and respond to Enter/Space, not just the mouse.
+  focus and respond to Enter/Space, not just the mouse. The week view's all-day columns
+  got the same treatment.
+- **Cancelling or reinstating a service entry closes the right modal.** Both flows closed the
+  first open overlay instead of the topmost one, which could dismiss a parent modal when dialogs
+  were stacked.
 
 ## [1.6.0] — 2026-09-07
 
