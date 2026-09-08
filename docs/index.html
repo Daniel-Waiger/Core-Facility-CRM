@@ -205,7 +205,7 @@
          stale twice, which is exactly the kind of thing not worth remembering by hand. -->
     <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">1.6.0 is the first slice of the roadmap: the booking form now warns about scheduling clashes <strong>as you type</strong> instead of only at save, and the money side grows up &mdash; <strong>grants</strong> that projects and bookings charge against, and cancellation billing rules you can finally configure. Around them: supervising staff on every instrument, a consult tag so Reports can count advisory work, and a daily spreadsheet dropped silently next to the automatic backup.</p>
+    <p class="lede">1.7.0 finishes the roadmap's scheduling and billing tiers. The calendar grows an hourly <strong>week view</strong> and a per-instrument <strong>timeline</strong>; instruments get real booking rules &mdash; minimum and maximum duration, gaps, advance notice &mdash; enforced by the same check that warns you as you type; a booking can <strong>repeat weekly</strong> with every occurrence checked before anything is saved. On the money side, named <strong>pricing tiers</strong> replace the one-size overhead pair, and <strong>service entries</strong> finally let technician time and sample prep be billed outside any booking.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="manual/">User Manual</a>
@@ -219,14 +219,14 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.6.0.</p>
+    <p class="section-sub">What changed in 1.7.0.</p>
     <div class="cards">
-      <div class="card"><div class="ic">⚡</div><h3>Conflicts, as you type</h3><p>The booking form now shows a live advisory the moment a date, time or instrument clashes with an existing booking &mdash; running the exact same check the save button enforces, so the warning can never disagree with the block.</p></div>
-      <div class="card"><div class="ic">🧾</div><h3>Grants</h3><p>Name, number and allowed users, managed in Settings. Projects and bookings pick a grant, Project Costs and every export carry it &mdash; and a toggle decides whether grants display by name or by number, everywhere at once.</p></div>
-      <div class="card"><div class="ic">💸</div><h3>Cancellation rules you set</h3><p>Whether a cancelled booking&rsquo;s charge counts &mdash; before the start, after the start &mdash; is now a Settings choice per facility. Untouched, it behaves exactly as before: early cancellations drop the charge, late ones keep it.</p></div>
-      <div class="card"><div class="ic">🔬</div><h3>Every instrument has a keeper</h3><p>Instruments now name their supervising facility staff &mdash; one or more per instrument. The groundwork for the roadmap&rsquo;s stewardship scorecards, and useful on its own as a &ldquo;who do I ask about this scope?&rdquo; column.</p></div>
-      <div class="card"><div class="ic">💬</div><h3>Consults are counted, not logged</h3><p>Bookings and syncs take a category tag &mdash; sync, consult, training, assisted session &mdash; and Reports counts consults per instrument and month. Advisory work finally shows up, without a chilling per-person consulting log.</p></div>
-      <div class="card"><div class="ic">📤</div><h3>The backup brings a spreadsheet</h3><p>Where a silent backup folder is set, the daily automatic backup now drops a full XLSX export alongside the JSON &mdash; an always-current spreadsheet on disk, with no extra downloads anywhere else.</p></div>
+      <div class="card"><div class="ic">📅</div><h3>A week, hour by hour</h3><p>The Calendar gains a Month / Week / Timeline toggle. Week mode is an hourly grid &mdash; clicking an empty hour opens New Booking with the date <em>and</em> that hour already filled in.</p></div>
+      <div class="card"><div class="ic">🛤️</div><h3>One lane per instrument</h3><p>Timeline mode shows where every machine is busy across the week &mdash; a booking on two instruments appears in both lanes, and clicking a free slot pre-selects that instrument too.</p></div>
+      <div class="card"><div class="ic">📏</div><h3>Instruments set their own rules</h3><p>Minimum and maximum session length, a required gap between bookings, and minimum advance notice &mdash; per instrument, enforced by the same check behind the as-you-type warning and the save button, so they can never disagree.</p></div>
+      <div class="card"><div class="ic">🔁</div><h3>Repeat weekly, checked first</h3><p>A new booking can repeat every N weeks until a date. Every occurrence is conflict- and rule-checked <em>before anything saves</em> &mdash; all or nothing, no half-created series &mdash; and each one stays an ordinary booking you can edit or cancel alone.</p></div>
+      <div class="card"><div class="ic">🏷️</div><h3>Pricing tiers</h3><p>Named price lists &mdash; internal, academia, industry &mdash; with per-tier overhead and optional per-tier instrument rates, assigned per lab. Labs without a tier keep pricing exactly as before, and existing bookings never recompute.</p></div>
+      <div class="card"><div class="ic">🧰</div><h3>Billable work outside a booking</h3><p>Service entries: technician time, sample prep, per-unit items &mdash; logged with staff, instrument, project and grant, counted into Project Costs, Reports and every export under the same rules as bookings.</p></div>
     </div>
   </div>
 </section>
@@ -238,7 +238,82 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>The booking form warns you before you clash <span class="tag">new</span></h3>
+        <h3>The calendar learns hours: week view <span class="tag">new</span></h3>
+        <p>The month grid answers &ldquo;what&rsquo;s happening this month?&rdquo; but not &ldquo;is Tuesday 10&ndash;12 free?&rdquo;. Week mode does: a Month / Week / Timeline toggle in the calendar header, an hourly grid with each booking block positioned at its time, and an all-day lane on top for milestones and untimed entries. Clicking an empty hour opens New Booking with the date <em>and</em> that hour prefilled &mdash; and the live conflict advisory from 1.6.0 reacts immediately.</p>
+        <p>Every slot is keyboard-reachable too &mdash; tab to an hour and press Enter.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/56-week-view.png" alt="Week calendar view with an hourly grid, booking blocks at their times, and an all-day lane" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/56-week-view.png</code></span></div>
+        <figcaption>A week, hour by hour &mdash; click an empty slot and the booking form opens on that hour.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Timeline: where every machine is busy <span class="tag">new</span></h3>
+        <p>The third calendar mode turns the same week sideways: one lane per instrument, booking blocks where it&rsquo;s held. A session on two instruments appears in both lanes &mdash; both were genuinely occupied &mdash; and a retired instrument keeps its lane while it still has history in view. Clicking a free slot opens New Booking with the date, the hour, <em>and that instrument</em> already selected.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/57-resource-timeline.png" alt="Resource timeline with one lane per instrument and booking blocks across the week" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/57-resource-timeline.png</code></span></div>
+        <figcaption>One lane per instrument &mdash; the &ldquo;is the confocal free Thursday?&rdquo; view.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Instruments set their own booking rules <span class="tag">new</span></h3>
+        <p>A cryo-scope that needs a day&rsquo;s notice, a screening system nobody should book for ten minutes, a laser that wants a cool-down gap &mdash; each instrument now carries its own rules: minimum and maximum session length, minimum gap between bookings, minimum advance notice. They live inside the <em>same</em> conflict check that powers the as-you-type warning and the save button, so the advisory, the hard gate, and reinstating a cancelled booking all enforce them identically.</p>
+        <p>Editing an old booking without touching its schedule still saves &mdash; the notice rule guards new scheduling, not history.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/58-booking-constraints.png" alt="New Booking modal showing a live minimum-duration violation for the selected instrument" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/58-booking-constraints.png</code></span></div>
+        <figcaption>A 30-minute booking on an instrument with a 1-hour minimum &mdash; flagged while you type.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Recurring bookings, checked before they exist <span class="tag">new</span></h3>
+        <p>A weekly imaging slot is one form now: &ldquo;repeat every N week(s) until&rdquo; a date. Every occurrence is conflict- and constraint-checked <em>before anything is saved</em> &mdash; if week 3 collides, the whole series is refused with the date named, so a half-created series can&rsquo;t happen. Deliberately, there is no &ldquo;series&rdquo; object: each occurrence is an ordinary booking you edit, cancel, or reinstate on its own, under the same billing rules as any other.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/59-recurring-booking.png" alt="New Booking modal with the repeat-every-week-until fields filled in" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/59-recurring-booking.png</code></span></div>
+        <figcaption>Repeat weekly until a date &mdash; all occurrences checked up front, all or nothing.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Pricing tiers replace the one-size overhead <span class="tag">new</span></h3>
+        <p>Until now every booking paid the same overhead &mdash; the internal and external percentages, summed. Facilities don&rsquo;t price that way: internal labs, academia, and industry each get their own list. Pricing tiers are named lists with their own overhead percentage, assigned per lab; an instrument can carry a different hourly rate per tier. The old percentages migrate into two default tiers, and a lab with <em>no</em> tier assigned prices exactly as before &mdash; nothing changes until you say so.</p>
+        <p>Money already billed is untouched: cost snapshots are frozen at save, and each booking records which tier priced it, so history stays auditable.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/60-pricing-tiers.png" alt="Settings card listing pricing tiers with per-tier overhead and per-lab tier assignment" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/60-pricing-tiers.png</code></span></div>
+        <figcaption>Named price lists with per-tier overhead &mdash; assigned per lab, frozen into each booking at save.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Service entries: billable work without a booking <span class="tag">new</span></h3>
+        <p>Technician time, sample prep, a per-unit charge &mdash; real facility work that never held an instrument slot had nowhere to be billed. Service entries fix that: staff, optional instrument and project, grant, quantity &times; rate, logged from a project&rsquo;s Costs card or facility-wide from Reports. They follow the same money rule as bookings &mdash; a cancelled entry&rsquo;s charge counts only if it was retained &mdash; and appear in Project Costs, Reports, and every XLSX/DOCX/PDF export.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/61-service-entries.png" alt="Project Costs card showing service entries alongside bookings in the billing total" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/61-service-entries.png</code></span></div>
+        <figcaption>Technician time and sample prep, billed and totalled next to the bookings.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>The booking form warns you before you clash <span class="tag">1.6.0</span></h3>
         <p>Double-booking has always been blocked &mdash; at save, after the whole form was filled in. Now the same conflict check runs as you type: pick a date, a start and end time, an instrument or a staff member, and the form immediately says whose booking you would collide with, or shows a quiet all-clear once times are set. Nothing is blocked early and nothing new decides what a conflict is &mdash; the advisory calls the very function the save button enforces, so the warning and the block can never drift apart.</p>
         <p>Editing an existing booking excludes itself from the check, and a half-filled form shows nothing rather than a premature &ldquo;no conflicts&rdquo;.</p>
       </div>
@@ -251,7 +326,7 @@
 
     <div class="feature reverse">
       <div class="txt">
-        <h3>Grants: the number the invoice reconciles against <span class="tag">new</span></h3>
+        <h3>Grants: the number the invoice reconciles against <span class="tag">1.6.0</span></h3>
         <p>Facility charges are ultimately paid from a grant, and until now the app only knew that as free text on a project. Grants are proper records now &mdash; name, number, and the people allowed to charge against them &mdash; managed from a Settings card, picked from a dropdown on projects and bookings, and carried into Project Costs and every XLSX, DOCX and PDF export so a monthly statement can be reconciled line by line.</p>
         <ul>
           <li>A Settings toggle chooses whether grants display by <strong>name</strong> or by <strong>number</strong> &mdash; one switch, applied everywhere at once, exports included.</li>
@@ -267,7 +342,7 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>Instruments name their supervising staff <span class="tag">new</span></h3>
+        <h3>Instruments name their supervising staff <span class="tag">1.6.0</span></h3>
         <p>The roadmap&rsquo;s reporting principle is that metrics hang on <em>instruments</em>, not on people &mdash; and that starts with knowing who is responsible for each one. Instrument records now carry one or more supervising facility staff, picked with the same token picker bookings use, shown on the Instruments screen. Retired supervisors stay on the record (marked, as everywhere) rather than silently vanishing on the next save.</p>
       </div>
       <figure class="shot">
@@ -279,7 +354,7 @@
 
     <div class="feature reverse">
       <div class="txt">
-        <h3>Consulting shows up in Reports &mdash; without a consult log <span class="tag">new</span></h3>
+        <h3>Consulting shows up in Reports &mdash; without a consult log <span class="tag">1.6.0</span></h3>
         <p>Advisory work is real facility output that never appeared anywhere. The deliberate design is <em>not</em> a consulting log &mdash; a per-person record of every conversation reads as surveillance and discourages people from approaching core staff. Instead, the entries that already exist take a category &mdash; sync, consult, training, assisted session &mdash; and Reports counts consult-tagged sessions per instrument and per month. The vocabulary is extensible like the app&rsquo;s other dropdowns, and the tag rides along into the meeting exports.</p>
       </div>
       <figure class="shot">
