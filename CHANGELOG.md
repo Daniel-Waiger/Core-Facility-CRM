@@ -46,6 +46,13 @@ This project uses [Semantic Versioning](https://semver.org/).
   exports alongside meetings, and count toward person/instrument/project/grant reference checks so
   a referenced record retires/archives instead of deleting.
 
+### Fixed
+- **Service Entries table columns aligned.** The Reports table's rows rendered quantity and unit
+  in one cell under separate Qty/Unit headers, shifting Total and Actions under the wrong headers.
+- **Retired timeline lanes no longer claim an instrument prefill.** An empty slot in a retired
+  instrument's lane now omits the instrument from the click-to-book shortcut's markup and tooltip,
+  matching the documented intent (the picker would exclude the retired instrument anyway).
+
 ## [1.6.0] — 2026-09-07
 
 ### Added

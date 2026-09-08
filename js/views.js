@@ -944,8 +944,8 @@
       const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '23:59';
       out += `
         <div class="cal-tl-hour-slot clickable" style="width:${CAL_TL_HOUR_PCT}%"
-             data-act="new-booking" data-date="${ds}" data-start="${startHH}" data-end="${endHH}" data-inst="${instId}"
-             data-tooltip="Click to add a booking at ${startHH} on ${ds} for this instrument"></div>`;
+             data-act="new-booking" data-date="${ds}" data-start="${startHH}" data-end="${endHH}"${instId ? ` data-inst="${instId}"` : ''}
+             data-tooltip="Click to add a booking at ${startHH} on ${ds}${instId ? ' for this instrument' : ''}"></div>`;
     }
     return out;
   }

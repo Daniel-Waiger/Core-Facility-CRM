@@ -583,7 +583,8 @@
                 <td class="small">${r.person_name ? nameCell(r.person_name, r.person_retired) : '<span class="faint">—</span>'}</td>
                 <td class="small">${r.instrument_name ? nameCell(r.instrument_name, r.instrument_retired) : '<span class="faint">—</span>'}</td>
                 <td class="mono small faint">${esc(r.date || '—')}</td>
-                <td class="mono small" style="text-align:right">${r.qty || 0} ${esc(r.unit || '')}</td>
+                <td class="mono small" style="text-align:right">${r.qty || 0}</td>
+                <td class="small">${esc(r.unit || '—')}</td>
                 <td class="mono small" style="text-align:right">${fmtMoney(r.countedCost)}</td>
                 <td style="text-align:right">
                   <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${r.id}" title="Edit entry">${ic('edit')}</button>
