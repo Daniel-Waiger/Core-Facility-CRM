@@ -127,7 +127,7 @@
   // (instrument, person) pairs — rule 1, no money involved.
   function loadAttendeeLines(from, to) {
     return DB.rows(`
-      SELECT mi.instrument_id, mp.person_id
+      SELECT DISTINCT mi.instrument_id, mp.person_id
       FROM meeting_instruments mi
       JOIN meeting_people mp ON mp.meeting_id = mi.meeting_id
       JOIN meetings mt ON mt.id = mi.meeting_id

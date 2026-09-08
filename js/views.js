@@ -391,8 +391,8 @@
               <span class="k"><span class="badge neutral" style="text-transform:capitalize">${esc(o.type)}</span> ${esc(o.title)}</span>
               <span class="v">${o.reference ? esc(o.reference) + ' — ' : ''}${o.date ? fmt(o.date) : fmt(o.created_at)}</span>
               <div class="row" style="gap:4px">
-                <span class="del" data-act="output-edit" data-id="${o.id}" title="Edit output">${ic('edit')}</span>
-                <span class="del" data-act="output-del" data-id="${o.id}" title="Delete output">${ic('x')}</span>
+                <span class="del" role="button" tabindex="0" aria-label="Edit output" data-act="output-edit" data-id="${o.id}" title="Edit output">${ic('edit')}</span>
+                <span class="del" role="button" tabindex="0" aria-label="Delete output" data-act="output-del" data-id="${o.id}" title="Delete output">${ic('x')}</span>
               </div>
             </div>`).join('')}
         </div>` : emptyState('tag', 'No research outputs yet', 'Log a publication, acknowledgement, dataset, or other output once this project produces one.')}
