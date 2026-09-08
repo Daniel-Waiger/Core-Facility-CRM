@@ -3,6 +3,13 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Search filter in token pickers.** Token pickers (People/Instruments/Staff/etc.) gain a
+  type-to-filter search box above the dropdown, narrowing the available options without ever
+  hiding an already-picked badge.
+
 ## [1.7.0] — 2026-09-08
 
 ### Added

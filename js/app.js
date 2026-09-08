@@ -2162,6 +2162,7 @@
     return `<div class="field"><label>${label}</label>
       <div class="token-picker" data-kind="${kind}" data-add="${esc(addLabel)}">
         <div class="token-list"></div>
+        <input type="text" class="input token-search" placeholder="Type to filter…" autocomplete="off" hidden />
         <select class="input token-select"></select>
       </div></div>`;
   }
@@ -2247,12 +2248,19 @@
     if (!wrap) return;
     const list = wrap.querySelector('.token-list');
     const sel = wrap.querySelector('.token-select');
+    const search = wrap.querySelector('.token-search');
     const addLabel = wrap.dataset.add || '+ Add…';
     const byId = new Map(items.map((it) => [String(it.id), it]));
     const selected = new Set();
     let locked = false, lockMsg = '';
     let filterFn = null; // narrows the dropdown only — an already-picked badge never disappears
     let singleInstrumentLock = false; // 'inst' picker only — set once the user confirms one instrument is enough
+    let searchTerm = ''; // type-to-search text, ANDed with filterFn — narrows the dropdown only
+    // Always shown: the box is harmless even on a short list (a few extra pixels), and any
+    // fixed item-count threshold ends up hiding it on real data — the shipped demo dataset's
+    // own People/Instruments/Staff pickers all sit at or under 8 items, which a `> 8` gate
+    // would hide entirely. Simpler and correct: no gating.
+    if (search) search.hidden = false;
 
     function render() {
       list.innerHTML = [...selected].map((id) => {
@@ -2265,6 +2273,10 @@
       // survives the next save) but are never offered for a new assignment.
       let avail = items.filter((it) => !selected.has(String(it.id)) && !it.retired);
       if (filterFn) avail = avail.filter(filterFn);
+      if (searchTerm) {
+        const t = searchTerm.toLowerCase();
+        avail = avail.filter((it) => (it.name || '').toLowerCase().includes(t) || (it.meta || '').toLowerCase().includes(t));
+      }
       sel.innerHTML = `<option value="">${esc(singleInstrumentLock ? 'Remove the instrument above to add another' : addLabel)}</option>` +
         avail.map((it) => `<option value="${it.id}">${esc(it.name)}${it.meta ? ' — ' + esc(it.meta) : ''}</option>`).join('');
       sel.value = '';
@@ -2273,9 +2285,25 @@
       // selection itself changes; the attendees picker doesn't bother — it isn't billed.
       if (onChange) onChange();
     }
+    if (search) {
+      search.addEventListener('input', () => { searchTerm = search.value || ''; render(); });
+      // Esc inside a non-empty search box clears it first, and stops the keydown from also
+      // reaching ui.js's global document-level handler (which would otherwise close the whole
+      // modal on the same keypress). An empty box has nothing local to do, so that Esc is left
+      // to bubble and closes the modal as usual — one Esc to clear, one more to leave.
+      search.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (!search.value) return; // let it bubble — closes the modal
+        e.stopPropagation();
+        search.value = '';
+        searchTerm = '';
+        render();
+      });
+    }
     sel.addEventListener('change', () => {
       if (!sel.value) return;
       selected.add(sel.value);
+      if (search && search.value) { search.value = ''; searchTerm = ''; } // fresh search after a pick
       render();
       // Ask only the first time an instrument is picked by hand (not when an edit modal seeds
       // existing badges via _setSelected) — and only while it's the sole instrument selected.
