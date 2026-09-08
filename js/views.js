@@ -930,6 +930,7 @@
       out += `
         <div class="cal-hour-slot clickable" role="button" tabindex="0" style="height:${px}px"
              data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}
+             aria-label="Add a booking at ${startHH} on ${ds}"
              data-tooltip="Click to add a booking at ${startHH} on ${ds}"></div>`;
     }
     return out;
@@ -948,6 +949,7 @@
       out += `
         <div class="cal-tl-hour-slot clickable" role="button" tabindex="0" style="width:${CAL_TL_HOUR_PCT}%"
              data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}${instId ? ` data-inst="${instId}"` : ''}
+             aria-label="Add a booking at ${startHH} on ${ds}${instId ? ' for this instrument' : ''}"
              data-tooltip="Click to add a booking at ${startHH} on ${ds}${instId ? ' for this instrument' : ''}"></div>`;
     }
     return out;
@@ -1056,7 +1058,7 @@
       </div>`).join('');
 
     const alldayHtml = dayInfos.map((d) => `
-      <div class="cal-week-allday-col clickable" role="button" tabindex="0" data-act="new-booking" data-date="${d.ds}" data-tooltip="Click to add a booking on ${d.ds}">
+      <div class="cal-week-allday-col clickable" role="button" tabindex="0" data-act="new-booking" data-date="${d.ds}" aria-label="Add a booking on ${d.ds}" data-tooltip="Click to add a booking on ${d.ds}">
         ${d.allDay.map((e) => calEvChipHtml(e)).join('')}
       </div>`).join('');
 
