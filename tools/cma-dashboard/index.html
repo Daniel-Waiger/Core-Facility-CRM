@@ -95,9 +95,23 @@
   .nbox.hot{stroke:var(--accent);stroke-width:2}
   .edge{fill:none;stroke-linecap:round;opacity:.9}
   .edge.idle{stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 5;opacity:.7}
+  /* Motion is reserved for lanes carrying work RIGHT NOW. A lane that only
+     saw traffic earlier in the run stays solid, so movement keeps meaning
+     something once the run is long. */
   .flow{stroke-dasharray:7 9;animation:flow 1.1s linear infinite}
   @keyframes flow{to{stroke-dashoffset:-16}}
-  @media (prefers-reduced-motion:reduce){.flow{animation:none}}
+  .packet{opacity:.95}
+  .halo{fill:none;stroke:var(--accent);stroke-width:2;opacity:.35;
+    animation:halo 1.6s ease-in-out infinite}
+  @keyframes halo{0%,100%{opacity:.34;stroke-width:2}50%{opacity:.08;stroke-width:6}}
+  .nbox.live{stroke:var(--accent);stroke-width:2.5}
+  .livedot{width:9px;height:9px;border-radius:99px;background:var(--faint);
+    display:inline-block;flex:0 0 auto}
+  .livedot.on{background:var(--done);animation:halo 1.3s ease-in-out infinite;
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--done) 25%,transparent)}
+  @media (prefers-reduced-motion:reduce){
+    .flow,.halo,.livedot.on{animation:none}
+  }
 
   .ledger{
     background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
@@ -183,8 +197,8 @@
   </section>
 
   <section class="panel">
-    <h2>Agent network
-      <span class="hint">traffic across the scheme — solid edges carry work, dashed are unused this run</span>
+    <h2><span id="live-dot" class="livedot"></span> Agent network
+      <span class="hint">moving = carrying work right now · solid = used earlier · dashed = unused</span>
     </h2>
     <div class="body">
       <div class="netwrap">
@@ -240,6 +254,93 @@
     learner:      {x:670, y:252, label:"Learner",      sub:"cma-learner"}
   };
   var NW = 132, NH = 54;
+  var NS = "http://www.w3.org/2000/svg";
+
+  var TIER = {opus:"orchestrator", fable:"orchestrator", sonnet:"executor",
+              haiku:"ops", learner:"learner", "cma-learner":"learner"};
+  function tierNode(by) {
+    return by ? (TIER[String(by).toLowerCase()] || "executor") : null;
+  }
+  function owner(node) {
+    return (node === "orchestrator" || node === "executor") ? node : "executor";
+  }
+
+  // Which lane a task SITS ON right now, and which lane a task JUST CROSSED.
+  // The first drives the live highlight, the second fires a packet.
+  function laneFor(task, status) {
+    var node = tierNode(task.by);
+    if (status === "running") {
+      return task.mode === "cold"
+        ? "orchestrator>" + (node && node !== "orchestrator" ? node : "executor")
+        : "orchestrator>orchestrator";
+    }
+    if (status === "verifying" || status === "done" || status === "resolved") {
+      return owner(node) + ">verifier";
+    }
+    if (status === "failed") { return "verifier>" + owner(node); }
+    return null;
+  }
+
+  function liveState(tasks) {
+    var nodes = {}, lanes = {};
+    (tasks || []).forEach(function (t) {
+      if (t.status !== "running" && t.status !== "verifying") { return; }
+      var k = laneFor(t, t.status);
+      if (!k) { return; }
+      lanes[k] = 1;
+      k.split(">").forEach(function (n) { nodes[n] = 1; });
+    });
+    return {nodes: nodes, lanes: lanes};
+  }
+
+  // Poll-to-poll diffing is what makes this live rather than decorative: the
+  // board already re-reads status.json every couple of seconds, so a status
+  // that changed since the last read is an event we can actually animate.
+  var prevStatus = null;
+  var LANE_INDEX = {};
+
+  var REDUCED = window.matchMedia
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Hand-tweened rather than SMIL <animateMotion>: a dynamically inserted
+  // animateMotion needs begin="indefinite" + beginElement(), because a plain
+  // begin="0s" means zero seconds from DOCUMENT start -- already in the past
+  // on a board that has been open a while, so the dot never moves and parks
+  // at the origin. rAF sidesteps that entirely and needs no SMIL support.
+  function firePacket(laneKey) {
+    if (REDUCED) { return; }
+    var lane = LANE_INDEX[laneKey];
+    var fx = document.getElementById("net-fx");
+    if (!lane || !fx) { return; }
+
+    var probe = document.createElementNS(NS, "path");
+    probe.setAttribute("d", pathFor(lane));
+    var len;
+    try { len = probe.getTotalLength(); } catch (e) { return; }
+    if (!len) { return; }
+
+    var dot = document.createElementNS(NS, "circle");
+    var p0 = probe.getPointAtLength(0);
+    dot.setAttribute("r", "6");
+    dot.setAttribute("fill", KIND[lane.kind].color);
+    dot.setAttribute("class", "packet");
+    dot.setAttribute("cx", p0.x);
+    dot.setAttribute("cy", p0.y);
+    fx.appendChild(dot);
+
+    var t0 = null, dur = 1250;
+    function step(now) {
+      if (t0 === null) { t0 = now; }
+      var k = Math.min(1, (now - t0) / dur);
+      var p = probe.getPointAtLength(k * len);
+      dot.setAttribute("cx", p.x);
+      dot.setAttribute("cy", p.y);
+      dot.setAttribute("opacity", k > 0.82 ? ((1 - k) / 0.18).toFixed(2) : "1");
+      if (k < 1) { requestAnimationFrame(step); }
+      else if (dot.parentNode) { dot.parentNode.removeChild(dot); }
+    }
+    requestAnimationFrame(step);
+  }
 
   var KIND = {
     dispatch:{color:"var(--run)"},   verify:{color:"var(--verify)"},
@@ -321,8 +422,16 @@
     } catch (e) { return null; }
   }
 
-  function drawNetwork(net) {
+  function drawNetwork(net, tasks) {
     var svg = el("net");
+    // Two layers: the base is rebuilt on every poll, the fx layer holds
+    // in-flight packets and must survive that rebuild.
+    var base = document.getElementById("net-base");
+    if (!base) {
+      svg.innerHTML = '<g id="net-base"></g><g id="net-fx"></g>';
+      base = document.getElementById("net-base");
+    }
+    var live = liveState(tasks);
     var edges = (net && net.edges) || [];
     var counts = (net && net.nodes) || {};
     var byKey = {};
@@ -345,15 +454,22 @@
 
     var lanes = "", labels = "";
     LANES.forEach(function (lane) {
-      var e = byKey[lane.from + ">" + lane.to];
+      var key = lane.from + ">" + lane.to;
+      LANE_INDEX[key] = lane;
+      var e = byKey[key];
       var n = e ? e.n : 0;
+      var hot = !!live.lanes[key];
       var d = pathFor(lane);
-      if (!n) {
+      if (!n && !hot) {
         lanes += '<path class="edge idle" d="' + d + '" marker-end="url(#ah-off)"/>';
         return;
       }
+      // Motion means "carrying work right now". A lane that merely saw
+      // traffic earlier in the run draws solid -- otherwise everything
+      // animates forever and the movement stops meaning anything.
       var w = Math.min(7, 1.8 + n * 0.7);
-      lanes += '<path class="edge flow" d="' + d + '" stroke="' + KIND[lane.kind].color +
+      lanes += '<path class="edge' + (hot ? " flow live" : "") + '" d="' + d +
+               '" stroke="' + KIND[lane.kind].color +
                '" stroke-width="' + w.toFixed(1) + '" marker-end="url(#ah-' +
                lane.kind + ')"/>';
       var m = midpoint(d);
@@ -368,8 +484,13 @@
     var boxes = "";
     Object.keys(NODES).forEach(function (key) {
       var nd = NODES[key], c = counts[key] || 0;
+      var working = !!live.nodes[key];
       boxes += '<g>' +
-        '<rect class="nbox' + (c ? " hot" : "") + '" x="' + (nd.x - NW / 2) +
+        (working ? '<rect class="halo" x="' + (nd.x - NW / 2 - 7) + '" y="' +
+                   (nd.y - NH / 2 - 7) + '" width="' + (NW + 14) + '" height="' +
+                   (NH + 14) + '" rx="15"/>' : "") +
+        '<rect class="nbox' + (c ? " hot" : "") + (working ? " live" : "") +
+          '" x="' + (nd.x - NW / 2) +
           '" y="' + (nd.y - NH / 2) + '" width="' + NW + '" height="' + NH +
           '" rx="11"/>' +
         '<text class="nlabel" x="' + nd.x + '" y="' + (nd.y - 4) +
@@ -385,7 +506,14 @@
       boxes += "</g>";
     });
 
-    svg.innerHTML = defs + lanes + boxes + labels;
+    base.innerHTML = defs + lanes + boxes + labels;
+
+    var busy = Object.keys(live.lanes).length;
+    var dot = el("live-dot");
+    if (dot) {
+      dot.className = busy ? "livedot on" : "livedot";
+      dot.title = busy ? busy + " lane(s) carrying work" : "idle";
+    }
 
     var led = (net && net.ledger) || {warm: 0, cold: 0, ratio: 0};
     el("warm-pct").textContent = (led.warm + led.cold) ? led.ratio + "%" : "—";
@@ -451,8 +579,23 @@
       : '<div class="empty">No signals recorded. Add with ' +
         "<code>--stat K=V:tone</code>.</div>";
 
-    drawNetwork(s.network);
+    drawNetwork(s.network, s.tasks);
     drawTasks(s.tasks, s.current);
+
+    // Fire a packet for every task that changed status since the last poll.
+    // The first poll only establishes a baseline -- otherwise opening the
+    // board mid-run would replay the whole history at once.
+    var seen = {};
+    (s.tasks || []).forEach(function (t) { seen[t.id] = t.status; });
+    if (prevStatus) {
+      var fired = 0;
+      (s.tasks || []).forEach(function (t) {
+        if (prevStatus[t.id] === t.status || fired >= 12) { return; }
+        var key = laneFor(t, t.status);
+        if (key) { setTimeout(firePacket.bind(null, key), fired * 140); fired++; }
+      });
+    }
+    prevStatus = seen;
 
     var d = s.defects || [];
     el("defects").innerHTML = d.length
@@ -509,7 +652,7 @@
 </script>
 
 <!--CMA:SNAPSHOT:START-->
-<script type="application/json" id="cma-snapshot">{"schema":1,"run":{"name":"CMA dashboard v2 + lessons + skill vendoring","orch":"opus","path":"warm","started":"2026-09-08T19:09:51","updated":"2026-09-08T19:29:16"},"current":{"id":"T11","title":"Committing the toolchain"},"tasks":[{"id":"T1","title":"Survey repo: gitignore, python, .claude tracking, docs layout","phase":"Context","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T2","title":"update.py — generalist driver, derived agent network, auto-seed","phase":"Dashboard","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T3","title":"index.html — template with agent-network SVG + warm/cold ledger","phase":"Dashboard","status":"resolved","by":"opus","mode":"warm","hist":["done","failed","resolved"],"depends_on":[]},{"id":"T4","title":"Repo lessons file (docs/cma-lessons.md)","phase":"Lessons","status":"done","by":"opus","mode":"warm","hist":["running","done"],"depends_on":[]},{"id":"T5","title":"Global lessons file (~/.claude/cma-lessons.md)","phase":"Lessons","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T6","title":"Vendor cma-run skill into .claude/skills for the second account","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T7","title":"install.py — non-clobbering promote-to-global","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T8","title":"README + .gitignore wiring","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T9","title":"Adversarial verification of the whole toolchain","phase":"Verify","status":"done","by":"opus","mode":"warm","hist":["verifying","done"],"depends_on":[]},{"id":"T10","title":"Fix python3 -> python note in CLAUDE.md and AGENTS.md","phase":"Follow-on","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T11","title":"Branch and commit the CMA toolchain","phase":"Follow-on","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]}],"stats":[{"k":"Path","v":"warm-context","tone":"good"},{"k":"Cold dispatches","v":"0","tone":"good"},{"k":"Defects found","v":"3","tone":"warn"},{"k":"Tasks","v":"11","tone":"neutral"}],"defects":[],"log":[{"ts":"2026-09-08T19:09:51","msg":"run started: CMA dashboard v2 + lessons + skill vendoring"},{"ts":"2026-09-08T19:09:51","msg":"seeded 9 task(s) from task-graph.json"},{"ts":"2026-09-08T19:09:59","msg":"batch 1 (dashboard) closed warm — no subagent dispatched"},{"ts":"2026-09-08T19:14:46","msg":"verify: warm work drew a dispatch edge through the Executor box — rerouted + recoloured"},{"ts":"2026-09-08T19:14:46","msg":"verify: idempotence, input rejection, --new-run reset, clobber refusal all pass"},{"ts":"2026-09-08T19:16:32","msg":"verify: defect edge re-pointed at the actual work owner; arrowheads pinned to userSpaceOnUse"},{"ts":"2026-09-08T19:16:55","msg":"verification complete: 3 defects found and fixed, 0 outstanding"},{"ts":"2026-09-08T19:29:00","msg":"seeded 2 task(s) from task-graph.json"},{"ts":"2026-09-08T19:29:16","msg":"docs: Windows interpreter note added to CLAUDE.md + AGENTS.md"},{"ts":"2026-09-08T19:29:16","msg":"merge-seed verified: +2 tasks, 9 prior statuses preserved"},{"ts":"2026-09-08T19:29:16","msg":"run complete — committing on claude/cma-run-toolchain"}],"manual_edges":[],"network":{"nodes":{"orchestrator":11,"executor":0,"verifier":0,"ops":0,"learner":0},"edges":[{"from":"orchestrator","to":"orchestrator","label":"warm","n":11,"kind":"warm"},{"from":"orchestrator","to":"verifier","label":"verify","n":11,"kind":"verify"},{"from":"verifier","to":"orchestrator","label":"defect","n":1,"kind":"defect"}],"ledger":{"warm":11,"cold":0,"ratio":100}}}</script>
+<script type="application/json" id="cma-snapshot">{"schema":1,"run":{"name":"CMA dashboard v2 + lessons + skill vendoring","orch":"opus","path":"warm","started":"2026-09-08T19:09:51","updated":"2026-09-08T19:34:42"},"current":{"id":"T12","title":"Run complete"},"tasks":[{"id":"T1","title":"Survey repo: gitignore, python, .claude tracking, docs layout","phase":"Context","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T2","title":"update.py — generalist driver, derived agent network, auto-seed","phase":"Dashboard","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T3","title":"index.html — template with agent-network SVG + warm/cold ledger","phase":"Dashboard","status":"resolved","by":"opus","mode":"warm","hist":["done","failed","resolved"],"depends_on":[]},{"id":"T4","title":"Repo lessons file (docs/cma-lessons.md)","phase":"Lessons","status":"done","by":"opus","mode":"warm","hist":["running","done"],"depends_on":[]},{"id":"T5","title":"Global lessons file (~/.claude/cma-lessons.md)","phase":"Lessons","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T6","title":"Vendor cma-run skill into .claude/skills for the second account","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T7","title":"install.py — non-clobbering promote-to-global","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T8","title":"README + .gitignore wiring","phase":"Distribution","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T9","title":"Adversarial verification of the whole toolchain","phase":"Verify","status":"done","by":"opus","mode":"warm","hist":["verifying","done"],"depends_on":[]},{"id":"T10","title":"Fix python3 -> python note in CLAUDE.md and AGENTS.md","phase":"Follow-on","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T11","title":"Branch and commit the CMA toolchain","phase":"Follow-on","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]},{"id":"T12","title":"Live agent-network interaction: packets, halos, live-only motion","phase":"Live network","status":"done","by":"opus","mode":"warm","hist":["done"],"depends_on":[]}],"stats":[{"k":"Path","v":"warm-context","tone":"good"},{"k":"Cold dispatches","v":"0","tone":"good"},{"k":"Defects found","v":"4","tone":"warn"},{"k":"Tasks","v":"12","tone":"neutral"}],"defects":[],"log":[{"ts":"2026-09-08T19:09:51","msg":"run started: CMA dashboard v2 + lessons + skill vendoring"},{"ts":"2026-09-08T19:09:51","msg":"seeded 9 task(s) from task-graph.json"},{"ts":"2026-09-08T19:09:59","msg":"batch 1 (dashboard) closed warm — no subagent dispatched"},{"ts":"2026-09-08T19:14:46","msg":"verify: warm work drew a dispatch edge through the Executor box — rerouted + recoloured"},{"ts":"2026-09-08T19:14:46","msg":"verify: idempotence, input rejection, --new-run reset, clobber refusal all pass"},{"ts":"2026-09-08T19:16:32","msg":"verify: defect edge re-pointed at the actual work owner; arrowheads pinned to userSpaceOnUse"},{"ts":"2026-09-08T19:16:55","msg":"verification complete: 3 defects found and fixed, 0 outstanding"},{"ts":"2026-09-08T19:29:00","msg":"seeded 2 task(s) from task-graph.json"},{"ts":"2026-09-08T19:29:16","msg":"docs: Windows interpreter note added to CLAUDE.md + AGENTS.md"},{"ts":"2026-09-08T19:29:16","msg":"merge-seed verified: +2 tasks, 9 prior statuses preserved"},{"ts":"2026-09-08T19:29:16","msg":"run complete — committing on claude/cma-run-toolchain"},{"ts":"2026-09-08T19:34:41","msg":"seeded 1 task(s) from task-graph.json"},{"ts":"2026-09-08T19:34:42","msg":"live network: poll-diff fires a packet per transition; motion now means active, not historical"},{"ts":"2026-09-08T19:34:42","msg":"verify: SMIL animateMotion begin=0s parked packets at the origin — replaced with a rAF tween"}],"manual_edges":[],"network":{"nodes":{"orchestrator":12,"executor":0,"verifier":0,"ops":0,"learner":0},"edges":[{"from":"orchestrator","to":"orchestrator","label":"warm","n":12,"kind":"warm"},{"from":"orchestrator","to":"verifier","label":"verify","n":12,"kind":"verify"},{"from":"verifier","to":"orchestrator","label":"defect","n":1,"kind":"defect"}],"ledger":{"warm":12,"cold":0,"ratio":100}}}</script>
 <!--CMA:SNAPSHOT:END-->
 </body>
 </html>

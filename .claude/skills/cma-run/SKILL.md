@@ -176,8 +176,18 @@ be worth nothing; this one is anchored on the **warm/cold ledger**, which is
 the scheme's one genuinely contested claim. `MODE` on `--task` is `warm` (done
 in already-paid context) or `cold` (a subagent dispatch that re-paid the
 first-read cost), and the panel reports the ratio. That makes adherence to
-warm-context-first *auditable after the fact* instead of aspirational. Lanes
-with no traffic render dashed — an unused path is information too.
+warm-context-first *auditable after the fact* instead of aspirational.
+
+**Motion means "happening right now", not "happened at some point".** The board
+re-reads `status.json` every two seconds and diffs it against the previous
+read, so a task that changed status since the last poll is an event it can
+animate: a packet flies down the lane that transition crossed, and every node
+with work in flight wears a pulsing halo. The legend is three-state and worth
+keeping straight — **moving** = carrying work this instant, **solid** = used
+earlier in the run, **dashed** = never used. If everything animated forever the
+movement would stop carrying information, which is the failure mode this
+replaced. So drive the board *as tasks move*: ticking only at the end still
+produces a correct ledger, but you watch a dead diagram.
 
 Set `MODE` explicitly when you know it. Left off, it defaults to `warm` for
 the orchestrator tier and `cold` for everything else, which is right far more

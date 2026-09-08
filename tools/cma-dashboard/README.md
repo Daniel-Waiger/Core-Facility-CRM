@@ -75,5 +75,12 @@ topology diagram that looked identical every run would be decoration, whereas
 the ratio of warm work to cold dispatches is the scheme's one contested claim,
 and this makes adherence auditable rather than aspirational.
 
+**Motion means live.** The page diffs each poll against the last, so a task
+that just changed status fires a packet down the lane it crossed, and nodes
+with work in flight pulse. Legend: **moving** = carrying work now, **solid** =
+used earlier, **dashed** = never used. Tick the board as tasks move and you get
+a live view; tick only at the end and the ledger is still right but the diagram
+is dead. Honours `prefers-reduced-motion`.
+
 Commit `index.html` at checkpoints (end of a batch, end of a run, at handover),
 not on every tick — that's why `status.json` is gitignored.
