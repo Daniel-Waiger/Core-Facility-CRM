@@ -3,7 +3,7 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.8.0] — 2026-09-08
 
 ### Added
 - **Search filter in token pickers.** Token pickers (People/Instruments/Staff/etc.) gain a
