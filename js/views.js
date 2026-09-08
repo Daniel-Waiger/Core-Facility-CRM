@@ -924,10 +924,12 @@
     let out = '';
     for (let h = 0; h < CAL_DAY_HOURS; h++) {
       const startHH = String(h).padStart(2, '0') + ':00';
-      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '23:59';
+      // The 23:00 slot gets no end prefill: a hard-coded 23:59 would make a 59-minute booking
+      // that can trip a 60-minute min-duration constraint before the user has touched anything.
+      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '';
       out += `
         <div class="cal-hour-slot clickable" style="height:${px}px"
-             data-act="new-booking" data-date="${ds}" data-start="${startHH}" data-end="${endHH}"
+             data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}
              data-tooltip="Click to add a booking at ${startHH} on ${ds}"></div>`;
     }
     return out;
@@ -941,10 +943,11 @@
     let out = '';
     for (let h = 0; h < CAL_DAY_HOURS; h++) {
       const startHH = String(h).padStart(2, '0') + ':00';
-      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '23:59';
+      // Same rule as calHourSlotsHtml: no 23:59 end prefill on the last slot.
+      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '';
       out += `
         <div class="cal-tl-hour-slot clickable" style="width:${CAL_TL_HOUR_PCT}%"
-             data-act="new-booking" data-date="${ds}" data-start="${startHH}" data-end="${endHH}"${instId ? ` data-inst="${instId}"` : ''}
+             data-act="new-booking" data-date="${ds}" data-start="${startHH}"${endHH ? ` data-end="${endHH}"` : ''}${instId ? ` data-inst="${instId}"` : ''}
              data-tooltip="Click to add a booking at ${startHH} on ${ds}${instId ? ' for this instrument' : ''}"></div>`;
     }
     return out;

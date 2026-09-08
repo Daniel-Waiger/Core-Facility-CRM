@@ -57,6 +57,9 @@ This project uses [Semantic Versioning](https://semver.org/).
   reports and exports; it now defaults to today, exactly as creating one does.
 - **Archive dialog no longer credits all billing to bookings.** The preserved-billing figure
   includes service entries, and the copy now says so.
+- **The 23:00 calendar slot no longer prefills a 59-minute booking.** The last hour slot in the
+  week view and timeline leaves the end time blank instead of forcing 23:59, which could trip a
+  60-minute minimum-duration constraint before the user touched anything.
 
 ## [1.6.0] — 2026-09-07
 
