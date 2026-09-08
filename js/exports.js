@@ -4,8 +4,28 @@
   const DB = global.DB;
   const UI = global.UI;
 
+  // The one place every export path resolves a grant row to display text — wraps DB.grantLabel
+  // (the shared name/number-toggle logic app.js and views.js also read) with the "(Retired)"
+  // suffix and this file's own fallback string, so no export path re-derives the name-vs-number
+  // choice on its own. `row` is any record carrying grant_id/grant_name/grant_number/grant_is_retired
+  // from a LEFT JOIN grants — every query below joins those columns rather than storing a
+  // denormalized grant name, since the name/number toggle would make a frozen string wrong later.
+  function grantLabelFor(row) {
+    if (!row || !row.grant_id) return '—';
+    // grant_id is a soft link (no FK), so a joined row can come back empty; an orphaned id must
+    // still render the fallback rather than a blank cell.
+    const label = DB.grantLabel({ name: row.grant_name, number: row.grant_number });
+    return label ? UI.retiredName(label, row.grant_is_retired) : '—';
+  }
+
   function loadProject(id) {
-    const p = DB.row('SELECT p.*, pe.name as pi_name, pe.email as pi_email, pe.organization as pi_org FROM projects p LEFT JOIN people pe ON pe.id = p.pi_id WHERE p.id=?', [id]);
+    const p = DB.row(`
+      SELECT p.*, pe.name as pi_name, pe.email as pi_email, pe.organization as pi_org,
+             g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
+      FROM projects p
+      LEFT JOIN people pe ON pe.id = p.pi_id
+      LEFT JOIN grants g ON g.id = p.grant_id
+      WHERE p.id=?`, [id]);
     if (!p) return null;
 
     const ppl = DB.rows(`
@@ -33,7 +53,12 @@
       ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
 
     const kv = DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
-    const mtgs = DB.rows('SELECT * FROM meetings WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
+    const mtgs = DB.rows(`
+      SELECT m.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
+      FROM meetings m
+      LEFT JOIN grants g ON g.id = m.grant_id
+      WHERE m.project_id=?
+      ORDER BY m.date DESC, m.id DESC`, [id]);
     const files = DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     const prog = DB.projectProgress(id);
 
@@ -212,6 +237,7 @@
       ['Principal Investigator', d.p.pi_name || '—'],
       ['PI Email', d.p.pi_email || '—'],
       ['Funding Source', d.p.funding || '—'],
+      ['Grant', grantLabelFor(d.p)],
       ['Modality / Technique', d.p.modality || '—'],
       ['Sample Type', d.p.sample || '—'],
       ['Flags / Risk', d.p.flags || '—'],
@@ -272,16 +298,16 @@
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
-    const mtRows = [['Meeting Title', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
+    const mtRows = [['Meeting Title', 'Grant', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, grantLabelFor(m), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
 
     // Sheet 6: Files
@@ -313,6 +339,7 @@
       new Paragraph({ text: `Status: ${d.p.status}   |   Priority: ${d.p.priority || 'Medium'}   |   Progress: ${d.prog.pct}% (${d.prog.done}/${d.prog.total} milestones)` }),
       new Paragraph({ text: `Principal Investigator: ${d.p.pi_name || '—'}   |   Funding: ${d.p.funding || '—'}   |   Modality: ${d.p.modality || '—'}` }),
       new Paragraph({ text: `Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} → ${UI.fmtDate(d.p.end_date)}` }),
+      new Paragraph({ text: `Grant: ${grantLabelFor(d.p)}` }),
     ];
 
     if (d.p.notes) {
@@ -372,7 +399,9 @@
     if (d.mtgs.length) {
       d.mtgs.forEach((m) => {
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
+        const catStr = m.category ? ` [${m.category}]` : '';
+        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
+        if (m.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(m)}`, italics: true }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
@@ -450,7 +479,7 @@
     // Summary Box
     pdf.setFillColor(248, 250, 252);
     pdf.setDrawColor(226, 232, 240);
-    pdf.roundedRect(margin, y, 210 - (margin * 2), 26, 2, 2, 'FD');
+    pdf.roundedRect(margin, y, 210 - (margin * 2), 32, 2, 2, 'FD');
     y += 6;
     pdf.setFontSize(9);
     pdf.setTextColor(20, 20, 20);
@@ -459,6 +488,8 @@
     pdf.text(`Principal Investigator: ${d.p.pi_name || '—'}   |   Funding: ${d.p.funding || '—'}   |   Modality: ${d.p.modality || '—'}`, margin + 4, y);
     y += 6;
     pdf.text(`Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} → ${UI.fmtDate(d.p.end_date)}`, margin + 4, y);
+    y += 6;
+    pdf.text(`Grant: ${grantLabelFor(d.p)}`, margin + 4, y);
     y += 12;
 
     if (d.p.notes) {
@@ -543,9 +574,18 @@
         checkPage(14);
         pdf.setFont('helvetica', 'bold');
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}${bookingStatusSuffix(m)}`, margin, y);
+        const catStr = m.category ? ` [${m.category}]` : '';
+        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
+        if (m.grant_id) {
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdf.text(`Grant: ${grantLabelFor(m)}`, margin + 4, y);
+          pdf.setTextColor(20, 20, 20);
+          pdf.setFontSize(9);
+          y += 4;
+        }
         if (m.attendees) {
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
@@ -602,36 +642,43 @@
     UI.toast('Exported formatted PDF report');
   }
 
-  /* ---------------- Facility-wide XLSX Export (all projects) ---------------- */
-  function exportAllXlsx() {
+  /* ---------------- Facility-wide XLSX Export (all projects) ----------------
+     buildAllXlsxBlob() does the actual workbook construction and returns the Blob; exportAllXlsx()
+     is the user-initiated entry point (build + prompt-download). The silent periodic auto-backup
+     (app.js's performBackupDownload) calls buildAllXlsxBlob() directly so it never fires an
+     unprompted browser download. */
+  function buildAllXlsxBlob() {
     const XLSX = global.XLSX;
-    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    if (!XLSX) return null;
 
     const projects = DB.rows(`
-      SELECT p.*, pe.name as pi_name, pe.email as pi_email
-      FROM projects p LEFT JOIN people pe ON pe.id = p.pi_id
+      SELECT p.*, pe.name as pi_name, pe.email as pi_email,
+             g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
+      FROM projects p
+      LEFT JOIN people pe ON pe.id = p.pi_id
+      LEFT JOIN grants g ON g.id = p.grant_id
       ORDER BY p.updated_at DESC`);
 
-    if (!projects.length) { UI.toast('No projects to export', 'error'); return; }
+    if (!projects.length) return null;
 
     const wb = XLSX.utils.book_new();
 
     // Sheet 1: Projects overview (one row per project)
     const projRows = [[
-      'Code', 'Title', 'Status', 'Priority', 'PI', 'PI Email', 'Funding', 'Modality',
+      'Code', 'Title', 'Status', 'Priority', 'PI', 'PI Email', 'Funding', 'Grant', 'Modality',
       'Sample', 'Flags', 'Tags', 'Start Date', 'End Date', 'Progress %', 'Milestones', 'Created', 'Updated'
     ]];
     projects.forEach((p) => {
       const prog = DB.projectProgress(p.id);
       projRows.push([
         p.code, p.title, p.status, p.priority || 'Medium', p.pi_name || '—', p.pi_email || '—',
-        p.funding || '—', p.modality || '—', p.sample || '—', p.flags || '—', p.tags || '—',
+        p.funding || '—', grantLabelFor(p), p.modality || '—', p.sample || '—', p.flags || '—', p.tags || '—',
         p.start_date || '—', p.end_date || '—', prog.pct + '%', `${prog.done} of ${prog.total}`,
         p.created_at, p.updated_at
       ]);
     });
     const wsP = XLSX.utils.aoa_to_sheet(projRows);
-    wsP['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 20 }];
+    wsP['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, wsP, 'Projects');
 
     // Sheet 2: All milestones (across every project)
@@ -658,43 +705,54 @@
     XLSX.utils.book_append_sheet(wb, wsPe, 'People');
 
     // Sheet 4: Instruments
-    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Cost', 'Unit']];
-    DB.rows('SELECT name, kind, status, location, note, cost, cost_unit, is_retired FROM instruments ORDER BY is_retired, name').forEach((i) => {
-      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.cost || 0, i.cost_unit || 'time']);
+    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Supervisor(s)', 'Cost', 'Unit']];
+    DB.rows(`
+      SELECT i.name, i.kind, i.status, i.location, i.note, i.cost, i.cost_unit, i.is_retired,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
+                WHERE ist.instrument_id = i.id) as supervisors
+      FROM instruments i ORDER BY i.is_retired, i.name`).forEach((i) => {
+      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.supervisors || '—', i.cost || 0, i.cost_unit || 'time']);
     });
     const wsI = XLSX.utils.aoa_to_sheet(instRows);
-    wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
+    wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 24 }, { wch: 10 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
-    const mtRows = [['Project Code', 'Project', 'Meeting', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Grant', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
     DB.rows(`
-      SELECT mt.*, p.code as project_code, p.title as project_title
-      FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
+      SELECT mt.*, p.code as project_code, p.title as project_title,
+             g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
+      FROM meetings mt
+      LEFT JOIN projects p ON p.id = mt.project_id
+      LEFT JOIN grants g ON g.id = mt.grant_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title,
+      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), m.category || '—',
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
-    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings');
+    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings'); // !cols is intentionally shorter than the header row — SheetJS just applies its default width past the end
 
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
     // computeBookingBOM in app.js at the time the booking was saved).
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
+             g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
              (SELECT GROUP_CONCAT(i.name, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
              (SELECT GROUP_CONCAT(pe.name, ', ') FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = mt.id) as staff
-      FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
+      FROM meetings mt
+      LEFT JOIN projects p ON p.id = mt.project_id
+      LEFT JOIN grants g ON g.id = mt.grant_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
       // A waived cancellation contributes 0 to the Total Cost column so the column sums to what
       // the facility actually bills; the Status column says why.
       const counts = !(m.is_cancelled && !m.billing_retained);
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title,
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
@@ -702,12 +760,19 @@
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);
-    UI.toast(`Exported ${projects.length} project${projects.length === 1 ? '' : 's'} to XLSX`);
+    return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
+  }
+
+  function exportAllXlsx() {
+    if (!global.XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+    const built = buildAllXlsxBlob();
+    if (!built) { UI.toast('No projects to export', 'error'); return; }
+    blobDownload(built.blob, `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    UI.toast(`Exported ${built.count} project${built.count === 1 ? '' : 's'} to XLSX`);
   }
 
   /* ---------------- Reports & Utilization XLSX Export ---------------- */
@@ -726,6 +791,7 @@
     const staff = Reports.computeStaffRows(from, to);
     const matrix = Reports.computeStaffInstrumentMatrix(from, to);
     const proj = Reports.computeProjectRows(from, to);
+    const consult = Reports.computeConsultRows(from, to);
 
     const wb = XLSX.utils.book_new();
     const rangeLabel = `${from || 'earliest'} to ${to || 'latest'}`;
@@ -792,6 +858,17 @@
     wsPg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, wsPg, 'Projects & Groups');
 
+    // Sheet 6: Consults — bookings tagged Category = "consult", counted per instrument and per
+    // calendar-month period. Fed from the exact same Reports.computeConsultRows the screen
+    // renders from, so this sheet can never disagree with what's on screen.
+    const consultRows = [['Breakdown', 'Instrument / Month', 'Consults']];
+    consultRows.push(['Total', 'All', consult.totalConsults]);
+    consult.instrumentRows.forEach((r) => consultRows.push(['By Instrument', UI.retiredName(r.name, r.retired), r.count]));
+    consult.periodRows.forEach((r) => consultRows.push(['By Period', r.period, r.count]));
+    const wsConsult = XLSX.utils.aoa_to_sheet(consultRows);
+    wsConsult['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, wsConsult, 'Consults');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
     UI.toast('Exported Reports & Utilization to XLSX');
@@ -800,6 +877,6 @@
   // 1.9999999999998) showing up in a spreadsheet cell.
   function round2(n) { return Math.round((n || 0) * 100) / 100; }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, exportReportsXlsx };
+  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx };
 
 })(window);

@@ -17,6 +17,7 @@
     flags TEXT DEFAULT '',
     tags TEXT DEFAULT '',
     pi_id INTEGER,
+    grant_id INTEGER,
     start_date TEXT,
     end_date TEXT,
     notes TEXT DEFAULT '',
@@ -39,6 +40,20 @@
     is_retired INTEGER DEFAULT 0,
     retired_at TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    number TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    is_retired INTEGER DEFAULT 0,
+    retired_at TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS grant_users (
+    grant_id INTEGER NOT NULL REFERENCES grants(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    PRIMARY KEY (grant_id, person_id)
   );
   CREATE TABLE IF NOT EXISTS instruments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +79,11 @@
     instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
     PRIMARY KEY (project_id, instrument_id)
   );
+  CREATE TABLE IF NOT EXISTS instrument_staff (
+    instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    PRIMARY KEY (instrument_id, person_id)
+  );
   CREATE TABLE IF NOT EXISTS milestones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -87,12 +107,14 @@
   CREATE TABLE IF NOT EXISTS meetings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    grant_id INTEGER,
     title TEXT NOT NULL,
     date TEXT,
     start_time TEXT DEFAULT '',
     end_time TEXT DEFAULT '',
     attendees TEXT DEFAULT '',
     link TEXT DEFAULT '',
+    category TEXT DEFAULT '',
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
     discount_pct REAL DEFAULT 0,
@@ -242,6 +264,11 @@
           org TEXT PRIMARY KEY,
           percent REAL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS instrument_staff (
+          instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          PRIMARY KEY (instrument_id, person_id)
+        );
       `);
     } catch (_) {}
 
@@ -290,6 +317,38 @@
     try { db.exec("ALTER TABLE meetings ADD COLUMN is_cancelled INTEGER DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN cancelled_at TEXT DEFAULT ''"); } catch (_) {}
     try { db.exec("ALTER TABLE meetings ADD COLUMN billing_retained INTEGER DEFAULT 0"); } catch (_) {}
+    // Consult-type tag (sync / consult / training / assisted session, extensible via the vocab
+    // table like every other dropdown) so Reports can count consults per instrument and period.
+    try { db.exec("ALTER TABLE meetings ADD COLUMN category TEXT DEFAULT ''"); } catch (_) {}
+
+    // Grants: a name/number entity, pickable on bookings and projects, with an allowed-users join
+    // table — retired (not deleted) via the same is_retired pattern as people/instruments once
+    // anything references it (see countGrantRefs). meetings.grant_id/projects.grant_id carry NO
+    // REFERENCES clause, matching the projects.pi_id precedent — a nullable "soft" link that any
+    // grant delete path (see retireGrant in app.js) must null out explicitly rather than lean on a
+    // FK cascade. Runs at the end of migrate() — meetings.grant_id in particular must come after
+    // the meetings rebuild above, which copies an explicit (older) column list into a fresh table
+    // and would otherwise silently drop a column added before it ran.
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS grants (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          number TEXT DEFAULT '',
+          note TEXT DEFAULT '',
+          is_retired INTEGER DEFAULT 0,
+          retired_at TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS grant_users (
+          grant_id INTEGER NOT NULL REFERENCES grants(id) ON DELETE CASCADE,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          PRIMARY KEY (grant_id, person_id)
+        );
+      `);
+    } catch (_) {}
+    try { db.exec('ALTER TABLE meetings ADD COLUMN grant_id INTEGER'); } catch (_) {}
+    try { db.exec('ALTER TABLE projects ADD COLUMN grant_id INTEGER'); } catch (_) {}
   }
 
   async function boot() {
@@ -658,6 +717,9 @@
      countPersonRefs/countInstrumentRefs report how much history a record carries. Zero
      references means there is nothing to preserve, so a genuine delete is safe and offered
      instead of retirement (otherwise a mistyped entry could never be tidied away). */
+  // Also deliberately excludes instrument_staff for the same reason as countInstrumentRefs below:
+  // supervising an instrument is a current assignment, not history. retirePerson's zero-ref
+  // delete branch cleans up instrument_staff rows explicitly before deleting the person.
   function countPersonRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_people WHERE person_id=?) AS projects,
@@ -672,6 +734,11 @@
     parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.pi;
     return parts;
   }
+  // Deliberately excludes instrument_staff: a supervisor assignment is current-state ("who looks
+  // after this instrument today"), not the historical fact this gate protects (a booking/milestone/
+  // project that actually used the instrument). retireInstrument's zero-ref delete branch still
+  // cleans up instrument_staff rows explicitly before deleting, so a supervised-but-otherwise-
+  // unused instrument can still be deleted without leaving an orphaned join row.
   function countInstrumentRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_instruments WHERE instrument_id=?) AS projects,
@@ -720,6 +787,38 @@
     parts.any = parts.lines + parts.attendees + (parts.total > 0 ? 1 : 0);
     return parts;
   }
+  /* How much of the app a grant touches: projects billed against it and bookings billed against
+     it (both via a nullable, REFERENCES-less grant_id column — see the migrate() comment for why).
+     Zero references means there's nothing to preserve, so retireGrant offers a real delete instead
+     of retirement, same rule as countPersonRefs/countInstrumentRefs/countProjectRefs above. */
+  function countGrantRefs(id) {
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM projects WHERE grant_id=?) AS projects,
+      (SELECT COUNT(*) FROM meetings WHERE grant_id=?) AS bookings`, [id, id]) || {};
+    const parts = { projects: r.projects || 0, bookings: r.bookings || 0 };
+    parts.total = parts.projects + parts.bookings;
+    return parts;
+  }
+
+  /* The one place that resolves a grant to display text — honors the Settings name/number toggle
+     so every caller (app.js pickers, views.js's Project Costs card, exports.js's XLSX/DOCX/PDF
+     paths) agrees on what a grant "is called" without forking that logic per file. Accepts either
+     a grant id (looked up fresh) or an already-fetched row/object carrying at least {name, number}
+     — callers that already joined grants into their own query (to avoid an extra round-trip) pass
+     that row straight through. Falls back to whichever of name/number is present if the configured
+     one is blank, so a grant entered with only a number still displays as something. Does NOT
+     append "(Retired)" — that's UI.retiredName's job, same split as every other entity here. */
+  function grantLabel(grantOrId) {
+    if (grantOrId == null) return '';
+    let g = grantOrId;
+    if (typeof g !== 'object') {
+      g = row('SELECT id, name, number FROM grants WHERE id=?', [g]);
+    }
+    if (!g) return '';
+    const mode = getConfig('grant_display', 'name');
+    return mode === 'number' ? (g.number || g.name || '') : (g.name || g.number || '');
+  }
+
   /* retained: does this cancelled booking's cost still count toward Project Costs? A session
      cancelled after its start time was still time the facility held; one cancelled beforehand
      was not. Either way the booking itself stays logged. */
@@ -738,9 +837,9 @@
       run("UPDATE projects SET is_archived=0, archived_at='', updated_at=datetime('now') WHERE id=?", [id]);
     }
   }
-  // table is 'people' or 'instruments' — nothing else is retirable.
+  // table is 'people', 'instruments' or 'grants' — nothing else is retirable.
   function setRetired(table, id, retired) {
-    if (table !== 'people' && table !== 'instruments') return;
+    if (table !== 'people' && table !== 'instruments' && table !== 'grants') return;
     if (retired) {
       run(`UPDATE ${table} SET is_retired=1, retired_at=datetime('now') WHERE id=?`, [id]);
     } else {
@@ -812,6 +911,7 @@
     db.exec(`
       DELETE FROM project_people;
       DELETE FROM project_instruments;
+      DELETE FROM instrument_staff;
       DELETE FROM milestone_owners;
       DELETE FROM milestone_instruments;
       DELETE FROM milestones;
@@ -819,6 +919,8 @@
       DELETE FROM meeting_instruments;
       DELETE FROM meeting_staff;
       DELETE FROM meetings;
+      DELETE FROM grant_users;
+      DELETE FROM grants;
       DELETE FROM files;
       DELETE FROM kv;
       DELETE FROM projects;
@@ -829,7 +931,7 @@
       // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
       // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
-      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv')");
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     markDirty();
   }
@@ -847,9 +949,9 @@
        spec.cancelled:   {retained} or omitted/null for a live booking. */
   function seedBooking(spec) {
     const {
-      projectId = null, title, date, start = '', end = '',
+      projectId = null, grantId = null, title, date, start = '', end = '',
       instruments = [], staff = [], peopleIds = [], groupOrg = '',
-      note = '', actions = '', cancelled = null
+      note = '', actions = '', cancelled = null, category = ''
     } = spec;
 
     const instRows = instruments.length
@@ -885,16 +987,17 @@
       : '';
 
     const isCancelled = !!(cancelled && cancelled.cancelled !== false);
-    run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, note, actions,
+    run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, note, actions,
           discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost,
-          is_cancelled, cancelled_at, billing_retained)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
-      projectId, title, date, start, end, attendees, note, actions,
+          is_cancelled, cancelled_at, billing_retained, category)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      projectId, grantId, title, date, start, end, attendees, note, actions,
       0, groupOrg, groupPct, bom.subtotal, bom.beforeTax, bom.total,
       isCancelled ? 1 : 0,
       // Full timestamp, not a calendar day — toISOString() is the right tool here (see CLAUDE.md).
       isCancelled ? new Date().toISOString() : '',
-      isCancelled && cancelled.retained ? 1 : 0
+      isCancelled && cancelled.retained ? 1 : 0,
+      category
     ]);
     const inserted = row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
@@ -944,15 +1047,52 @@
       run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)', i);
     }
 
+    // 2b. Instrument supervisors (instrument_staff): David Kim (6) covers the four optical
+    // scopes (1-4), Priya Anand (7) is the Cryo-EM specialist supervising the Glacios (5), and
+    // Tom Alvarez (8) co-supervises the two highest-throughput/analysis-heavy scopes alongside
+    // David Kim — a real many-to-many (an instrument can have more than one supervisor).
+    const supervisorPairs = [
+      [1, 6], [2, 6], [3, 6], [4, 6], // David Kim — Leica SP8, Olympus FV3000, Zeiss Lightsheet, Nikon AX R
+      [5, 7],                         // Priya Anand — Glacios Cryo-TEM
+      [2, 8], [4, 8]                  // Tom Alvarez — Olympus FV3000 & Nikon AX R (analysis-heavy pipelines)
+    ];
+    for (const [instrumentId, personId] of supervisorPairs) {
+      run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [instrumentId, personId]);
+    }
+
+    // 2c. Grants — name/number pairs matching each seed project's own `funding` text (the free-text
+    // field on the project itself), plus an allowed-users list (grant_users) so the grant picker's
+    // token picker has something real to show. Populating BOTH the grant_id references below AND
+    // grant_users here is the same denormalized/join-table drift class CLAUDE.md warns about for
+    // meetings.attendees — a grant with no grant_users would look assigned everywhere but pick
+    // nobody in its own edit modal.
+    const grantsData = [
+      ['CAR-T Immunology R01', 'NIH R01-AI154920', 'Elena Rostova lab — intravital CAR-T imaging'],
+      ['Synaptic Density Brain Grant', 'Brain Research Grant #8410', 'Marcus Thorne lab — STED synaptic screening'],
+      ['Islet Imaging State Grant', 'State Health Initiative #4401', 'Sarah Lin lab — lightsheet islet mapping']
+    ];
+    for (const g of grantsData) {
+      run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', g);
+    }
+    const grantUserPairs = [
+      [1, 1], [1, 4], // CAR-T R01 — Elena Rostova, Alex Chen
+      [2, 2], [2, 5], // Brain Research Grant — Marcus Thorne, Maya Patel
+      [3, 3]          // Islet Imaging State Grant — Sarah Lin
+    ];
+    for (const [grantId, personId] of grantUserPairs) {
+      run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [grantId, personId]);
+    }
+
     // 3. Projects
     // Project 1: Active
-    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       'Intravital Multi-Photon Imaging of CAR-T Cell Infiltration',
       'PRJ-2026-001',
       'Active',
       'High',
       1, // Dr. Elena Rostova
+      1, // CAR-T Immunology R01 (NIH R01-AI154920)
       'Multiphoton',
       'NIH R01-AI154920',
       'Transgenic murine lymph node (in vivo)',
@@ -964,13 +1104,14 @@
     ]);
 
     // Project 2: Initiated
-    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       'Super-Resolution Mapping of Synaptic Density Compounds',
       'PRJ-2026-002',
       'Initiated',
       'Medium',
       2, // Prof. Marcus Thorne
+      2, // Synaptic Density Brain Grant (Brain Research Grant #8410)
       'Super-Resolution',
       'Brain Research Grant #8410',
       'Primary hippocampal cultures (96-well glass bottom)',
@@ -982,13 +1123,14 @@
     ]);
 
     // Project 3: Completed
-    run(`INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    run(`INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, tags, start_date, end_date, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       'Whole-Organ 3D Lightsheet Mapping of Pancreatic Islets',
       'PRJ-2025-088',
       'Completed',
       'Low',
       3, // Dr. Sarah Lin
+      3, // Islet Imaging State Grant (State Health Initiative #4401)
       'Lightsheet',
       'State Health Initiative #4401',
       'CUBIC-cleared murine pancreas',
@@ -1078,6 +1220,7 @@
     // overhead, 8% tax) still has to land on 490 / 546.25 / 589.95.
     seedBooking({
       projectId: 1,
+      grantId: 1, // CAR-T Immunology R01 — matches project 1's own grant
       title: 'Project Kickoff & Laser Alignment Review',
       date: day(-95), start: '09:00', end: '11:00',
       instruments: [{ id: 2 }],
@@ -1085,7 +1228,8 @@
       peopleIds: [1, 4, 6], // Elena Rostova, Alex Chen, David Kim
       groupOrg: 'Bio-Photonics Lab',
       note: 'Reviewed intravital laser power levels and live-animal heating stage protocol.',
-      actions: 'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.'
+      actions: 'Alex to reserve recurring Monday/Thursday blocks on Olympus FV3000; David to verify gas calibration.',
+      category: 'sync'
     });
 
     // #2/#3 — realistic no-line-item consultations: plenty of bookings are just a conversation,
@@ -1096,7 +1240,8 @@
       date: day(-80), start: '13:00', end: '14:30',
       peopleIds: [4, 6], // Alex Chen, David Kim
       note: 'Observed minor fluorophore quenching in red channel. Switched to resonant line accumulation.',
-      actions: 'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.'
+      actions: 'Pulse power dialed down to 7.5%; signal-to-noise preserved without phototoxicity.',
+      category: 'consult'
     });
     seedBooking({
       projectId: 2,
@@ -1104,13 +1249,32 @@
       date: day(-70), start: '10:00', end: '11:30',
       peopleIds: [2, 5, 6], // Marcus Thorne, Maya Patel, David Kim
       note: 'Discussed depletion laser doughnut alignment and immersion oil selection for 96-well glass plates.',
-      actions: 'Maya to prepare test 24-well plate for PSF and resolution calibration next week.'
+      actions: 'Maya to prepare test 24-well plate for PSF and resolution calibration next week.',
+      category: 'consult'
+    });
+    // — and the roadmap's other consult modality: a booking with the core member's time billed
+    // retroactively (1-hour floor), attributed to the instrument it was about via
+    // meeting_instruments (amount 0 ⇒ no per-grid charge — only Priya's time is billed). This is
+    // the seed row that gives the Consults report's per-instrument panel something to show.
+    seedBooking({
+      projectId: 3,
+      grantId: 3, // Islet Imaging State Grant — matches project 3's own grant
+      title: 'Vitrification Troubleshooting Consult',
+      date: day(-60), start: '14:00', end: '14:45',
+      instruments: [{ id: 5 }], // Glacios Cryo-TEM — what the consult was about; 0 units billed
+      staff: [{ id: 7 }], // Dr. Priya Anand — 45 min, billed at the 1-hour floor
+      peopleIds: [3, 7], // Sarah Lin, Priya Anand
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Walked through blot-force and humidity settings after repeated thin-ice failures on islet grids.',
+      actions: 'Priya\'s time billed retroactively per facility consult policy; new plunge parameters logged on the instrument sheet.',
+      category: 'consult'
     });
 
     // #4 — multi-instrument (parallel sample runs): the only booking exercising Reports' even
     // split of one staff member's hours across more than one instrument.
     seedBooking({
       projectId: 2,
+      grantId: 2, // Synaptic Density Brain Grant — matches project 2's own grant
       title: 'Parallel Confocal Reference Imaging: STED vs. Standard Resolution Benchmarking',
       date: day(-45), start: '09:00', end: '13:00',
       instruments: [{ id: 1 }, { id: 4 }], // Leica SP8 FALCON + Nikon AX R Resonant, side by side
@@ -1118,13 +1282,15 @@
       peopleIds: [2, 5, 6], // Marcus Thorne, Maya Patel, David Kim
       groupOrg: 'Neural Dynamics Institute', // no standing discount — see setGroupDiscount above
       note: 'Ran matched fields on the Leica SP8 FALCON and Nikon AX R Resonant in parallel to benchmark STED resolution gains against confocal and resonant-scan baselines on the same synaptic marker set.',
-      actions: 'Maya to tabulate FWHM measurements across both systems for the STED validation section of the grant renewal.'
+      actions: 'Maya to tabulate FWHM measurements across both systems for the STED validation section of the grant renewal.',
+      category: 'assisted session'
     });
 
     // #5 — per-unit (non-'time') instrument charge: Glacios Cryo-TEM bills per grid, not per
     // hour, and that per-unit cost is excluded from the discount base (see computeBookingBOM).
     seedBooking({
       projectId: 3,
+      grantId: 3, // Islet Imaging State Grant — matches project 3's own grant
       title: 'Cryo-EM Grid Screening for Islet Ultrastructure Micrographs',
       date: day(-100), start: '09:00', end: '12:00',
       instruments: [{ id: 5, amount: 8 }], // Glacios Cryo-TEM, $45/grid x 8 grids screened
@@ -1132,7 +1298,8 @@
       peopleIds: [3, 7], // Sarah Lin, Priya Anand
       groupOrg: 'Therapeutics & Onco-Therapy', // no standing discount
       note: 'Screened 8 vitrified grids from the CUBIC-cleared islet prep for ice thickness and particle distribution ahead of high-resolution acquisition.',
-      actions: 'Proceed to full data collection on the 3 grids with the most uniform ice; discard grids 4 and 6 for crystalline contamination.'
+      actions: 'Proceed to full data collection on the 3 grids with the most uniform ice; discard grids 4 and 6 for crystalline contamination.',
+      category: 'assisted session'
     });
 
     // #6 — facility-wide (project_id NULL) booking, and also the partial-staff-window example:
@@ -1145,7 +1312,8 @@
       staff: [{ id: 8, start: '10:00', end: '10:40' }], // Tom Alvarez, image analysis specialist
       peopleIds: [4, 5, 8], // Alex Chen, Maya Patel, Tom Alvarez
       note: 'General walk-in session covering Imaris surface reconstruction and STED deconvolution workflows for whichever project needed help that week.',
-      actions: 'Circulate the shared Imaris batch-processing macro to both labs.'
+      actions: 'Circulate the shared Imaris batch-processing macro to both labs.',
+      category: 'assisted session'
     });
 
     // #7 — cancelled BEFORE its start time: nothing was held, so the charge is dropped
@@ -1160,7 +1328,8 @@
       groupOrg: 'Neural Dynamics Institute',
       note: 'Requested to add a second resonant-confocal acquisition block for a backup screening plate batch.',
       actions: '',
-      cancelled: { cancelled: true, retained: false } // plate batch delayed in fixation; cancelled while the slot was still ahead of us
+      cancelled: { cancelled: true, retained: false }, // plate batch delayed in fixation; cancelled while the slot was still ahead of us
+      category: 'assisted session'
     });
 
     // #8 — cancelled AFTER its start time: the slot was held, so the charge stands
@@ -1175,7 +1344,8 @@
       groupOrg: 'Neural Dynamics Institute',
       note: 'Booked to redo the 775nm depletion doughnut alignment after an immersion oil swap introduced spherical aberration.',
       actions: '',
-      cancelled: { cancelled: true, retained: true } // failed a safety interlock check after the session had already started; facility held the slot so the charge stands
+      cancelled: { cancelled: true, retained: true }, // failed a safety interlock check after the session had already started; facility held the slot so the charge stands
+      category: 'assisted session'
     });
 
     // #9 — completes instrument coverage (Zeiss Lightsheet Z.1) and gives project 3 a second,
@@ -1189,7 +1359,8 @@
       peopleIds: [3, 6, 8], // Sarah Lin, David Kim, Tom Alvarez
       groupOrg: 'Therapeutics & Onco-Therapy',
       note: 'Re-ran two z-stacks that showed stitching artifacts and handed the corrected volumes to segmentation QC.',
-      actions: 'Tom to re-run the islet counting macro on the corrected volumes before the final report is regenerated.'
+      actions: 'Tom to re-run the islet counting macro on the corrected volumes before the final report is regenerated.',
+      category: 'assisted session'
     });
 
     // #10 — instrument-only booking (no staff line item): plenty of sessions are unstaffed
@@ -1202,7 +1373,8 @@
       peopleIds: [4], // Alex Chen
       groupOrg: 'Bio-Photonics Lab',
       note: 'Re-ran the multipoint time-lapse unattended overnight after last week’s run was cut short by a stage collision.',
-      actions: ''
+      actions: '',
+      category: 'assisted session'
     });
 
     // 9. Custom KV Metadata
@@ -1258,6 +1430,8 @@
     countPersonRefs,
     countInstrumentRefs,
     countProjectRefs,
+    countGrantRefs,
+    grantLabel,
     setProjectArchived,
     countBookingRefs,
     setBookingCancelled,

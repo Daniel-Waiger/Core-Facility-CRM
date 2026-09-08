@@ -3,6 +3,52 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-09-07
+
+### Added
+- **Grants table with pickers, costs, and exports (roadmap 2.1).** A new Settings card manages
+  Grants (name, number, note, an "Allowed Users" token picker backed by `grant_users`), pickable on
+  the Project and Booking modals via a shared `grant_id` selector. Grants are retired rather than
+  deleted once referenced (`DB.countGrantRefs`), and a Settings toggle chooses whether the app
+  displays a grant by name or number everywhere — resolved through one shared `DB.grantLabel`
+  helper (no denormalized grant-name column) so Project Detail, Project Costs, and the XLSX/DOCX/PDF
+  exports can never disagree.
+- **Live conflict feedback in the booking modal.** As instrument/staff selections and the
+  date/start/end fields change, the modal now shows an as-you-type conflict advisory (or an
+  all-clear line once start/end are set), reusing `findBookingConflicts` verbatim so it can never
+  drift from the hard-block check `bookingSave`/`bookingEditSave` still run at save time.
+- **Configurable cancellation billing rules in Settings.** A new "Cancellation Billing Rules" card
+  lets each facility choose, independently for before- and after-start cancellations, whether a
+  booking's charge still counts toward Project Costs — defaulting to the app's original hard-coded
+  behavior (before = dropped, after = kept) so existing data behaves unchanged until configured.
+  `cancelBooking`'s confirm-dialog copy is driven by the same settings so the rule described can
+  never drift from the rule applied.
+- **Instrument → supervising staff mapping.** Instruments can now list one or more Facility Staff
+  as "Supervising Staff" via a token picker on the Add/Edit Instrument modals, backed by a new
+  many-to-many `instrument_staff` join table. Supervisors show on the Instruments table, are
+  searchable there, and appear in the XLSX instrument export.
+- **Consult type tag on meetings (roadmap 3.1).** Bookings can now be tagged with a Category
+  (sync, consult, training, assisted session — extensible via the usual "+ Add New" vocab flow),
+  shown as a badge on the meeting list and included in the XLSX/DOCX/PDF exports. Reports &
+  Utilization gains a "Consults" card breaking down category = "consult" bookings by instrument
+  and by calendar month, backed by `Reports.computeConsultRows` and mirrored in the Reports XLSX
+  export so the two can never disagree.
+- **Periodic local exports into the silent backup folder (roadmap 3.7).** When an automatic backup
+  writes silently into the configured backup folder, it now also drops a companion facility-wide
+  XLSX export (projects, milestones, people, instruments, bookings & costs) into the same folder,
+  reusing `Exports.buildAllXlsxBlob` so the XLSX content can never drift from the manual "Export
+  All" report. Purely additive — any failure building or writing the XLSX is swallowed and never
+  falls back to an unprompted browser download; only the JSON backup is load-bearing.
+
+### Fixed
+- **Orphaned grant references render the fallback dash, not a blank.** `grant_id` is a soft
+  link, so a referenced grant row can be missing; Project Detail, the bookings table, and every
+  export now decide between label and "—" from the *resolved* label rather than from `grant_id`
+  alone.
+- **Live conflict advisory matches the save-time date default.** The New Booking form defaults a
+  blank date to today at save; the as-you-type conflict check now applies the same default (the
+  edit form stores a blank date as no-date, where no conflict is possible — unchanged).
+
 ## [1.5.7] — 2026-09-07
 
 ### Fixed

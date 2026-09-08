@@ -208,8 +208,19 @@
 
   /* ---------------- Project detail ---------------- */
   function projectDetail(id) {
-    const p = global.DB.row('SELECT p.*, pe.name as pi_name FROM projects p LEFT JOIN people pe ON pe.id = p.pi_id WHERE p.id=?', [id]);
+    const p = global.DB.row(`
+      SELECT p.*, pe.name as pi_name, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
+      FROM projects p
+      LEFT JOIN people pe ON pe.id = p.pi_id
+      LEFT JOIN grants g ON g.id = p.grant_id
+      WHERE p.id=?`, [id]);
     if (!p) return emptyState('folder', 'Project not found', 'This project may have been deleted.');
+    // No denormalized grant-name column — the Settings name/number toggle would make a frozen
+    // string wrong by design, so this always joins fresh and resolves via DB.grantLabel (the one
+    // shared label helper app.js/views.js/exports.js all read).
+    const grantDisplayStr = p.grant_id
+      ? global.UI.retiredName(global.DB.grantLabel({ name: p.grant_name, number: p.grant_number }), p.grant_is_retired)
+      : '';
 
     const ppl = global.DB.rows(`
       SELECT pp.role, pe.id, pe.name, pe.type, pe.email, pe.is_retired
@@ -232,7 +243,12 @@
       ORDER BY m.due_date IS NULL, m.due_date ASC, m.id ASC`, [id]);
 
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
-    const mtgs = global.DB.rows('SELECT * FROM meetings WHERE project_id=? ORDER BY date DESC, id DESC', [id]);
+    const mtgs = global.DB.rows(`
+      SELECT m.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
+      FROM meetings m
+      LEFT JOIN grants g ON g.id = m.grant_id
+      WHERE m.project_id=?
+      ORDER BY m.date DESC, m.id DESC`, [id]);
     const costCur = global.DB.getConfig('currency', '$');
     const files = global.DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     const prog = global.DB.projectProgress(p.id);
@@ -301,6 +317,7 @@
         <div class="card-body">
           <div class="metadata-grid">
             <div class="meta-item"><span class="meta-label">Funding:</span> <span class="meta-val">${esc(p.funding || '—')}</span></div>
+            <div class="meta-item"><span class="meta-label">Grant:</span> <span class="meta-val">${grantDisplayStr ? esc(grantDisplayStr) : '—'}</span></div>
             <div class="meta-item"><span class="meta-label">Modality:</span> <span class="meta-val">${esc(p.modality || '—')}</span></div>
             <div class="meta-item"><span class="meta-label">Sample Type:</span> <span class="meta-val">${esc(p.sample || '—')}</span></div>
             <div class="meta-item"><span class="meta-label">Flags:</span> <span class="meta-val">${flags.length ? flags.map((f) => `<span class="badge danger">${esc(f)}</span>`).join(' ') : '—'}</span></div>
@@ -389,13 +406,17 @@
         ${mtgs.length ? `
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>Booking</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
+            <thead><tr><th>Booking</th><th>Grant</th><th>Date / Time</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Before Tax</th><th style="text-align:right">Total</th><th style="text-align:right">Details</th></tr></thead>
             <tbody>
               ${mtgs.map((m) => {
                 const waived = m.is_cancelled && !m.billing_retained;
+                const bookingGrantStr = m.grant_id
+                  ? global.UI.retiredName(global.DB.grantLabel({ name: m.grant_name, number: m.grant_number }), m.grant_is_retired)
+                  : '';
                 return `
                 <tr class="${m.is_cancelled ? 'row-retired' : ''}">
-                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled before it started — charge dropped' : 'Cancelled after its start time — charge stands'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
+                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
+                  <td class="small">${bookingGrantStr ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>
@@ -443,7 +464,7 @@
           ${mtgs.length ? mtgs.map((m) => `
             <div class="meeting-box mb-8 ${m.is_cancelled ? 'row-retired' : ''}">
               <div class="row">
-                <span class="font-medium grow">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
+                <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email attendees">${ic('mail')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
@@ -601,7 +622,10 @@
   function instruments() {
     const allRows = global.DB.rows(`
       SELECT i.*,
-             (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count
+             (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
+                WHERE ist.instrument_id = i.id) as supervisors
       FROM instruments i
       ORDER BY i.is_retired, i.name`);
     const retiredCount = allRows.filter((r) => r.is_retired).length;
@@ -613,7 +637,7 @@
       if (instrumentFilter.status && r.status !== instrumentFilter.status) return false;
       if (instrumentFilter.kind && r.kind !== instrumentFilter.kind) return false;
       if (qLower) {
-        const textToSearch = `${r.name} ${r.kind || ''} ${r.status || ''} ${r.location || ''} ${r.note || ''}`.toLowerCase();
+        const textToSearch = `${r.name} ${r.kind || ''} ${r.status || ''} ${r.location || ''} ${r.note || ''} ${r.supervisors || ''}`.toLowerCase();
         if (!textToSearch.includes(qLower)) return false;
       }
       return true;
@@ -647,10 +671,10 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:16%"><col style="width:12%"><col style="width:8%"><col style="width:10%">
-            <col style="width:17%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:78px">
+            <col style="width:14%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
+            <col style="width:13%"><col style="width:13%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
           </colgroup>
-          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
@@ -659,6 +683,7 @@
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
                 <td class="faint small">${esc(r.location || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
+                <td class="faint small">${esc(r.supervisors || '—')}</td>
                 <td class="mono small">${esc(r.cost || 0)}</td>
                 <td class="muted small">${esc(r.cost_unit || 'time')}</td>
                 <td><span class="badge neutral">${r.proj_count} projects</span></td>
@@ -810,6 +835,10 @@
     const skipSingleInstrumentPrompt = UI.storage.getItem('skip-single-instrument-prompt') === '1';
     const orgs = global.DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization").map((r) => r.organization);
     const renameOrgs = global.DB.listAllOrgNames(); // includes orgs that only show up in group_discounts/meetings.group_org
+    const grants = global.DB.rows(`
+      SELECT g.*, (SELECT COUNT(*) FROM grant_users gu WHERE gu.grant_id = g.id) as user_count
+      FROM grants g ORDER BY g.is_retired ASC, g.name ASC`);
+    const grantDisplay = global.DB.getConfig('grant_display', 'name');
 
     return `
     <div class="card mb-16">
@@ -887,10 +916,10 @@
               !folderStatus.supported
                 ? "Not supported in this browser (Chrome/Edge only). Without it, automatic backups use your browser's normal file download — if that shows a save dialog every time, disable \"Ask where to save each file before downloading\" in your browser's download settings for a fully silent experience."
                 : folderStatus.name && folderStatus.granted
-                ? `Automatic backups write silently into <strong>${esc(folderStatus.name)}</strong> — no download prompts.`
+                ? `Automatic backups write silently into <strong>${esc(folderStatus.name)}</strong> — a full JSON backup plus an XLSX export of every project, milestone, person, instrument and booking — no download prompts.`
                 : folderStatus.name && !folderStatus.granted
                 ? `Backup folder "${esc(folderStatus.name)}" was configured but needs permission again (this can happen after a browser restart).`
-                : 'Not set up. Pick the folder where this app is saved (or any folder) — a "backups" subfolder will be created inside it automatically, and every automatic backup writes there silently with no download dialog.'
+                : 'Not set up. Pick the folder where this app is saved (or any folder) — a "backups" subfolder will be created inside it automatically, and every automatic backup writes a JSON backup and an XLSX export there silently with no download dialog.'
             }</div>
           </div>
           <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -919,6 +948,71 @@
           <div class="field"><label>Currency Symbol</label><input class="input" id="cfg-currency" value="${esc(global.DB.getConfig('currency', '$'))}" maxlength="4" /></div>
         </div>
         <button class="btn btn-primary btn-sm mt-8" data-act="save-billing-rates">${ic('check')} Save Rates</button>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('tag')} Grants</span></div>
+        <button class="btn btn-primary btn-sm" data-act="add-grant">${ic('plus')} Add Grant</button>
+      </div>
+      <div class="card-body">
+        <div class="faint small mb-8">Grants are picked on bookings and projects for billing reconciliation. There is no stored grant name on those records — every display resolves fresh through the setting below, so a rename never leaves a stale string behind.</div>
+        <div class="row mb-16" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field" style="margin:0;max-width:220px">
+            <label>Display grants by</label>
+            <select class="input" id="cfg-grant-display">
+              <option value="name" ${grantDisplay === 'number' ? '' : 'selected'}>Name</option>
+              <option value="number" ${grantDisplay === 'number' ? 'selected' : ''}>Number</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary btn-sm" data-act="save-grant-display">${ic('check')} Save Display Setting</button>
+        </div>
+        ${grants.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Name</th><th>Number</th><th>Note</th><th title="People allowed to be picked for this grant">Allowed Users</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${grants.map((g) => `
+                <tr class="${g.is_retired ? 'row-retired' : ''}">
+                  <td style="font-weight:600">${esc(global.UI.retiredName(g.name, g.is_retired))}</td>
+                  <td class="mono small">${esc(g.number || '—')}</td>
+                  <td class="faint small">${esc(g.note || '—')}</td>
+                  <td><span class="badge neutral">${g.user_count}</span></td>
+                  <td style="text-align:right;white-space:nowrap">
+                    <button class="btn btn-ghost btn-xs" data-act="edit-grant" data-id="${g.id}" title="Edit Grant">${ic('edit')}</button>
+                    ${g.is_retired
+                      ? `<button class="btn btn-ghost btn-xs" data-act="restore-grant" data-id="${g.id}" title="Restore — make available for new work again">${ic('rocket')}</button>`
+                      : `<button class="btn btn-ghost btn-xs" data-act="retire-grant" data-id="${g.id}" title="Retire — keeps every project/booking billed against it">${ic('archive')}</button>`}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('tag', 'No grants yet', 'Add a grant to make it pickable on projects and bookings.')}
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-title">${ic('clock')} Cancellation Billing Rules</div>
+      <div class="card-body">
+        <div class="faint small mb-8">Controls whether a booking's cost still counts toward Project Costs when it's cancelled, based on whether the cancellation happens before or after the booking's scheduled start time. Admin Mode can still override this per booking for after-start cancellations.</div>
+        <div class="grid cols-2">
+          <div class="field">
+            <label>Cancelling Before Start Time</label>
+            <select class="input" id="cfg-cancel-before-charge">
+              <option value="0" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? '' : 'selected'}>Charge dropped</option>
+              <option value="1" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? 'selected' : ''}>Charge kept</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Cancelling After Start Time</label>
+            <select class="input" id="cfg-cancel-after-charge">
+              <option value="0" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? '' : 'selected'}>Charge dropped</option>
+              <option value="1" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? 'selected' : ''}>Charge kept</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm mt-8" data-act="save-cancellation-rules">${ic('check')} Save Cancellation Rules</button>
       </div>
     </div>
 

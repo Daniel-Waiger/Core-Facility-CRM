@@ -205,7 +205,7 @@
          stale twice, which is exactly the kind of thing not worth remembering by hand. -->
     <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede">A facility manager's two standing questions are how much each instrument actually gets used, and where their own time goes. 1.5.1 answers both with a <strong>Reports</strong> screen — instrument hours, facility-staff time per instrument, and spend per project and lab, over any date range. It also fixes a calendar bug that had been quietly showing bookings on the wrong day for everyone east of Greenwich &mdash; and, in 1.5.2, the reason some installed copies were still showing you none of this.</p>
+    <p class="lede">1.6.0 is the first slice of the roadmap: the booking form now warns about scheduling clashes <strong>as you type</strong> instead of only at save, and the money side grows up &mdash; <strong>grants</strong> that projects and bookings charge against, and cancellation billing rules you can finally configure. Around them: supervising staff on every instrument, a consult tag so Reports can count advisory work, and a daily spreadsheet dropped silently next to the automatic backup.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="manual/">User Manual</a>
@@ -219,16 +219,14 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.5.0 &ndash; 1.5.2.</p>
+    <p class="section-sub">What changed in 1.6.0.</p>
     <div class="cards">
-      <div class="card"><div class="ic">📊</div><h3>Instrument utilisation</h3><p>Bookings, booked hours and billed revenue per instrument over any date range, with each instrument&rsquo;s share of total facility hours.</p></div>
-      <div class="card"><div class="ic">⏱️</div><h3>Where staff time goes</h3><p>Hours per facility-staff member, and a staff&nbsp;&times;&nbsp;instrument breakdown &mdash; so &ldquo;am I mostly helping users on one scope?&rdquo; has an answer.</p></div>
-      <div class="card"><div class="ic">🧮</div><h3>Worked hours and billed hours</h3><p>Reported separately, because billing rounds every staff line up to a whole hour. One number is workload, the other is the invoice.</p></div>
-      <div class="card"><div class="ic">🏫</div><h3>Per project and per lab</h3><p>Bookings, hours and cost grouped by project and by lab &mdash; including facility-wide sessions that belong to no project.</p></div>
-      <div class="card"><div class="ic">🗓️</div><h3>The calendar was a day out</h3><p>East of Greenwich, every cell was captioned with one date and filled with the previous day&rsquo;s bookings. Fixed, along with the click-to-book prefill it fed.</p></div>
-      <div class="card"><div class="ic">🔄</div><h3>Updates actually arrive</h3><p>An installed copy could pin itself to an old release: the cached shell naming which files to load was itself allowed to come from the browser’s cache. Settings said 1.4.0 while every file on the server said 1.5.1. Reloading now gets you the release that is actually deployed.</p></div>
-      <div class="card"><div class="ic">🧪</div><h3>A demo that shows the reports</h3><p>The sample dataset carried billing on a single booking, so Reports looked empty on the very data meant to demonstrate it. Ten bookings now cover every instrument, three staff, both cancellation rules and a per-unit charge &mdash; priced by the app&rsquo;s own calculator, and dated relative to the day you load it.</p></div>
-      <div class="card"><div class="ic">👥</div><h3>Facility Staff, spelled out</h3><p>One consistent name, and the forms now say what the flag does: tick it and the person becomes bookable, billable staff. Untick it and their past sessions stay intact.</p></div>
+      <div class="card"><div class="ic">⚡</div><h3>Conflicts, as you type</h3><p>The booking form now shows a live advisory the moment a date, time or instrument clashes with an existing booking &mdash; running the exact same check the save button enforces, so the warning can never disagree with the block.</p></div>
+      <div class="card"><div class="ic">🧾</div><h3>Grants</h3><p>Name, number and allowed users, managed in Settings. Projects and bookings pick a grant, Project Costs and every export carry it &mdash; and a toggle decides whether grants display by name or by number, everywhere at once.</p></div>
+      <div class="card"><div class="ic">💸</div><h3>Cancellation rules you set</h3><p>Whether a cancelled booking&rsquo;s charge counts &mdash; before the start, after the start &mdash; is now a Settings choice per facility. Untouched, it behaves exactly as before: early cancellations drop the charge, late ones keep it.</p></div>
+      <div class="card"><div class="ic">🔬</div><h3>Every instrument has a keeper</h3><p>Instruments now name their supervising facility staff &mdash; one or more per instrument. The groundwork for the roadmap&rsquo;s stewardship scorecards, and useful on its own as a &ldquo;who do I ask about this scope?&rdquo; column.</p></div>
+      <div class="card"><div class="ic">💬</div><h3>Consults are counted, not logged</h3><p>Bookings and syncs take a category tag &mdash; sync, consult, training, assisted session &mdash; and Reports counts consults per instrument and month. Advisory work finally shows up, without a chilling per-person consulting log.</p></div>
+      <div class="card"><div class="ic">📤</div><h3>The backup brings a spreadsheet</h3><p>Where a silent backup folder is set, the daily automatic backup now drops a full XLSX export alongside the JSON &mdash; an always-current spreadsheet on disk, with no extra downloads anywhere else.</p></div>
     </div>
   </div>
 </section>
@@ -240,7 +238,60 @@
 
     <div class="feature">
       <div class="txt">
-        <h3>Reports: how much the scopes get used, and where staff time goes <span class="tag">new</span></h3>
+        <h3>The booking form warns you before you clash <span class="tag">new</span></h3>
+        <p>Double-booking has always been blocked &mdash; at save, after the whole form was filled in. Now the same conflict check runs as you type: pick a date, a start and end time, an instrument or a staff member, and the form immediately says whose booking you would collide with, or shows a quiet all-clear once times are set. Nothing is blocked early and nothing new decides what a conflict is &mdash; the advisory calls the very function the save button enforces, so the warning and the block can never drift apart.</p>
+        <p>Editing an existing booking excludes itself from the check, and a half-filled form shows nothing rather than a premature &ldquo;no conflicts&rdquo;.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/52-live-conflicts.png" alt="Booking modal showing a live conflict advisory naming the clashing booking, before saving" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/52-live-conflicts.png</code></span></div>
+        <figcaption>A clash named while you are still choosing the time &mdash; not after you hit Save.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Grants: the number the invoice reconciles against <span class="tag">new</span></h3>
+        <p>Facility charges are ultimately paid from a grant, and until now the app only knew that as free text on a project. Grants are proper records now &mdash; name, number, and the people allowed to charge against them &mdash; managed from a Settings card, picked from a dropdown on projects and bookings, and carried into Project Costs and every XLSX, DOCX and PDF export so a monthly statement can be reconciled line by line.</p>
+        <ul>
+          <li>A Settings toggle chooses whether grants display by <strong>name</strong> or by <strong>number</strong> &mdash; one switch, applied everywhere at once, exports included.</li>
+          <li>A grant referenced by any project or booking is retired, never deleted &mdash; the same history-preserving rule people and instruments already follow.</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/53-grants-settings.png" alt="Settings card managing grants with name, number and allowed users, and the name-or-number display toggle" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/53-grants-settings.png</code></span></div>
+        <figcaption>Grants managed in Settings; picked on bookings and projects; printed on every export.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Instruments name their supervising staff <span class="tag">new</span></h3>
+        <p>The roadmap&rsquo;s reporting principle is that metrics hang on <em>instruments</em>, not on people &mdash; and that starts with knowing who is responsible for each one. Instrument records now carry one or more supervising facility staff, picked with the same token picker bookings use, shown on the Instruments screen. Retired supervisors stay on the record (marked, as everywhere) rather than silently vanishing on the next save.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/54-instrument-supervisors.png" alt="Instrument edit dialog with a Supervising Staff token picker, and supervisor names in the instruments list" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/54-instrument-supervisors.png</code></span></div>
+        <figcaption>Who to ask about this scope &mdash; recorded on the instrument itself.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>Consulting shows up in Reports &mdash; without a consult log <span class="tag">new</span></h3>
+        <p>Advisory work is real facility output that never appeared anywhere. The deliberate design is <em>not</em> a consulting log &mdash; a per-person record of every conversation reads as surveillance and discourages people from approaching core staff. Instead, the entries that already exist take a category &mdash; sync, consult, training, assisted session &mdash; and Reports counts consult-tagged sessions per instrument and per month. The vocabulary is extensible like the app&rsquo;s other dropdowns, and the tag rides along into the meeting exports.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/55-consults-report.png" alt="Reports screen showing consult-tagged sessions counted per instrument and per month" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/55-consults-report.png</code></span></div>
+        <figcaption>Consults counted per instrument and month &mdash; the work, not the people.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Reports: how much the scopes get used, and where staff time goes <span class="tag">1.5.1</span></h3>
         <p>Every booking already recorded which instrument was held, for how long, and which facility staff worked it. Nothing read that back in aggregate. <strong>Reports &amp; Utilization</strong> does: pick a date range and get booked hours and revenue per instrument, hours per staff member, a staff&nbsp;&times;&nbsp;instrument breakdown, and spend per project and per lab &mdash; exportable to XLSX.</p>
         <p>Two numbers are deliberately kept apart. <strong>Hours worked</strong> is the real time; <strong>hours billed</strong> applies the 1-hour minimum and rounds up to whole hours, exactly as the booking calculator does. One is workload, the other is the invoice, and a facility needs both.</p>
         <p>Cancelled bookings are handled the way the rest of the app already handles them: their hours drop out entirely, because a cancellation frees the slot and the instrument was never held &mdash; while their charge counts only if it was retained rather than waived. Both rules are printed under the tables they govern, so a total can always be reconciled against its rows. Retired staff, retired instruments and archived projects still appear; keeping them was the whole point.</p>

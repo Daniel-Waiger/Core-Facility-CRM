@@ -1,5 +1,5 @@
 /* consts.js — shared vocabularies (keep in sync with UI) */
-window.APP_VERSION = '1.5.7';
+window.APP_VERSION = '1.6.0';
 window.CONST = {
   // A lab→facility review/billing workflow by default; facilities can add their own via the
   // "+ Add New" vocab flow (DB.vocabList/addVocab), same as every other list here.
@@ -16,4 +16,7 @@ window.CONST = {
   // How an instrument's cost is priced: 'time' = price per hour (drives off booking start/end);
   // anything else = price per amount the user types in on the booking (e.g. per sample, per gram).
   UNIT: ['time', 'unit', 'weight', 'other'],
+  // Consult-type tag on a booking/meeting, so Reports can count consults per instrument/period.
+  // Facilities can add their own via the "+ Add New" vocab flow, same as every other list here.
+  BOOKING_CATEGORY: ['sync', 'consult', 'training', 'assisted session'],
 };

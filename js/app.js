@@ -538,8 +538,9 @@
 
   // Writes into the previously-granted "backups" subfolder with no dialog. Returns false
   // (never throws) if no folder is configured, permission has lapsed, or the write fails for
-  // any reason — callers should fall back to a normal download in that case.
-  async function tryWriteSilentBackup(filename, json) {
+  // any reason — callers should fall back to a normal download in that case. `contents` may be
+  // a string (the JSON backup) or a Blob (the XLSX export) — writable.write() accepts either.
+  async function tryWriteSilentBackup(filename, contents) {
     if (!supportsSilentBackupFolder()) return false;
     try {
       const stored = await DB.getAutoBackupDirHandle();
@@ -548,7 +549,7 @@
       if (perm !== 'granted') return false; // re-granting requires a user gesture; don't prompt silently
       const fileHandle = await stored.dirHandle.getFileHandle(filename, { create: true });
       const writable = await fileHandle.createWritable();
-      await writable.write(json);
+      await writable.write(contents);
       await writable.close();
       return true;
     } catch (e) {
@@ -593,12 +594,21 @@
     const data = await DB.buildBackup();
     const json = JSON.stringify(data);
     const namePart = kind === 'auto' ? 'autobackup' : kind === 'pre-restore' ? 'pre-restore-backup' : 'backup';
-    const filename = `core-facility-${namePart}-${new Date().toISOString().slice(0, 10)}.json`;
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const filename = `core-facility-${namePart}-${dateStamp}.json`;
 
     if (kind === 'auto') {
       const wroteSilently = await tryWriteSilentBackup(filename, json);
       UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
       if (wroteSilently) {
+        // The JSON backup landed silently — also drop a companion XLSX export into the same
+        // folder. This is purely additive: if it fails for any reason (library not loaded, no
+        // projects yet, write error) we still return here and never fall through to an
+        // unprompted browser download — only the JSON backup is load-bearing.
+        try {
+          const built = Exports && Exports.buildAllXlsxBlob ? Exports.buildAllXlsxBlob() : null;
+          if (built) await tryWriteSilentBackup(`core-facility-export-${dateStamp}.xlsx`, built.blob);
+        } catch (e) { console.error('silent auto XLSX export failed', e); }
         UI.toast('Automatic backup saved silently');
         return;
       }
@@ -914,8 +924,10 @@
       case 'restore': return doRestore();
       case 'toggle-admin-mode': return toggleAdminMode();
       case 'save-billing-rates': return saveBillingRates();
+      case 'save-cancellation-rules': return saveCancellationRules();
       case 'save-group-discounts': return saveGroupDiscounts();
       case 'rename-org': return renameOrgFromSettings();
+      case 'save-grant-display': return saveGrantDisplay();
       case 'choose-auto-backup-folder': return chooseAutoBackupFolder();
       case 'disable-auto-backup-folder': return disableAutoBackupFolder();
       case 'regrant-auto-backup-folder': return regrantAutoBackupFolder();
@@ -953,6 +965,14 @@
       case 'duplicate-project': return duplicateProject(el.dataset.id || ctx.project);
       case 'archive-project': return archiveProject();
       case 'restore-project': return restoreProject(el.dataset.id);
+
+      // Grants CRUD (Settings)
+      case 'add-grant': return addGrant();
+      case 'g-save': return gSave();
+      case 'edit-grant': return editGrant(el.dataset.id);
+      case 'g-edit-save': return gEditSave(el.dataset.id);
+      case 'retire-grant': return retireGrant(el.dataset.id);
+      case 'restore-grant': return restoreGrant(el.dataset.id);
 
       // Clipboard
       case 'copy': return UI.copyToClipboard(el.dataset.copy, el.dataset.copyLabel || 'Copied to clipboard');
@@ -1083,9 +1103,10 @@
         </div>
 
 
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           ${vocabField({ category: 'MODALITY', id: 'np-modality', label: 'Modality / Technique', placeholder: '-- Select Modality --' })}
           ${vocabField({ category: 'FUNDING', id: 'np-funding', label: 'Funding Source', placeholder: '-- Select Funding --' })}
+          ${grantSelectField('np-grant', null)}
         </div>
         <div class="grid cols-2">
           ${vocabField({ category: 'SAMPLE', id: 'np-sample', label: 'Sample Type', placeholder: '-- Select Sample --' })}
@@ -1141,6 +1162,8 @@
     const modality = m.querySelector('#np-modality').value;
     const funding = m.querySelector('#np-funding').value;
     const sample = m.querySelector('#np-sample').value;
+    const grantVal = (m.querySelector('#np-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const flags = [...m.querySelectorAll('[data-flag].on')].map((c) => c.dataset.flag).join(',');
     const start = m.querySelector('#np-start').value || null;
     const end = m.querySelector('#np-end').value || null;
@@ -1149,9 +1172,9 @@
 
     try {
       DB.run(`
-        INSERT INTO projects (title, code, status, priority, pi_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes]
+        INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes]
       );
     } catch (e) {
       UI.toast('Could not create project: ' + (e.message || 'unknown error'), 'error');
@@ -1202,9 +1225,10 @@
           </div>
           ${vocabField({ category: 'MODALITY', id: 'ep-modality', label: 'Modality / Technique', selected: p.modality, placeholder: '-- Select Modality --' })}
         </div>
-        <div class="grid cols-2">
+        <div class="grid cols-3">
           ${vocabField({ category: 'FUNDING', id: 'ep-funding', label: 'Funding Source', selected: p.funding, placeholder: '-- Select Funding --' })}
           ${vocabField({ category: 'SAMPLE', id: 'ep-sample', label: 'Sample Type', selected: p.sample, placeholder: '-- Select Sample --' })}
+          ${grantSelectField('ep-grant', p.grant_id)}
         </div>
         <div class="field">
           <label>Risk / Status Flags</label>
@@ -1245,6 +1269,8 @@
     const modality = m.querySelector('#ep-modality').value;
     const funding = m.querySelector('#ep-funding').value;
     const sample = m.querySelector('#ep-sample').value;
+    const grantVal = (m.querySelector('#ep-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const flags = [...m.querySelectorAll('[data-flag].on')].map((c) => c.dataset.flag).join(',');
     const start = m.querySelector('#ep-start').value || null;
     const end = m.querySelector('#ep-end').value || null;
@@ -1254,9 +1280,9 @@
     try {
       DB.run(`
         UPDATE projects
-        SET title=?, code=?, status=?, priority=?, pi_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
+        SET title=?, code=?, status=?, priority=?, pi_id=?, grant_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
         WHERE id=?`,
-        [title, code, status, priority, piId, modality, funding, sample, flags, start, end, tags, notes, id]
+        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes, id]
       );
     } catch (e) {
       UI.toast('Could not save project: ' + (e.message || 'unknown error'), 'error');
@@ -1672,6 +1698,13 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
+      // instrument_staff/grant_users aren't counted in countPersonRefs (supervising an instrument
+      // or being an allowed user on a grant is a current assignment, not history — see db.js), so
+      // a person with zero "real" refs can still hold either. Cascade would catch this too, but
+      // the explicit delete is the belt-and-suspenders convention every other delete path here
+      // follows.
+      DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
+      DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
       DB.run('DELETE FROM people WHERE id=?', [id]);
       UI.toast('Person deleted');
       refresh();
@@ -1721,11 +1754,14 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="i-cost" placeholder="0" /></div>
           ${vocabField({ category: 'UNIT', id: 'i-cost-unit', label: 'Billed per', selected: 'time', placeholder: '-- Select Unit --' })}
         </div>
+        ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="i-save">Save Instrument</button>
-      </div>`);
+      </div>`, (m) => {
+      mountTokenPicker(m, 'supervisor', instSupervisorItems());
+    });
   }
 
   function iSave() {
@@ -1735,6 +1771,8 @@
     DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit) VALUES (?,?,?,?,?,?,?)',
       [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
        Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time']);
+    const iid = DB.q1('SELECT last_insert_rowid()')[0];
+    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument added');
     refresh();
@@ -1743,6 +1781,7 @@
   function editInstrument(id) {
     const inst = DB.row('SELECT * FROM instruments WHERE id=?', [id]);
     if (!inst) return;
+    const currentSupervisors = DB.rows('SELECT person_id FROM instrument_staff WHERE instrument_id=?', [id]).map((r) => r.person_id);
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Instrument</span></div>
@@ -1758,11 +1797,15 @@
           <div class="field"><label>Cost</label><input type="number" min="0" step="any" class="input" id="ie-cost" value="${inst.cost || 0}" /></div>
           ${vocabField({ category: 'UNIT', id: 'ie-cost-unit', label: 'Billed per', selected: inst.cost_unit || 'time', placeholder: '-- Select Unit --' })}
         </div>
+        ${tokenPickerField('supervisor', 'Supervising Staff', '+ Add staff…')}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="i-edit-save" data-id="${inst.id}">Save Changes</button>
-      </div>`);
+      </div>`, (m) => {
+      mountTokenPicker(m, 'supervisor', instSupervisorItems(currentSupervisors));
+      m.querySelector('.token-picker[data-kind="supervisor"]')._setSelected(currentSupervisors);
+    });
   }
 
   function iEditSave(id) {
@@ -1772,6 +1815,8 @@
     DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=? WHERE id=?',
       [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
        Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time', id]);
+    DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
     refresh();
@@ -1791,6 +1836,11 @@
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
+      // instrument_staff isn't counted in countInstrumentRefs (supervision is current assignment,
+      // not history — see db.js), so an instrument with zero "real" refs can still have a
+      // supervisor. Cascade would catch this too, but the explicit delete is the
+      // belt-and-suspenders convention every other delete path here follows.
+      DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
       DB.run('DELETE FROM instruments WHERE id=?', [id]);
       UI.toast('Instrument deleted');
       refresh();
@@ -1974,6 +2024,27 @@
       org: r.organization || '', // discrete field for the Group/Lab filter — `meta` below is just for display
       meta: [r.organization, r.department].filter(Boolean).join(' · '),
       tip: (r.is_staff ? 'Facility Staff — ' : 'No longer Facility Staff — ') + fmtMoney(r.rate || 0) + '/hr'
+    }));
+  }
+
+  // Same shape/rule as bkStaffItems above, for the instrument "Supervising Staff" picker:
+  // selectable = Facility Staff OR already assigned as a supervisor here. A supervisor who has
+  // since retired (or been unticked as Facility Staff) keeps their badge on this instrument's
+  // picker but drops out of the "add new" dropdown — iEditSave rebuilds instrument_staff from
+  // whatever the picker renders, so losing the badge here would silently un-supervise them.
+  function instSupervisorItems(assignedIds) {
+    const extraIds = [...new Set((assignedIds || []).map(Number).filter((n) => Number.isFinite(n)))];
+    const extraClause = extraIds.length ? ` OR id IN (${extraIds.map(() => '?').join(',')})` : '';
+    const rows = DB.rows(
+      `SELECT id, name, organization, department, is_retired, is_staff FROM people WHERE is_staff=1${extraClause} ORDER BY name`,
+      extraIds
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      retired: !!r.is_retired || !r.is_staff,
+      name: UI.retiredName(r.name, r.is_retired),
+      meta: [r.organization, r.department].filter(Boolean).join(' · '),
+      tip: r.is_staff ? 'Facility Staff' : 'No longer Facility Staff'
     }));
   }
 
@@ -2475,12 +2546,44 @@
     }
   }
 
+  // Live, as-you-type conflict advisory — reuses findBookingConflicts VERBATIM so this can never
+  // drift from the hard-block check bookingSave/bookingEditSave run at save time; this is purely
+  // informational and never blocks typing or saving. findBookingConflicts itself returns [] both
+  // when start/end aren't set yet AND when they are set with genuinely no conflicts, so callers
+  // have to tell those two apart themselves: render nothing in the first case (an empty "no
+  // conflicts" box before the user's even picked times is just noise), a subtle all-clear line in
+  // the second.
+  function renderBookingConflicts(m, ids) {
+    const host = m.querySelector('#' + ids.prefix + '-conflicts');
+    if (!host) return;
+    // A blank date must mean here exactly what it means at save time, or the advisory drifts
+    // from the hard gate: bookingSave defaults a blank date to UI.today() (ids.dateDefault
+    // 'today'), while bookingEditSave stores null — which findBookingConflicts matches nothing
+    // against, so '' is already faithful there.
+    let date = ids.date ? (m.querySelector('#' + ids.date) || {}).value || '' : '';
+    if (!date && ids.dateDefault === 'today') date = UI.today();
+    const start = (m.querySelector('#' + ids.start) || {}).value || '';
+    const end = (m.querySelector('#' + ids.end) || {}).value || '';
+    if (!start || !end) { host.innerHTML = ''; return; }
+    const instIds = readTokenIds(m, 'inst');
+    const staffIds = readTokenIds(m, 'staff');
+    const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds });
+    if (!conflicts.length) {
+      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>`;
+      return;
+    }
+    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>`;
+  }
+
   function wireBomInputs(m, ids) {
     const recalc = () => recomputeBomTotals(m, ids);
+    const recalcConflicts = () => renderBookingConflicts(m, ids);
     const startEl = m.querySelector('#' + ids.start);
     const endEl = m.querySelector('#' + ids.end);
-    if (startEl) startEl.addEventListener('input', recalc);
-    if (endEl) endEl.addEventListener('input', recalc);
+    if (startEl) startEl.addEventListener('input', () => { recalc(); recalcConflicts(); });
+    if (endEl) endEl.addEventListener('input', () => { recalc(); recalcConflicts(); });
+    const dateEl = ids.date ? m.querySelector('#' + ids.date) : null;
+    if (dateEl) dateEl.addEventListener('input', recalcConflicts);
     const projectEl = m.querySelector('#' + ids.project);
     if (projectEl) projectEl.addEventListener('change', () => applyProjectDrivenGroup(m, ids));
     const groupEl = m.querySelector('#' + ids.group);
@@ -2509,7 +2612,7 @@
     (opts.instrumentDetails || []).forEach((row) => { m._bom.instrAmounts[row.instrument_id] = row.amount || 0; });
     (opts.staffDetails || []).forEach((row) => { m._bom.staffWindows[row.person_id] = { start: row.start_time || '', end: row.end_time || '' }; });
 
-    const refreshBom = () => { renderBomRows(m, ids); recomputeBomTotals(m, ids); };
+    const refreshBom = () => { renderBomRows(m, ids); recomputeBomTotals(m, ids); renderBookingConflicts(m, ids); };
 
     mountTokenPicker(m, 'owner', bkPeopleItems());
     mountTokenPicker(m, 'inst', bkInstItems(), refreshBom);
@@ -2574,7 +2677,7 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" /></div>
         </div>
-        <div class="grid cols-2">
+        <div class="grid cols-4">
           <div class="field">
             <label>Project (optional)</label>
             <select class="input" id="bk-project">
@@ -2582,7 +2685,9 @@
               ${allProjects.map((p) => `<option value="${p.id}" ${pid === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
             </select>
           </div>
+          ${grantSelectField('bk-grant', null)}
           ${groupSelectField('bk-group', '')}
+          ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bk-category', label: 'Category', placeholder: '-- Select Category --' })}
         </div>
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
@@ -2593,6 +2698,7 @@
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
         ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
+        <div id="bk-conflicts"></div>
 
         ${bomSectionHtml('bk', adminOn)}
 
@@ -2602,7 +2708,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
   }
 
   function bookingSave() {
@@ -2615,7 +2721,10 @@
     const end = m.querySelector('#bk-end').value || '';
     const projectVal = m.querySelector('#bk-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#bk-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const groupOrg = (m.querySelector('#bk-group') || {}).value || '';
+    const category = (m.querySelector('#bk-category') || {}).value || '';
     const note = readNote(m, 'bk-note');
     const actions = m.querySelector('#bk-act').value.trim();
 
@@ -2634,9 +2743,9 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`INSERT INTO meetings (project_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total]);
+    DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [projectId, grantId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
     const inserted = DB.row('SELECT last_insert_rowid() as id');
     const mid = inserted ? inserted.id : null;
     if (mid) {
@@ -2671,7 +2780,7 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bke-start" value="${esc(mt.start_time || '')}" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bke-end" value="${esc(mt.end_time || '')}" /></div>
         </div>
-        <div class="grid cols-2">
+        <div class="grid cols-4">
           <div class="field">
             <label>Project (optional)</label>
             <select class="input" id="bke-project">
@@ -2679,7 +2788,9 @@
               ${allProjects.map((p) => `<option value="${p.id}" ${mt.project_id === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}
             </select>
           </div>
+          ${grantSelectField('bke-grant', mt.grant_id)}
           ${groupSelectField('bke-group', mt.group_org || '')}
+          ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bke-category', label: 'Category', selected: mt.category || '', placeholder: '-- Select Category --' })}
         </div>
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
@@ -2690,6 +2801,7 @@
         <div class="row mb-8"><button type="button" class="btn btn-mint btn-sm" data-act="bk-add-person" data-tooltip="Register someone not in the list yet">${ic('user')} Register New Person</button></div>
         ${tokenPickerField('inst', 'Assign Instruments', '+ Add instrument…')}
         ${tokenPickerField('staff', 'Assign Facility Staff', '+ Add facility staff…')}
+        <div id="bke-conflicts"></div>
 
         ${bomSectionHtml('bke', adminOn)}
 
@@ -2709,7 +2821,7 @@
         instrumentDetails: currentInstDetails, staffDetails: currentStaffDetails,
         discountPct: mt.discount_pct || 0, note: mt.note,
         groupOrg: mt.group_org || '', groupPct: mt.group_discount_pct || 0,
-        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', project: 'bke-project', group: 'bke-group', allLabs: 'bke-all-labs' }
+        ids: { prefix: 'bke', start: 'bke-start', end: 'bke-end', date: 'bke-date', project: 'bke-project', group: 'bke-group', allLabs: 'bke-all-labs', excludeId: mt.id }
       }));
   }
 
@@ -2723,7 +2835,10 @@
     const end = m.querySelector('#bke-end').value || '';
     const projectVal = m.querySelector('#bke-project').value;
     const projectId = projectVal ? Number(projectVal) : null;
+    const grantVal = (m.querySelector('#bke-grant') || {}).value;
+    const grantId = grantVal ? Number(grantVal) : null;
     const groupOrg = (m.querySelector('#bke-group') || {}).value || '';
+    const category = (m.querySelector('#bke-category') || {}).value || '';
     const note = readNote(m, 'bke-note');
     const actions = m.querySelector('#bke-act').value.trim();
 
@@ -2742,9 +2857,9 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, attendees=?, note=?, actions=?,
-              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, id]);
+    DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
+              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?, updated_at=datetime('now') WHERE id=?`,
+      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, id]);
 
     DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
     DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
@@ -2837,6 +2952,12 @@
     const started = bookingHasStarted(mt);
     const total = mt.total_cost || 0;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
+    // Configurable in Settings → Cancellation Billing Rules; these defaults (before=dropped,
+    // after=kept) reproduce the app's original hard-coded behavior for any database with no
+    // config rows set.
+    const beforeCharge = DB.getConfigNum('cancel_before_start_charge', 0) === 1;
+    const afterCharge = DB.getConfigNum('cancel_after_start_charge', 1) === 1;
+    const ruleRetain = started ? afterCharge : beforeCharge;
     let retained;
 
     if (started && adminOn && total > 0) {
@@ -2846,10 +2967,14 @@
     } else {
       const line = started
         ? (total > 0
-          ? `Its start time has passed, so the slot was held and its ${esc(fmtMoney(total))} charge still counts toward Project Costs.${adminOn ? '' : ' Only Admin Mode can waive it.'}`
+          ? (afterCharge
+            ? `Its start time has passed, so the slot was held and its ${esc(fmtMoney(total))} charge still counts toward Project Costs.${adminOn ? '' : ' Only Admin Mode can waive it.'}`
+            : `Its start time has passed, but this facility's cancellation rule drops the charge for after-start cancellations, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`)
           : 'Its start time has passed, so it stays on the record as a late cancellation.')
         : (total > 0
-          ? `It hasn't started yet, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`
+          ? (beforeCharge
+            ? `It hasn't started yet, but this facility's cancellation rule keeps the charge for before-start cancellations, so its ${esc(fmtMoney(total))} charge still counts toward Project Costs.`
+            : `It hasn't started yet, so its ${esc(fmtMoney(total))} charge is dropped from Project Costs.`)
           : "It hasn't started yet, so nothing is charged.");
       const ok = await UI.confirmModal(
         'Cancel Booking',
@@ -2857,7 +2982,7 @@
         { confirmText: 'Cancel Booking', cancelText: 'Keep Booking' }
       );
       if (!ok) return;
-      retained = started && total > 0;
+      retained = total > 0 && ruleRetain;
     }
 
     DB.setBookingCancelled(id, true, retained);
@@ -3171,6 +3296,21 @@
     refresh();
   }
 
+  // Whether a cancelled booking's charge still counts toward Project Costs, split by whether the
+  // cancellation happens before or after the booking's scheduled start time. Read by cancelBooking
+  // (and mirrored in its confirm-dialog copy) so the rule applied and the rule described can never
+  // drift apart. Defaults (before=dropped, after=kept) reproduce the app's original hard-coded
+  // behavior exactly, so a database with no config rows behaves identically to before this feature.
+  function saveCancellationRules() {
+    const beforeEl = document.getElementById('cfg-cancel-before-charge');
+    const afterEl = document.getElementById('cfg-cancel-after-charge');
+    if (!beforeEl || !afterEl) return;
+    DB.setConfig('cancel_before_start_charge', Number(beforeEl.value) === 1 ? 1 : 0);
+    DB.setConfig('cancel_after_start_charge', Number(afterEl.value) === 1 ? 1 : 0);
+    UI.toast('Cancellation rules saved');
+    refresh();
+  }
+
   function saveGroupDiscounts() {
     document.querySelectorAll('.group-discount-input').forEach((inp) => {
       DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0);
@@ -3232,6 +3372,185 @@
     if (result.merged) bits.push('discount merged');
     else if (result.discountMoved) bits.push('discount moved');
     UI.toast(`Renamed ${oldName} → ${newName}: ${bits.join(', ')}`);
+    refresh();
+  }
+
+  /* ---------------- Grants CRUD (Settings) ----------------
+     A grant is a name/number pair with an allowed-users join table (grant_users), pickable on
+     bookings and projects for billing reconciliation. Like people/instruments it is retired, not
+     deleted, once anything references it — see retireGrant below and DB.countGrantRefs. There is
+     deliberately no denormalized grant-name column anywhere (the Settings name/number display
+     toggle would make a frozen string wrong by design) — every display goes through DB.grantLabel,
+     the one place that resolves a grant to text, so app.js/views.js/exports.js can never disagree. */
+
+  // Allowed-users picker items: selectable = not retired (grants don't have an is_staff-style
+  // restriction — any active person can be an allowed user of a grant). `assignedIds` (the ids
+  // already in grant_users when editing) are unioned in so a since-retired allowed user still
+  // renders their badge and survives the next save, per CLAUDE.md's picker rule.
+  function grantUserItems(assignedIds) {
+    const extraIds = [...new Set((assignedIds || []).map(Number).filter((n) => Number.isFinite(n)))];
+    const extraClause = extraIds.length ? ` OR id IN (${extraIds.map(() => '?').join(',')})` : '';
+    const rows = DB.rows(
+      `SELECT id, name, type, organization, department, is_retired FROM people WHERE is_retired=0${extraClause} ORDER BY name`,
+      extraIds
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      retired: !!r.is_retired,
+      name: UI.retiredName(r.name, r.is_retired),
+      meta: [r.organization, r.department].filter(Boolean).join(' · ') || r.type || '',
+      tip: r.type || 'Person'
+    }));
+  }
+
+  // Grant <select> options for the plain (non-token) picker on bookings/projects: selectable =
+  // not retired OR already the value on the record being edited (`currentId`) — same rule as
+  // everywhere else, applied to a <select> instead of a token picker since a booking/project has
+  // at most one grant.
+  function grantSelectOptions(currentId) {
+    return DB.rows('SELECT id, name, number, is_retired FROM grants WHERE is_retired=0 OR id=? ORDER BY is_retired, name', [currentId || 0]);
+  }
+  function grantSelectField(id, selected) {
+    const opts = grantSelectOptions(selected);
+    return `<div class="field">
+      <label>Grant</label>
+      <select class="input" id="${id}">
+        <option value="">-- No Grant --</option>
+        ${opts.map((g) => `<option value="${g.id}" ${g.id === selected ? 'selected' : ''}>${esc(UI.retiredName(DB.grantLabel(g), g.is_retired))}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  function addGrant() {
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('tag')} Add Grant</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Grant Name *</label><input class="input" id="g-name" placeholder="e.g. CAR-T Immunology R01" /></div>
+        <div class="field"><label>Grant Number</label><input class="input" id="g-number" placeholder="e.g. NIH R01-AI154920" /></div>
+        <div class="field"><label>Note</label><input class="input" id="g-note" placeholder="Optional note" /></div>
+        ${tokenPickerField('grant-users', 'Allowed Users', '+ Add person…')}
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="g-save">Save Grant</button>
+      </div>`, (m) => {
+      mountTokenPicker(m, 'grant-users', grantUserItems());
+    });
+  }
+
+  function gSave() {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#g-name').value.trim();
+    if (!name) { UI.toast('Grant name required', 'error'); return; }
+    const number = m.querySelector('#g-number').value.trim();
+    const note = m.querySelector('#g-note').value.trim();
+    DB.run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', [name, number, note]);
+    const inserted = DB.row('SELECT last_insert_rowid() as id');
+    const gid = inserted ? inserted.id : null;
+    if (gid) {
+      readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [gid, pid]));
+    }
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Grant added');
+    refresh();
+  }
+
+  function editGrant(id) {
+    const g = DB.row('SELECT * FROM grants WHERE id=?', [id]);
+    if (!g) return;
+    const currentUsers = DB.rows('SELECT person_id FROM grant_users WHERE grant_id=?', [id]).map((r) => r.person_id);
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Edit Grant</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Grant Name *</label><input class="input" id="ge-name" value="${esc(g.name)}" /></div>
+        <div class="field"><label>Grant Number</label><input class="input" id="ge-number" value="${esc(g.number || '')}" /></div>
+        <div class="field"><label>Note</label><input class="input" id="ge-note" value="${esc(g.note || '')}" /></div>
+        ${tokenPickerField('grant-users', 'Allowed Users', '+ Add person…')}
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="g-edit-save" data-id="${g.id}">Save Changes</button>
+      </div>`, (m) => {
+      mountTokenPicker(m, 'grant-users', grantUserItems(currentUsers));
+      m.querySelector('.token-picker[data-kind="grant-users"]')._setSelected(currentUsers);
+    });
+  }
+
+  function gEditSave(id) {
+    const m = document.querySelector('.modal');
+    const name = m.querySelector('#ge-name').value.trim();
+    if (!name) { UI.toast('Grant name required', 'error'); return; }
+    const number = m.querySelector('#ge-number').value.trim();
+    const note = m.querySelector('#ge-note').value.trim();
+    DB.run('UPDATE grants SET name=?, number=?, note=? WHERE id=?', [name, number, note, id]);
+    // Rebuilt from the picker every save, same as every other join table here — an allowed user
+    // filtered out of the form (retired-but-assigned excepted, see grantUserItems) is dropped.
+    DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
+    readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [id, pid]));
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Grant updated');
+    refresh();
+  }
+
+  /* Same reasoning as retirePerson/retireInstrument above: a grant that billed real projects or
+     bookings must stay on those records for reconciliation, so it's retired rather than deleted
+     once anything references it. Zero references (a mistyped entry, nothing billed against it
+     yet) is the only case a real delete is offered. */
+  async function retireGrant(id) {
+    const g = DB.row('SELECT name FROM grants WHERE id=?', [id]);
+    if (!g) return;
+    const refs = DB.countGrantRefs(id);
+
+    if (!refs.total) {
+      const ok = await UI.confirmModal(
+        'Delete Grant',
+        `"${esc(g.name)}" isn't referenced by any project or booking, so there's no history to keep. Delete permanently?`,
+        { danger: true, confirmText: 'Delete' }
+      );
+      if (!ok) return;
+      // Explicit cleanup even though refs.total===0 already implies no meetings/projects point at
+      // this grant — the same belt-and-suspenders convention every delete path here follows (see
+      // CLAUDE.md's cascading-deletes section), and grant_id on both tables carries no REFERENCES
+      // clause (matches the projects.pi_id precedent) so cascade wouldn't null it out anyway.
+      DB.run('UPDATE meetings SET grant_id=NULL WHERE grant_id=?', [id]);
+      DB.run('UPDATE projects SET grant_id=NULL WHERE grant_id=?', [id]);
+      DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
+      DB.run('DELETE FROM grants WHERE id=?', [id]);
+      UI.toast('Grant deleted');
+      refresh();
+      return;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const where = [];
+    if (refs.projects) where.push('billed on ' + plural(refs.projects, 'project'));
+    if (refs.bookings) where.push('billed on ' + plural(refs.bookings, 'booking'));
+
+    const ok = await UI.confirmModal(
+      'Retire Grant',
+      `"${esc(g.name)}" is ${where.join(', ')}. Those records are history and are kept exactly as they are — retiring only labels it "(Retired)" and stops it being offered for new work. Nothing is deleted, and you can restore it at any time.`,
+      { confirmText: 'Retire' }
+    );
+    if (!ok) return;
+    DB.setRetired('grants', id, true);
+    UI.toast(`${g.name} retired`);
+    refresh();
+  }
+
+  function restoreGrant(id) {
+    const g = DB.row('SELECT name FROM grants WHERE id=?', [id]);
+    if (!g) return;
+    DB.setRetired('grants', id, false);
+    UI.toast(`${g.name} restored`);
+    refresh();
+  }
+
+  function saveGrantDisplay() {
+    const el = document.getElementById('cfg-grant-display');
+    if (!el) return;
+    DB.setConfig('grant_display', el.value === 'number' ? 'number' : 'name');
+    UI.toast('Grant display setting saved');
     refresh();
   }
 
