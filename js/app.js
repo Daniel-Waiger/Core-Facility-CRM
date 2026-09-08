@@ -1019,7 +1019,7 @@
       case 'restore-instrument': return restoreInstrument(el.dataset.id);
 
       // Bookings (Meetings) CRUD
-      case 'new-booking': return newBooking(el.dataset.date, ctx.project, el.dataset.start, el.dataset.end);
+      case 'new-booking': return newBooking(el.dataset.date, ctx.project, el.dataset.start, el.dataset.end, el.dataset.inst);
       case 'add-meeting': return newBooking(UI.today(), ctx.project);
       case 'booking-save': return bookingSave();
       case 'edit-booking': return editBooking(el.dataset.id);
@@ -2741,9 +2741,12 @@
     return conflicts;
   }
 
-  function newBooking(date, projectId = null, start = '', end = '') {
+  function newBooking(date, projectId = null, start = '', end = '', instrumentId = null) {
     const allProjects = DB.rows('SELECT id, title FROM projects ORDER BY title');
     const pid = projectId != null ? Number(projectId) : null;
+    // Clicking an empty slot in the resource timeline passes the lane's instrument through here
+    // so the new booking starts pre-locked to it (mountBookingModal -> opts.insts -> _setSelected).
+    const instId = instrumentId != null && instrumentId !== '' ? Number(instrumentId) : null;
     const adminOn = UI.storage.getItem('admin-mode') === '1';
 
     UI.openModal(`
@@ -2786,7 +2789,7 @@
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="booking-save">Save Booking</button>
-      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' } }));
+      </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' }, insts: instId ? [instId] : undefined }));
   }
 
   function bookingSave() {

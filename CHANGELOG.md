@@ -20,6 +20,12 @@ This project uses [Semantic Versioning](https://semver.org/).
   existing overlap checks, shared by the booking modal's live advisory and its save-time hard
   block so the two can never disagree; advance notice is skipped for notes-only edits and
   reinstating a cancelled booking so it can't retroactively fail a slot already locked in.
+- **Per-instrument resource timeline (roadmap 1.4).** The Calendar screen gains a Timeline mode
+  alongside Month/Week: one lane per instrument across the same Monday–Sunday week as Week mode,
+  with each booking rendered as a proportional block reusing the Week grid's time-layout helpers
+  at a percent-per-hour scale. Clicking an empty slot opens a new booking pre-filled with that
+  lane's instrument as well as the date/time; retired instruments still show their booking history
+  but are excluded from that pre-fill.
 
 ## [1.6.0] — 2026-09-07
 

@@ -700,33 +700,58 @@
     </div>`;
   }
 
-  /* ---------------- Calendar (Month grid + Week hourly view) ---------------- */
-  let calOffset = 0; // Month mode: whole months. Week mode: whole weeks. Reset on mode switch.
-  let calMode = 'month'; // 'month' | 'week'
+  /* ---------------- Calendar (Month grid + Week hourly view + per-instrument Timeline) ---------------- */
+  let calOffset = 0; // Month mode: whole months. Week/Timeline mode: whole weeks. Reset on mode switch.
+  let calMode = 'month'; // 'month' | 'week' | 'timeline'
   function navCalendar(delta) { calOffset += delta; global.App.refresh(); }
   function calToday() { calOffset = 0; global.App.refresh(); }
   function setCalMode(mode) {
-    if (mode !== 'month' && mode !== 'week') return;
+    if (mode !== 'month' && mode !== 'week' && mode !== 'timeline') return;
     // calOffset's unit changes (months <-> weeks) when the mode changes, so a stale offset from
     // the other mode would jump to the wrong month/week — reset it whenever the mode actually flips.
-    if (mode !== calMode) { calMode = mode; calOffset = 0; }
+    // Week and Timeline share the same unit (whole weeks), so hopping directly between those two
+    // keeps whatever week you were looking at instead of jumping back to the current one.
+    const sameUnit = (a, b) => (a === 'week' || a === 'timeline') && (b === 'week' || b === 'timeline');
+    if (mode !== calMode && !sameUnit(mode, calMode)) calOffset = 0;
+    calMode = mode;
     global.App.refresh();
   }
 
-  // Shared toolbar for both calendar renderers: Month/Week toggle + prev/today/next.
+  // Shared toolbar for all three calendar renderers: Month/Week/Timeline toggle + prev/today/next.
   function calToolbarHtml(label, unitLabel) {
     return `
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('calendar')} ${label}</span></div>
-        <div class="row" style="gap:6px">
+        <div class="row" style="gap:6px;flex-wrap:wrap">
           <button class="btn ${calMode === 'month' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="month">Month</button>
           <button class="btn ${calMode === 'week' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="week">Week</button>
+          <button class="btn ${calMode === 'timeline' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="timeline">Timeline</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous ${unitLabel}">${ic('chevron-left')} Prev</button>
           <button class="btn btn-primary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next ${unitLabel}">Next ${ic('chevron-right')}</button>
           <button class="btn btn-secondary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">${ic('clock')} Agenda</button>
         </div>
       </div>`;
+  }
+
+  // Monday..Sunday of (today + calOffset weeks) as local-midnight Date objects. Shared by Week
+  // mode and the Timeline (both are week-unit views over the same offset) so there's one date
+  // computation to keep right — see UI.ymd/issue #14 on why this never touches toISOString().
+  function calWeekDays() {
+    const now = new Date();
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // local midnight, no string parsing
+    base.setDate(base.getDate() + calOffset * 7);
+    const mondayOffset = (base.getDay() + 6) % 7; // Mon=0..Sun=6
+    const monday = new Date(base);
+    monday.setDate(monday.getDate() - mondayOffset);
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(d.getDate() + i);
+      days.push(d);
+    }
+    return days;
   }
 
   // Milestones (by due_date) + meetings (by date) in [startStr, endStr] (inclusive, local
@@ -803,6 +828,11 @@
      baked in so a denser timeline grid can reuse the same math at a different scale. */
   const CAL_HOUR_PX = 48; // px per hour row at the week view's default scale
   const CAL_DAY_HOURS = 24;
+  // The Timeline lays days out horizontally at whatever width the lane column happens to be, so
+  // "px per hour" doesn't apply — calTimeToPx/calEventBlockLayout's math is unit-agnostic (it's
+  // just mins/60*hourPx), so passing a "% per hour" scale instead reuses the exact same helpers
+  // to place a block as a percentage of the day-cell's width rather than a pixel height.
+  const CAL_TL_HOUR_PCT = 100 / CAL_DAY_HOURS;
 
   function calTimeToPx(hhmm, hourPx) {
     const mins = global.UI.timeToMinutes(hhmm);
@@ -850,8 +880,27 @@
     return out;
   }
 
+  // Timeline's per-lane, per-day analog of calHourSlotsHtml: horizontal instead of vertical, so
+  // slots are equal-width percentages rather than fixed px, and each one also carries data-inst
+  // so a click prefills the lane's instrument alongside the date/time (see the new-booking
+  // dispatcher case and newBooking's optional instrumentId parameter).
+  function calTimelineHourSlotsHtml(ds, instId) {
+    let out = '';
+    for (let h = 0; h < CAL_DAY_HOURS; h++) {
+      const startHH = String(h).padStart(2, '0') + ':00';
+      const endHH = h + 1 < 24 ? String(h + 1).padStart(2, '0') + ':00' : '23:59';
+      out += `
+        <div class="cal-tl-hour-slot clickable" style="width:${CAL_TL_HOUR_PCT}%"
+             data-act="new-booking" data-date="${ds}" data-start="${startHH}" data-end="${endHH}" data-inst="${instId}"
+             data-tooltip="Click to add a booking at ${startHH} on ${ds} for this instrument"></div>`;
+    }
+    return out;
+  }
+
   function calendar() {
-    return calMode === 'week' ? calendarWeek() : calendarMonth();
+    if (calMode === 'week') return calendarWeek();
+    if (calMode === 'timeline') return calendarTimeline();
+    return calendarMonth();
   }
 
   function calendarMonth() {
@@ -920,20 +969,8 @@
   // Monday..Sunday of (today + calOffset weeks), hourly grid with an all-day lane above it for
   // untimed events (milestones, and any booking saved without a start time).
   function calendarWeek() {
-    const now = new Date();
-    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // local midnight, no string parsing
-    base.setDate(base.getDate() + calOffset * 7);
-    const mondayOffset = (base.getDay() + 6) % 7; // Mon=0..Sun=6
-    const monday = new Date(base);
-    monday.setDate(monday.getDate() - mondayOffset);
-
     const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(monday);
-      d.setDate(d.getDate() + i);
-      days.push(d);
-    }
+    const days = calWeekDays();
 
     const startStr = global.UI.ymd(days[0]);
     const endStr = global.UI.ymd(days[6]);
@@ -997,6 +1034,123 @@
           </div>
         </div>
       </div>
+    </div>`;
+  }
+
+  // Per-instrument resource timeline: one lane (row) per instrument, the same Monday..Sunday
+  // week range as Week mode (calWeekDays, calOffset counted in weeks) across as columns. A
+  // booking renders as a proportional block inside its day cell — reusing calTimeToPx at a
+  // percent-per-hour scale (CAL_TL_HOUR_PCT) rather than a full 24-row hour axis, which would be
+  // too dense stacked one row per instrument. Cancelled bookings still render (styled via the
+  // shared .ev-cancelled class from calEvChipHtml) rather than disappearing from the lane.
+  function calendarTimeline() {
+    const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const days = calWeekDays();
+    const startStr = global.UI.ymd(days[0]);
+    const endStr = global.UI.ymd(days[6]);
+    const todayStr = today();
+
+    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+    // Lanes: every active instrument, plus any retired instrument booked somewhere in this
+    // range — history renders (labelled via UI.retiredName), it just doesn't clutter every other
+    // week once nothing in view still references it.
+    const instruments = global.DB.rows(`
+      SELECT id, name, is_retired FROM instruments
+      WHERE is_retired = 0
+         OR id IN (
+           SELECT DISTINCT mi.instrument_id FROM meeting_instruments mi
+           JOIN meetings m ON m.id = mi.meeting_id
+           WHERE m.date >= ? AND m.date <= ?
+         )
+      ORDER BY is_retired ASC, name ASC`, [startStr, endStr]);
+
+    // One row per (instrument, booking) via meeting_instruments — a multi-instrument booking
+    // appears in every one of its lanes, the same attribution rule reports.js documents for its
+    // per-instrument aggregations. is_cancelled is selected (not filtered out) so cancelled
+    // bookings still render, just styled via calEvChipHtml's ev-cancelled class.
+    const bookingRows = global.DB.rows(`
+      SELECT mi.instrument_id, m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled,
+             p.id as project_id, p.title as project_title
+      FROM meeting_instruments mi
+      JOIN meetings m ON m.id = mi.meeting_id
+      LEFT JOIN projects p ON p.id = m.project_id
+      WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
+
+    // "instrument_id|date" -> [events], mirroring calFetchByDay's per-day bucketing.
+    const byInstDay = {};
+    for (const r of bookingRows) {
+      const key = r.instrument_id + '|' + r.date;
+      (byInstDay[key] = byInstDay[key] || []).push({
+        id: r.id, name: r.title, kind: 'mt', cancelled: !!r.is_cancelled,
+        start_time: r.start_time || '', end_time: r.end_time || '',
+        project_id: r.project_id, project_title: r.project_title
+      });
+    }
+
+    const headHtml = days.map((d, i) => {
+      const ds = global.UI.ymd(d);
+      return `
+      <div class="cal-tl-daycol-head ${ds === todayStr ? 'today' : ''}">
+        <span class="dow">${dow[i]}</span><span class="num">${d.getDate()}</span>
+      </div>`;
+    }).join('');
+
+    const rowsHtml = instruments.map((inst) => {
+      const label = global.UI.retiredName(inst.name, !!inst.is_retired);
+      const dayCells = days.map((d) => {
+        const ds = global.UI.ymd(d);
+        const evs = byInstDay[inst.id + '|' + ds] || [];
+        const blocksHtml = evs.map((e) => {
+          // Reuses calTimeToPx (the same time→position math the Week grid uses) at a % scale —
+          // see CAL_TL_HOUR_PCT. calEventBlockLayout's own MIN_H clamp assumes px, so its 20px
+          // floor isn't reused verbatim here: at a % width, a 20% minimum would make short
+          // bookings look hours long, so a small % floor (MIN_W) is applied directly instead.
+          const leftPct = calTimeToPx(e.start_time, CAL_TL_HOUR_PCT);
+          if (leftPct == null) {
+            // Untimed booking (saved without a start_time) — still shown, as a full-width strip,
+            // rather than silently vanishing from the lane.
+            return calEvChipHtml(e, 'position:absolute;left:2px;right:2px;top:2px;bottom:2px');
+          }
+          const endPct = calTimeToPx(e.end_time, CAL_TL_HOUR_PCT);
+          const MIN_W = 4;
+          const widthPct = (endPct != null && endPct > leftPct) ? Math.max(MIN_W, endPct - leftPct) : MIN_W;
+          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px`);
+        }).join('');
+        // A retired instrument's lane still shows its history, but an empty slot in it should not
+        // pre-lock a brand-new booking to a resource that's no longer available for new work —
+        // omit data-inst there so the click still opens New Booking (date/time prefilled) without
+        // the instrument. mountTokenPicker's own dropdown would exclude a retired instrument from
+        // a new booking anyway; this just keeps the timeline's shortcut consistent with that.
+        return `
+          <div class="cal-tl-daycell ${ds === todayStr ? 'today' : ''}">
+            ${calTimelineHourSlotsHtml(ds, inst.is_retired ? '' : inst.id)}
+            ${blocksHtml}
+          </div>`;
+      }).join('');
+      return `
+        <div class="cal-tl-row">
+          <div class="cal-tl-lane-label" title="${esc(label)}">${esc(label)}</div>
+          ${dayCells}
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="card">
+      ${calToolbarHtml(weekLabel, 'Week')}
+      ${instruments.length === 0
+        ? `<div class="faint small" style="padding:16px 4px">No instruments to show.</div>`
+        : `
+      <div class="cal-tl">
+        <div class="cal-tl-header">
+          <div class="cal-tl-lane-label cal-tl-lane-label-head">Instrument</div>
+          ${headHtml}
+        </div>
+        <div class="cal-tl-body">
+          ${rowsHtml}
+        </div>
+      </div>`}
     </div>`;
   }
 
@@ -1272,8 +1426,9 @@
     navCalendar,
     calToday,
     statusBadge,
-    // Hour-grid layout helpers factored out of the week calendar for reuse by the resource
-    // timeline (roadmap 1.3): time->px, an event's {top,height} block, and hour-row markup.
+    // Hour-grid layout helpers factored out of the week calendar, reused by the per-instrument
+    // resource timeline (calendarTimeline, roadmap 1.4): time->px, an event's {top,height} block,
+    // and hour-row markup.
     calLayout: {
       HOUR_PX: CAL_HOUR_PX,
       DAY_HOURS: CAL_DAY_HOURS,
