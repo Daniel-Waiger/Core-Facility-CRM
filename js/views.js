@@ -1380,7 +1380,7 @@
     <div class="card mb-16">
       <div class="card-title">${ic('tag')} Category Billing</div>
       <div class="card-body">
-        <div class="faint small mb-8">What percent of a Facility Staff member's normal rate a booking category bills, and whether that category requires a facility staff assignee at all. Instrument time is unaffected — tiers and discounts already govern that. Applies to staff time on NEW bookings only; existing bookings keep the price they were saved with.</div>
+        <div class="faint small mb-8">What percent of a Facility Staff member's normal rate a booking category bills, and whether that category requires a facility staff assignee at all. Instrument time is unaffected — tiers and discounts already govern that. An existing booking keeps its saved price until it is edited and re-saved — like every other rate in the app, a re-save prices at the rules in force at that moment.</div>
         ${categoryPolicies.map((p) => `
           <div class="row mb-8 cat-policy-row" style="gap:14px;align-items:center;flex-wrap:wrap" data-category="${esc(p.category)}">
             <span class="small font-medium" style="min-width:130px">${esc(p.category)}</span>
