@@ -15,6 +15,14 @@ This project uses [Semantic Versioning](https://semver.org/).
   staff assignee before it can be saved; the booking modal shows a live advisory and price note,
   and enforcement applies only to new/edited bookings so legacy history is untouched.
 
+### Changed
+- **Category "Add New" button alignment; notes toolbar simplified to bullets only.** The
+  label+Add-New header on vocab/category fields (and the PI "New Member" field) now uses a
+  fixed-height flex row instead of an absolute-positioned button, so the button can no longer
+  overlap the label on narrow columns. The meeting notes rich-text toolbar drops Bold/Italic and
+  the font-size picker, keeping only the bullet-list button; existing notes with that formatting
+  still render and export unchanged.
+
 ## [1.7.0] — 2026-09-08
 
 ### Added

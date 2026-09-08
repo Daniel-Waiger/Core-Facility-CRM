@@ -62,9 +62,9 @@
     if (selected && selected !== 'Other' && !opts.includes(selected)) opts.push(selected);
     return `
     <div class="field">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;row-gap:4px">
-        <label style="margin-bottom:0">${esc(label)}${required ? ' *' : ''}</label>
-        <button type="button" class="btn btn-secondary btn-sm" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
+      <div class="field-vocab-head">
+        <label>${esc(label)}${required ? ' *' : ''}</label>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add New</button>
       </div>
       <select class="input vocab-select" id="${id}" data-cat="${category}" data-label="${esc(label)}" data-prev="${esc(selected)}">
         <option value="">${placeholder}</option>
@@ -86,9 +86,9 @@
     if (selected && !opts.includes(selected)) opts.push(selected);
     return `
     <div class="field">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;row-gap:4px">
-        <label style="margin-bottom:0">${esc(label)}</label>
-        <button type="button" class="btn btn-secondary btn-sm" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}" style="padding:2px 7px;font-size:11px;white-space:nowrap">${ic('plus')} Add New</button>
+      <div class="field-vocab-head">
+        <label>${esc(label)}</label>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add New</button>
       </div>
       <select class="input" id="${id}">
         <option value="">— None —</option>
@@ -1241,11 +1241,9 @@
         
         <div class="grid cols-2">
           <div class="field">
-            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:2px">
-              <label style="margin-bottom:0">Principal Investigator (PI)</label>
-              <button type="button" class="btn btn-secondary btn-sm" data-act="ep-add-person" data-project-id="${p.id}" data-tooltip="Register new researcher or PI" style="padding:2px 7px;font-size:11px">
-                ${ic('plus')} New Member
-              </button>
+            <div class="field-vocab-head">
+              <label>Principal Investigator (PI)</label>
+              <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="ep-add-person" data-project-id="${p.id}" data-tooltip="Register new researcher or PI">${ic('plus')} New Member</button>
             </div>
             <select class="input" id="ep-pi">
               <option value="">-- Select or None --</option>
@@ -2171,16 +2169,7 @@
     return `<div class="field"><label>Notes</label>
       <div class="rte">
         <div class="rte-toolbar">
-          <button type="button" class="rte-btn" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
-          <button type="button" class="rte-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
           <button type="button" class="rte-btn" data-cmd="insertUnorderedList" title="Bullet list">&bull;</button>
-          <select class="rte-size" title="Font size">
-            <option value="">Size</option>
-            <option value="0.85em">Small</option>
-            <option value="1em">Normal</option>
-            <option value="1.25em">Large</option>
-            <option value="1.6em">Huge</option>
-          </select>
         </div>
         <div class="rte-editor input" id="${id}" contenteditable="true" data-placeholder="Short notes, bullet points, action context…"></div>
       </div></div>`;
@@ -2380,7 +2369,12 @@
   }
 
   /* Minimal rich-text editor for meeting notes. Uses execCommand (deprecated but universally
-     supported, fine for a local offline app); output is whitelisted by UI.sanitizeHtml on save. */
+     supported, fine for a local offline app); output is whitelisted by UI.sanitizeHtml on save.
+     The toolbar only offers bullets + normal text — bold/italic/underline and the font-size
+     picker were removed per the owner's request. This is a toolbar-only change: existing notes
+     saved with that legacy formatting still render and export exactly as before (sanitize's
+     allowed tags and the exports' rich-text walkers are untouched), and paste already strips
+     incoming HTML down to plain text below, so nothing new can smuggle that formatting back in. */
   function mountRichText(m, id) {
     const editor = m.querySelector('#' + id);
     if (!editor) return;
@@ -2389,35 +2383,17 @@
       b.addEventListener('mousedown', (e) => e.preventDefault());     // keep the selection
       b.addEventListener('click', () => { editor.focus(); document.execCommand(b.dataset.cmd, false, null); });
     });
-    const sizeSel = bar.querySelector('.rte-size');
-    sizeSel.addEventListener('change', () => {
-      const v = sizeSel.value;
-      sizeSel.value = '';
-      if (!v) return;
-      editor.focus();
-      applyFontSize(editor, v);
-    });
-    editor.addEventListener('keydown', (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'b') { e.preventDefault(); document.execCommand('bold'); }
-      else if (k === 'i') { e.preventDefault(); document.execCommand('italic'); }
-    });
     editor.addEventListener('paste', (e) => {
       e.preventDefault();
       const t = (e.clipboardData || window.clipboardData).getData('text/plain');
       document.execCommand('insertText', false, t);
     });
-  }
-  function applyFontSize(editor, value) {
-    const s = window.getSelection();
-    if (!s || s.isCollapsed || !s.rangeCount) return;
-    document.execCommand('fontSize', false, '7');
-    editor.querySelectorAll('font[size="7"]').forEach((f) => {
-      const span = document.createElement('span');
-      span.style.fontSize = value;
-      while (f.firstChild) span.appendChild(f.firstChild);
-      f.replaceWith(span);
+    // The bold/italic/underline toolbar buttons are gone, but contenteditable still answers to
+    // the browser's native Ctrl/Cmd+B/I/U shortcuts on its own — block those explicitly so the
+    // removed formatting can't come back through the keyboard.
+    editor.addEventListener('keydown', (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
     });
   }
   function readNote(m, id) {
