@@ -26,6 +26,10 @@ This project uses [Semantic Versioning](https://semver.org/).
   at a percent-per-hour scale. Clicking an empty slot opens a new booking pre-filled with that
   lane's instrument as well as the date/time; retired instruments still show their booking history
   but are excluded from that pre-fill.
+- **Recurring bookings (roadmap 1.5).** The new-booking modal gains an optional "Repeat every N
+  week(s) until" field; saving generates one occurrence per date (same BOM/pricing snapshot for
+  all), checking every date's conflicts up front so the save is all-or-nothing, with a 52-occurrence
+  sanity cap on the schedule length.
 
 ## [1.6.0] — 2026-09-07
 

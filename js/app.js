@@ -2758,6 +2758,16 @@
           <div class="field"><label>Start Time</label><input type="time" class="input" id="bk-start" value="${esc(start || '')}" /></div>
           <div class="field"><label>End Time</label><input type="time" class="input" id="bk-end" value="${esc(end || '')}" /></div>
         </div>
+        <div class="field">
+          <label>Repeat (optional)</label>
+          <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+            <span class="small">every</span>
+            <input type="number" class="input" id="bk-repeat-weeks" min="1" step="1" value="1" style="width:70px" />
+            <span class="small">week(s) until</span>
+            <input type="date" class="input" id="bk-repeat-until" style="width:170px" />
+            <span class="small faint">(blank = no repeat)</span>
+          </div>
+        </div>
         <div class="grid cols-4">
           <div class="field">
             <label>Project (optional)</label>
@@ -2792,6 +2802,29 @@
       </div>`, (m) => mountBookingModal(m, { noteId: 'bk-note', ids: { prefix: 'bk', start: 'bk-start', end: 'bk-end', date: 'bk-date', dateDefault: 'today', project: 'bk-project', group: 'bk-group', allLabs: 'bk-all-labs' }, insts: instId ? [instId] : undefined }));
   }
 
+  // Cap on how many occurrences a single "Repeat" save can create — a sanity backstop against a
+  // typo'd "until" date decades out, not a real product limit (~1 year of weekly bookings).
+  const MAX_RECURRING_OCCURRENCES = 52;
+
+  // Weekly/every-N-weeks occurrence dates from `startDate` (inclusive) through `untilDate`
+  // (inclusive), as local 'YYYY-MM-DD' strings. Built from parts (never `new Date('YYYY-MM-DD')`,
+  // which parses as UTC) and advanced with setDate — the safe way to add whole weeks across
+  // month/DST boundaries. Returns [startDate] when `untilDate` is blank (no repeat).
+  function computeRecurringDates(startDate, everyWeeks, untilDate) {
+    const dates = [startDate];
+    if (!untilDate) return dates;
+    const weeks = Math.max(1, parseInt(everyWeeks, 10) || 1);
+    const [y, mo, d] = startDate.split('-').map(Number);
+    let cur = new Date(y, mo - 1, d);
+    while (dates.length < MAX_RECURRING_OCCURRENCES + 1) {
+      cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 7 * weeks);
+      const next = UI.ymd(cur);
+      if (next > untilDate) break;
+      dates.push(next);
+    }
+    return dates;
+  }
+
   function bookingSave() {
     const m = document.querySelector('.modal');
     const title = m.querySelector('#bk-title').value.trim();
@@ -2813,8 +2846,40 @@
     const instIds = readTokenIds(m, 'inst');
     const staffIds = readTokenIds(m, 'staff');
 
-    const conflicts = findBookingConflicts({ date, start, end, instrumentIds: instIds, staffIds });
-    if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
+    const repeatWeeksEl = m.querySelector('#bk-repeat-weeks');
+    const repeatUntilEl = m.querySelector('#bk-repeat-until');
+    const repeatUntil = repeatUntilEl ? repeatUntilEl.value || '' : '';
+    const repeatWeeks = repeatWeeksEl ? repeatWeeksEl.value : 1;
+
+    let dates;
+    if (repeatUntil) {
+      if (repeatUntil < date) { UI.toast('"Repeat until" date must be on or after the booking date', 'error'); return; }
+      dates = computeRecurringDates(date, repeatWeeks, repeatUntil);
+      if (dates.length > MAX_RECURRING_OCCURRENCES) {
+        UI.toast(`That repeat schedule would create ${dates.length} bookings — the max is ${MAX_RECURRING_OCCURRENCES}. Choose a shorter "until" date.`, 'error');
+        return;
+      }
+    } else {
+      dates = [date];
+    }
+
+    // All-or-nothing: every occurrence is conflict-checked (constraint checks included, via
+    // findBookingConflicts) BEFORE any row is inserted, so a conflict on occurrence #7 never
+    // leaves #1-6 half-created. Single (non-repeating) saves keep today's exact toast wording.
+    if (dates.length === 1) {
+      const conflicts = findBookingConflicts({ date: dates[0], start, end, instrumentIds: instIds, staffIds });
+      if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
+    } else {
+      const conflictsByDate = [];
+      dates.forEach((d) => {
+        const dConflicts = findBookingConflicts({ date: d, start, end, excludeId: 0, instrumentIds: instIds, staffIds });
+        if (dConflicts.length) conflictsByDate.push(`${d}: ${dConflicts.join('; ')}`);
+      });
+      if (conflictsByDate.length) {
+        UI.toast(`Conflicts on ${conflictsByDate.length} date(s) — ${conflictsByDate.join(' | ')}`, 'error');
+        return;
+      }
+    }
 
     const attendees = ownerIds.length
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
@@ -2824,22 +2889,28 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, grantId, title, date, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
-    const inserted = DB.row('SELECT last_insert_rowid() as id');
-    const mid = inserted ? inserted.id : null;
-    if (mid) {
-      ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, oid]));
-      bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [mid, line.id, line.amount || 0, line.line]));
-      bom.staffLines.forEach((line) => {
-        const win = m._bom.staffWindows[line.id] || {};
-        DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [mid, line.id, win.start || '', win.end || '', line.line]);
-      });
+    // Same BOM snapshot (rates read once, at save time) for every occurrence — deliberate:
+    // identical recurring sessions are priced at today's rates, not recomputed per occurrence.
+    function insertBookingRow(dateStr) {
+      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category]);
+      const inserted = DB.row('SELECT last_insert_rowid() as id');
+      const mid = inserted ? inserted.id : null;
+      if (mid) {
+        ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mid, oid]));
+        bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [mid, line.id, line.amount || 0, line.line]));
+        bom.staffLines.forEach((line) => {
+          const win = m._bom.staffWindows[line.id] || {};
+          DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [mid, line.id, win.start || '', win.end || '', line.line]);
+        });
+      }
     }
 
+    dates.forEach((d) => insertBookingRow(d));
+
     UI.closeDim(m.closest('.modal-dim'));
-    UI.toast('Booking saved');
+    UI.toast(dates.length > 1 ? `${dates.length} bookings created` : 'Booking saved');
     refresh();
   }
 
