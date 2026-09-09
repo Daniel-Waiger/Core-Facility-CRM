@@ -3,6 +3,44 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.9.1] — 2026-09-09
+
+### Changed
+- **One capitalization rule for UI text, written down and applied.** Controls and column
+  headings are Title Case (buttons, table headers, form labels, tab and nav items, dialog and
+  card titles); anything that reads as a sentence — help text, placeholders, toasts,
+  confirmation bodies, empty states, validation messages — stays sentence case. The rule, its
+  lowercase-joining-word list, and the trap that makes it dangerous (plenty of visible strings
+  are also data: vocabulary values, `data-act` names, XLSX sheet names, anything compared with
+  `===`) are recorded in `CLAUDE.md`. Applied to the stragglers only; strings that already
+  complied were left byte-for-byte alone, and every candidate was grepped across `js/` first to
+  confirm nothing compares or stores it. Where the same control appears on two screens — the
+  service-entry actions on Project Costs and on the Reports screen — both copies move together,
+  and the four places the docs quoted a label by name were updated with it.
+- **The user manual covers the app as it is, not as it was in 1.5.x.** Four releases had passed
+  it by. `bookings` gains the month/week/timeline views and what each pre-fills, recurring
+  bookings with their 52-occurrence cap, per-instrument limits, and booking categories — and
+  drops a claim that had gone flatly false, that conflicts are "only caught when you save".
+  `reports` grows from four cards to ten plus charts and the custom report builder.
+  `settings-admin` gains pricing tiers, category billing, grants and cancellation billing rules.
+  `costs-math` corrects the overhead step, which described the pre-tier calculation.
+  `cancelling` stops stating the charge rule as law now that it is a per-facility setting.
+  `projects` documents research outputs. A new **Service Entries** chapter covers billable work
+  outside a booking. The glossary corrects "Conflict" and "Overhead" and defines five terms the
+  app had gained without them. Written for facility managers: no CRUD, schema or join tables.
+- **README speaks plainly.** "Full CRUD Capabilities" and "Custom Metadata (KV)" were developer
+  shorthand on the page that decides whether a facility tries the app at all.
+
+### Fixed
+- **A code comment claimed authority it did not have.** `js/reports.js` justified computing two
+  time-in-stage medians instead of one per stage transition with "per the roadmap spec". The
+  roadmap said no such thing. The comment now names it as the deliberate narrowing it is, and
+  the roadmap records it on item 3.3 — as does 3.4's maintenance slice and 3.2's two columns
+  that wait on Tier 4 data.
+- **Manual chapter numbers agree with the manual's own registry.** Inserting Service Entries as
+  chapter 11 shifted six chapters, and each page carries its number twice — once in
+  `manual.js`, once hardcoded in the page. All 17 now match, verified programmatically.
+
 ## [1.9.0] — 2026-09-08
 
 ### Added

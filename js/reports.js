@@ -753,8 +753,11 @@
        6. Research output       — project_outputs.date, falling back to created_at's date part
                                   when date is blank (same UTC/local caveat as stage 2 above).
 
-     Time-in-stage medians — ONLY these two transitions, per the roadmap spec (no median is
-     computed for any other adjacent pair):
+     Time-in-stage medians — ONLY these two transitions (no median is computed for any other
+     adjacent pair). This is a deliberate narrowing of roadmap item 3.3, which asks for
+     "conversion and time-in-stage per period"; the roadmap records the narrowing on the item
+     itself. Conversion IS reported at every stage — it is only the medians that are limited to
+     the two transitions where a duration is both well-defined and worth acting on:
        - created -> first booking
        - first booking -> first output
      Both use each project's UNBOUNDED true first-booking/first-output date (never a date
@@ -1140,7 +1143,7 @@
 
   const ENTITY_DEFS = {
     instrument: {
-      label: 'Instrument utilization',
+      label: 'Instrument Utilization',
       notes: [],
       buildRows: (from, to) => computeInstrumentRows(from, to).rows,
       columns: [
@@ -1152,7 +1155,7 @@
       ]
     },
     staff: {
-      label: 'Staff time',
+      label: 'Staff Time',
       notes: [],
       buildRows: (from, to) => computeStaffRows(from, to).rows,
       columns: [
@@ -1164,7 +1167,7 @@
       ]
     },
     projects: {
-      label: 'Projects & groups',
+      label: 'Projects & Groups',
       notes: ['A booking contributes to both its Project row and its Lab/Group row — the Scope column is required so summing Hours/Total Cost across both scopes can never be mistaken for a single total (it would double every booking).'],
       buildRows: (from, to) => {
         const p = computeProjectRows(from, to);
@@ -1198,7 +1201,7 @@
       ]
     },
     service: {
-      label: 'Service entries',
+      label: 'Service Entries',
       notes: [],
       buildRows: (from, to) => computeServiceEntryRows(from, to).rows,
       columns: [
@@ -1243,7 +1246,7 @@
       ]
     },
     activitymix: {
-      label: 'Activity mix',
+      label: 'Activity Mix',
       notes: ['Each period repeats once per category present in the data — the Category column is required so hours from different categories in the same period are never mistaken for duplicate rows of the same total.'],
       buildRows: (from, to) => {
         const mix = computeActivityMixRows(from, to);
@@ -1284,11 +1287,11 @@
       columns: [
         ccol('stage', 'Stage', 'text', (r) => r.stage, { required: true }),
         ccol('count', 'Count', 'number', (r) => r.count == null ? '' : r.count),
-        ccol('conversionPct', 'Conversion from Previous %', 'number', (r) => r.conversionPct == null ? '' : Math.round(r.conversionPct * 100) / 100)
+        ccol('conversionPct', 'Conversion From Previous %', 'number', (r) => r.conversionPct == null ? '' : Math.round(r.conversionPct * 100) / 100)
       ]
     },
     bookings: {
-      label: 'Bookings (row-level)',
+      label: 'Bookings (Row-Level)',
       notes: [],
       buildRows: (from, to) => computeBookingRows(from, to).rows,
       columns: [
@@ -1402,7 +1405,7 @@
     </div>
 
     <div class="card mb-16">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Instrument utilisation</span></div></div>
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Instrument Utilisation</span></div></div>
       ${!instr.rows.length ? global.Views.emptyState('cpu', 'No bookings in this range', 'Widen the date range or add instrument bookings.') : `
       <div class="mb-16">${chartUtilization(instr.rows)}</div>
       <div class="tbl-wrap">
@@ -1424,7 +1427,7 @@
     </div>
 
     <div class="card mb-16">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('users')} Facility staff time</span></div></div>
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('users')} Facility Staff Time</span></div></div>
       ${!staff.rows.length ? global.Views.emptyState('users', 'No staff time in this range', 'Widen the date range or assign facility staff to bookings.') : `
       <div class="tbl-wrap">
         <table class="tbl">
@@ -1445,7 +1448,7 @@
     </div>
 
     <div class="card mb-16">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('layers')} Staff × instrument</span></div></div>
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('layers')} Staff × Instrument</span></div></div>
       ${!matrix.staffList.length || !matrix.instrumentList.length ? global.Views.emptyState('layers', 'Nothing to cross-tabulate', 'Widen the date range or add multi-instrument bookings.') : `
       <div class="tbl-wrap">
         <table class="tbl">
@@ -1467,7 +1470,7 @@
     </div>
 
     <div class="card mb-16">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('folder')} Projects &amp; groups</span></div></div>
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('folder')} Projects &amp; Groups</span></div></div>
       <div class="grid cols-2">
         <div>
           <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">By Project</div>
@@ -1602,10 +1605,10 @@
                 <td class="small">${esc(r.unit || '—')}</td>
                 <td class="mono small" style="text-align:right">${fmtMoney(r.countedCost)}</td>
                 <td style="text-align:right">
-                  <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${r.id}" title="Edit entry">${ic('edit')}</button>
+                  <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${r.id}" title="Edit Entry">${ic('edit')}</button>
                   ${r.is_cancelled
                     ? `<button class="btn btn-ghost btn-xs" data-act="se-reinstate" data-id="${r.id}" title="Reinstate">${ic('rocket')}</button>`
-                    : `<button class="btn btn-ghost btn-xs" data-act="se-cancel" data-id="${r.id}" title="Cancel entry">${ic('archive')}</button>`}
+                    : `<button class="btn btn-ghost btn-xs" data-act="se-cancel" data-id="${r.id}" title="Cancel Entry">${ic('archive')}</button>`}
                 </td>
               </tr>`; }).join('')}
           </tbody>
@@ -1701,7 +1704,7 @@
       <div class="mb-16">${chartFunnel(funnel.stages)}</div>
       <div class="tbl-wrap">
         <table class="tbl">
-          <thead><tr><th>Stage</th><th>Count</th><th>Conversion from Previous</th></tr></thead>
+          <thead><tr><th>Stage</th><th>Count</th><th>Conversion From Previous</th></tr></thead>
           <tbody>
             ${funnel.stages.map((s) => `
               <tr>

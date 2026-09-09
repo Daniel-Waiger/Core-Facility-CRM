@@ -704,7 +704,7 @@
           <ol class="boot-steps">${guidance.steps.map((s) => `<li>${s}</li>`).join('')}</ol>
           <p class="boot-note">Note: your data always stays on <strong>this one device/browser</strong> — it never syncs between devices or people, even once saving works. See the README for how to move data between devices.</p>
           <div class="boot-actions">
-            <button class="btn btn-secondary" id="boot-continue">Continue anyway (temporary session)</button>
+            <button class="btn btn-secondary" id="boot-continue">Continue Anyway (Temporary Session)</button>
           </div>
           <p class="boot-fine">If you continue, anything you enter will be lost when you close this tab unless you export a backup first (Settings → Export Backup, once the app loads).</p>
         </div>
@@ -776,12 +776,12 @@
             <div class="faint small" style="margin-bottom:8px">Pick a folder once and a dated backup writes there automatically roughly every 24 hours — no download prompts. (Also available anytime later in Settings.)</div>
             <div class="row" style="gap:8px;flex-wrap:wrap">
               <button type="button" class="btn btn-secondary btn-sm" id="device-notice-choose-folder">${ic('folder')} Choose Backup Folder</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="device-notice-decline-folder">Don't ask again</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="device-notice-decline-folder">Don't Ask Again</button>
             </div>
           </div>` : '';
 
       UI.openModal(`
-        <div class="head"><span class="modal-title">${ic('cpu')} ${infoNeeded ? 'Before you start' : 'Set up automatic backups?'}</span></div>
+        <div class="head"><span class="modal-title">${ic('cpu')} ${infoNeeded ? 'Before You Start' : 'Set up automatic backups?'}</span></div>
         <div class="body"><div class="stack">
           ${infoHtml}
           ${folderHtml}
@@ -2086,7 +2086,7 @@
     return `<div class="field">
       <label>Group / Lab</label>
       <select class="input" id="${id}">
-        <option value="">-- All groups --</option>
+        <option value="">-- All Groups --</option>
         ${orgNames().map((o) => `<option value="${esc(o)}" ${o === selected ? 'selected' : ''}>${esc(o)}</option>`).join('')}
       </select>
     </div>`;
@@ -3442,21 +3442,21 @@
         <div class="field">
           <label>Attendees</label>
           <div class="row" style="align-items:flex-start">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(attendeesText)}" data-copy-label="Attendees copied" title="Copy attendees">${ic('copy')}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(attendeesText)}" data-copy-label="Attendees copied" title="Copy Attendees">${ic('copy')}</button>
             <input class="input grow" readonly value="${esc(attendeesText)}" />
           </div>
         </div>
         <div class="field">
           <label>Subject</label>
           <div class="row" style="align-items:flex-start">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(subjectText)}" data-copy-label="Subject copied" title="Copy subject">${ic('copy')}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(subjectText)}" data-copy-label="Subject copied" title="Copy Subject">${ic('copy')}</button>
             <input class="input grow" readonly value="${esc(subjectText)}" />
           </div>
         </div>
         <div class="field">
           <label>Body</label>
           <div class="row" style="align-items:flex-start">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(bodyText)}" data-copy-label="Body copied" title="Copy body">${ic('copy')}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-copy="${esc(bodyText)}" data-copy-label="Body copied" title="Copy Body">${ic('copy')}</button>
             <textarea class="input grow" readonly rows="6">${esc(bodyText)}</textarea>
           </div>
         </div>

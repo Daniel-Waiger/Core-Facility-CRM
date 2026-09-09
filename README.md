@@ -276,7 +276,7 @@ Browsers only allow permanent saving (IndexedDB) in a "secure context" — an `h
 
 ### If you open it as a file anyway
 
-The app still opens, but you'll get a **"Storage unavailable"** screen explaining the situation, with a **"Continue anyway (temporary session)"** option. In that mode a warning banner stays visible and **nothing is saved when you close the tab** — use **Settings → Export Backup** before closing if you want to keep anything.
+The app still opens, but you'll get a **"Storage unavailable"** screen explaining the situation, with a **"Continue Anyway (Temporary Session)"** option. In that mode a warning banner stays visible and **nothing is saved when you close the tab** — use **Settings → Export Backup** before closing if you want to keep anything.
 
 ---
 

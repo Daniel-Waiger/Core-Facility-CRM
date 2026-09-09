@@ -1151,7 +1151,7 @@
     // Sheet 12: Funnel: Consult to Output — fed from the exact same Reports.computeFunnelRows
     // the screen renders from. Both medians and their disclosed negative-delta exclusion counts
     // are repeated here (not just in the Notes sheet) so the sheet is self-explanatory on its own.
-    const funnelRows = [['Stage', 'Count', 'Conversion from Previous %']];
+    const funnelRows = [['Stage', 'Count', 'Conversion From Previous %']];
     funnel.stages.forEach((s) => funnelRows.push([s.label, s.count, s.conversionPct == null ? '' : round2(s.conversionPct)]));
     funnelRows.push(['', '', '']);
     funnelRows.push(['Median: created -> first booking (days)', funnel.medians.createdToActive.days == null ? '' : round2(funnel.medians.createdToActive.days), `n=${funnel.medians.createdToActive.sampleSize}, excluded (negative delta)=${funnel.medians.createdToActive.excludedNegative}`]);
