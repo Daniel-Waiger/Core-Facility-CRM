@@ -37,6 +37,11 @@ This project uses [Semantic Versioning](https://semver.org/).
   roadmap said no such thing. The comment now names it as the deliberate narrowing it is, and
   the roadmap records it on item 3.3 — as does 3.4's maintenance slice and 3.2's two columns
   that wait on Tier 4 data.
+- **The Reports export told you to look for a label that does not exist.** Both Notes sheets
+  stated that archived projects appear with an "(Archived)" suffix. Nothing in the app has ever
+  written one — `UI.retiredName` appends "(Retired)" and there is no archived equivalent — so an
+  archived project sits in a report under its ordinary name. The note now says that, and the
+  manual says it too.
 - **Manual chapter numbers agree with the manual's own registry.** Inserting Service Entries as
   chapter 11 shifted six chapters, and each page carries its number twice — once in
   `manual.js`, once hardcoded in the page. All 17 now match, verified programmatically.

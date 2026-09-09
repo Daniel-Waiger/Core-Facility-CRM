@@ -1030,7 +1030,7 @@
         + `${funnel.medians.createdToActive.excludedNegative} project${funnel.medians.createdToActive.excludedNegative === 1 ? '' : 's'} excluded: first booking predates the project record. `
         + `${funnel.medians.activeToOutput.excludedNegative} project${funnel.medians.activeToOutput.excludedNegative === 1 ? '' : 's'} excluded: first output predates the first booking.`],
       [''],
-      ['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']
+      ['Retired people and instruments are shown with a "(Retired)" suffix rather than removed, per this app’s history-preservation rule. Archived projects are included too, under their ordinary name — nothing marks a project as archived here.']
     ];
     const wsNotes = XLSX.utils.aoa_to_sheet(notes);
     wsNotes['!cols'] = [{ wch: 100 }];
@@ -1211,7 +1211,7 @@
       dsNotes.forEach((n) => notes.push([n]));
       notes.push(['']);
     }
-    notes.push(['Retired people/instruments and archived projects are shown with a "(Retired)" / "(Archived)" suffix rather than removed, per this app’s history-preservation rule.']);
+    notes.push(['Retired people and instruments are shown with a "(Retired)" suffix rather than removed, per this app’s history-preservation rule. Archived projects are included too, under their ordinary name — nothing marks a project as archived here.']);
     const wsNotes = XLSX.utils.aoa_to_sheet(notes);
     wsNotes['!cols'] = [{ wch: 100 }];
     XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');

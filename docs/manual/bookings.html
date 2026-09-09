@@ -48,7 +48,7 @@
       <ul>
         <li>An event on the calendar is either a <strong>📅 booking</strong> (a session on the facility's equipment) or a <strong>🎯 milestone</strong> (a project deadline — see <a href="milestones.html#add-a-milestone">Milestones</a>).</li>
         <li>Within a day, events with a set time sort first, earliest to latest; untimed events (including all milestones, which have no time of their own) follow after.</li>
-        <li><strong>Prev</strong> and <strong>Next</strong> move the view back or forward — a month at a time in Month view, a week at a time in Week or Timeline. <strong>Today</strong> jumps back to the current month or week and opens the <strong>Today's Agenda</strong> dialog — a focused list of just today's bookings and milestones (see <a href="dashboard.html#todays-agenda">Dashboard &amp; Today's Agenda</a>).</li>
+        <li><strong>Prev</strong> and <strong>Next</strong> move the view back or forward — a month at a time in Month view, a week at a time in Week or Timeline. <strong>Today</strong> jumps back to the current month or week. Next to it, a separate <strong>Agenda</strong> button opens the <strong>Today's Agenda</strong> dialog — a focused list of just today's bookings and milestones (see <a href="dashboard.html#todays-agenda">Dashboard &amp; Today's Agenda</a>).</li>
         <li>Click any <strong>existing event</strong> to open it — a booking opens for editing (see <a href="#edit-a-booking">below</a>), a milestone opens its own edit form. Everywhere else described below, "empty space" means anywhere that isn't already an event.</li>
       </ul>
 
@@ -121,7 +121,7 @@
       <p>Now work through the fields, top to bottom:</p>
       <ol class="steps">
         <li><strong>Title</strong> (required) — a short description of the session, e.g. "Confocal imaging — cell viability."</li>
-        <li><strong>Date</strong>, <strong>Start time</strong> and <strong>End time</strong> — the date is pre-filled from your click; times may be too, if you clicked an hour in Week or Timeline. Start and end decide the booking's length, which feeds directly into the cost calculation (see <a href="#live-cost-panel">the cost panel</a> below) and into whether this booking conflicts with another (see <a href="#conflicts">Conflicts</a>).</li>
+        <li><strong>Date</strong>, <strong>Start Time</strong> and <strong>End Time</strong> — the date is pre-filled from your click; times may be too, if you clicked an hour in Week or Timeline. Start and end decide the booking's length, which feeds directly into the cost calculation (see <a href="#live-cost-panel">the cost panel</a> below) and into whether this booking conflicts with another (see <a href="#conflicts">Conflicts</a>).</li>
         <li><strong>Repeat</strong> (optional) — leave it blank to book just this one date, or fill it in to create several evenly-spaced bookings in one save; see <a href="#repeat-a-booking">Repeating a booking</a> below.</li>
         <li><strong>Project</strong> — optional. Pick the project this session is for, or leave it blank for a facility-wide session with no specific project attached.</li>
         <li><strong>Grant</strong> — optional. If your facility tracks research grants separately from projects, pick one here for billing reconciliation; leave it blank if this booking isn't tied to a specific grant.</li>
@@ -140,6 +140,7 @@
         <li>Leave the "until" date blank to book only the one date you started with — this is the default, and nothing about a plain booking changes.</li>
         <li>To repeat, choose how many <strong>week(s)</strong> apart each occurrence should fall, and pick an <strong>until</strong> date. A booking is created on your start date, then again every N weeks, up to and including that date.</li>
         <li>Save — every date in the schedule is booked in one click, all priced and staffed identically.</li>
+        <li>A schedule longer than <strong>52 occurrences</strong> is refused outright, with a message telling you how many it would have made. Nothing is saved and nothing is trimmed — shorten the "until" date and try again.</li>
       </ol>
       <figure class="shot">
         <img src="../screenshots/59-recurring-booking.png" alt="The New Booking form's Repeat field, showing an every-N-weeks interval and an until date" loading="lazy"
@@ -160,7 +161,7 @@
 
     <section>
       <h2 id="group-lab-gate">The Group/Lab gate — and why the people picker locks</h2>
-      <p>Until you choose a <strong>Group/Lab</strong> for this booking, the <strong>Assign People</strong> dropdown is locked — it won't open, and it flashes a reminder: "Choose Group/Lab First."</p>
+      <p>Until you choose a <strong>Group/Lab</strong> for this booking, the <strong>Assign People</strong> dropdown is locked — it won't open, and it flashes a reminder: "Choose Group/Lab First — or tick Show all labs"</p>
       <figure class="shot">
         <img src="../screenshots/35-booking-group-required-lock.png" alt="The Assign People dropdown locked, showing a Choose Group/Lab First message" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
@@ -197,7 +198,7 @@
 
     <section>
       <h2 id="pickers">The three pickers and how badges work</h2>
-      <p>Three fields on the booking form work the same way: a dropdown to choose from, and a row of removable <strong>badges</strong> underneath showing everyone or everything you've added so far.</p>
+      <p>Three fields on the booking form work the same way: a row of removable <strong>badges</strong> at the top showing everyone or everything you've added so far, and a dropdown underneath to add more.</p>
       <ul>
         <li><strong>Assign People</strong> — attendees from the selected Group/Lab (see above).</li>
         <li><strong>Assign Instruments</strong> — the equipment used in this session.</li>
@@ -209,7 +210,7 @@
         <li>To remove someone or something, click the small remove control on their badge.</li>
       </ol>
       <figure class="shot">
-        <img src="../screenshots/15-booking-pickers.png" alt="The three booking pickers each showing a dropdown and a row of removable badges beneath it" loading="lazy"
+        <img src="../screenshots/15-booking-pickers.png" alt="The three booking pickers, each showing its badges above a dropdown" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/15-booking-pickers.png</div>
         <figcaption>Each picker's dropdown adds a badge; click a badge's remove control to take it back off.</figcaption>
@@ -232,7 +233,7 @@
       <ol class="steps">
         <li>On the New Booking form, choose <strong>Register New Person</strong>.</li>
         <li>Fill in their basic details and save.</li>
-        <li>You're returned to the same booking form, exactly as you left it, with the new person now available to pick.</li>
+        <li>You're returned to the same booking form, exactly as you left it, with the new person <strong>already added</strong> as a badge on Assign People. Remove the badge if you registered them but didn't want them on this booking.</li>
       </ol>
       <figure class="shot">
         <img src="../screenshots/16-register-person.png" alt="A small Register New Person form opened on top of the booking form" loading="lazy"
@@ -241,7 +242,7 @@
         <figcaption>Registering a new person from inside a booking — your in-progress booking is preserved.</figcaption>
       </figure>
       <div class="callout tip">
-        <p><strong>💡 Tip.</strong> This quick registration only asks for the essentials. If you need to set their Facility Staff flag, hourly rate, or other details, open their full record afterward from <a href="people-labs.html#add-a-person">People & Labs</a> and finish filling it in.</p>
+        <p><strong>💡 Tip.</strong> This is the same <strong>Register Researcher / Staff</strong> form you get from People &amp; Labs — nothing is left out. You can set the Facility Staff flag and the hourly rate here, without a second trip.</p>
       </div>
     </section>
 
@@ -263,7 +264,7 @@
 
     <section>
       <h2 id="booking-categories">Booking categories</h2>
-      <p>Category is an optional field that says what <em>kind</em> of session this was, rather than what instrument or project it used — is this a quick sync, a consult, a training session, or a session where a staff member assisted throughout? Four categories ship with the app: <strong>sync</strong>, <strong>consult</strong>, <strong>training</strong>, and <strong>assisted session</strong>. Choose "Add New" in the dropdown to add your own facility's term, the same way you'd add a new Modality or Department elsewhere in the app. Leave it blank for a plain session with nothing to categorize.</p>
+      <p>Category is an optional field that says what <em>kind</em> of session this was, rather than what instrument or project it used — is this a quick sync, a consult, a training session, or a session where a staff member assisted throughout? Four categories ship with the app: <strong>sync</strong>, <strong>consult</strong>, <strong>training</strong>, and <strong>assisted session</strong>. Use the <strong>+ Add New</strong> button beside the field label to add your own facility's term, the same way you'd add a new Modality or Department elsewhere in the app. Leave it blank for a plain session with nothing to categorize.</p>
       <p>Category is what lets the <a href="reports.html">Reports &amp; Utilization</a> screen count consults separately from hands-on instrument time, and split facility-staff hours out by activity — none of that bookkeeping is possible without it.</p>
       <figure class="shot">
         <img src="../screenshots/63-category-billing.png" alt="The booking form's Category field with a warning that this category requires a facility staff member" loading="lazy"
@@ -300,6 +301,9 @@
         <figcaption>Booking Constraints on an instrument's own form — every field defaults to 0, meaning no limit.</figcaption>
       </figure>
       <p>Break one of these and the booking is stopped exactly like a double-booking — see <a href="#conflicts">Conflicts</a> below — with a message naming the instrument and the rule you tripped.</p>
+      <div class="callout warn">
+        <p><strong>⚠️ A booking with no start and end time skips all of this.</strong> Every check on this page — double-booking, the four limits above, everything — needs a time window to compare. Leave the times blank and there is nothing to compare, so the booking saves unchecked and holds no slot. That is deliberate, because an undated note-style entry is sometimes what you want, but it means <em>an untimed booking is never protected by these rules</em>. If you want the limits to apply, give the booking a start and an end time.</p>
+      </div>
       <div class="callout why">
         <p><strong>🔍 Why an edit can skip the Min Notice check.</strong> Editing an existing booking without changing its date or start time never re-checks Min Notice — so you can go back and add a note to a session from last month without the app complaining that "last month" isn't 24 hours away from now. Change the date or start time and the notice check applies again like normal. Min Duration, Max Duration, and Min Gap always apply, on a new booking and on any edit.</p>
       </div>
@@ -322,15 +326,14 @@
 
     <section>
       <h2 id="rich-notes">Rich-text notes</h2>
-      <p>The Notes field (and Next Steps / Action Items) supports simple formatting, not just plain text:</p>
+      <p>The <strong>Notes</strong> field supports one piece of formatting beyond plain text:</p>
       <ul>
-        <li><strong>Bold</strong> and <em>italic</em> text.</li>
-        <li>Bulleted lists.</li>
-        <li>Four font sizes.</li>
-        <li>Keyboard shortcuts: <kbd>Ctrl</kbd>+<kbd>B</kbd> for bold, <kbd>Ctrl</kbd>+<kbd>I</kbd> for italic.</li>
+        <li><strong>Bulleted lists</strong>, via the single button on its small toolbar.</li>
       </ul>
+      <p>That is the whole toolbar. Bold, italic and font sizes were removed, and <kbd>Ctrl</kbd>+<kbd>B</kbd> / <kbd>Ctrl</kbd>+<kbd>I</kbd> do nothing here on purpose — a booking note is a record, not a document. Notes written before the change keep whatever formatting they already had, on screen and in exports.</p>
+      <p><strong>Next Steps / Action Items</strong> is a plain single-line field, with no formatting at all.</p>
       <figure class="shot">
-        <img src="../screenshots/19-rich-notes.png" alt="The rich-text notes editor with a formatting toolbar showing bold, italic, bullets, and font size options" loading="lazy"
+        <img src="../screenshots/19-rich-notes.png" alt="The notes editor with its single bullet-list button" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/19-rich-notes.png</div>
         <figcaption>The Notes editor's formatting toolbar — bold, italic, bullets, and font size.</figcaption>
@@ -341,6 +344,10 @@
     </section>
 
     <section>
+      <div class="callout note">
+        <p><strong>Minimum gap is measured within one day.</strong> The check looks at the instrument's other bookings <em>on the same date</em>, so a late-night session and an early-morning one on the following day never trip it, however close together they are.</p>
+      </div>
+
       <h2 id="conflicts">Conflicts: warned as you type, blocked at Save</h2>
       <p>The app won't let you double-book an instrument or a facility staff member, and it enforces any <a href="#booking-limits">per-instrument booking limit</a> the same way. If this booking's time overlaps with another booking on the <em>same day</em> that uses the <strong>same instrument</strong> or the <strong>same facility staff member</strong> — or breaks one of that instrument's own limits — you'll hear about it twice:</p>
       <ul>
