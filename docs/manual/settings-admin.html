@@ -81,9 +81,9 @@
 
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A flat Internal/External split assumes every lab fits into exactly one of two buckets, which doesn't hold for a facility that also serves academic collaborators or industry clients at different rates. Naming as many tiers as you actually need — Internal, Academia, Industry, or anything else — replaces that assumption with a real choice per lab. See <a href="#pricing-tiers">Pricing tiers</a> below for how a lab gets one, and what happens if you never set one up.</p></div>
 
-      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Changing tax or currency here only affects <em>new</em> bookings from that moment on. Every booking that's already been saved keeps the total it was calculated with when it was created — changing today's tax rate will never quietly rewrite last month's invoices. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> for why, and <a href="costs-math.html#worked-example">the worked example</a> for how the numbers actually combine.</p></div>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Changing tax or currency here only affects <em>new</em> bookings from that moment on. Every booking that's already been saved keeps the total it was calculated with when it was saved — unless you open it and save it again, which reprices it at today's rates — changing today's tax rate will never quietly rewrite last month's invoices. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> for why, and <a href="costs-math.html#worked-example">the worked example</a> for how the numbers actually combine.</p></div>
 
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, note the total cost on one existing booking. Then go change the Tax % in Settings and reopen that same booking. Its total hasn't moved — only a brand-new booking would use the new tax rate.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, note what one existing booking contributes to its project's <strong>Project Costs</strong> card. Change the Tax % in Settings, then look at that card again — the saved total hasn't moved.</p><p>Opening that booking's own edit form is a different thing, and worth knowing about: the live <em>Cost &amp; Time Breakdown</em> panel inside the form always prices at today's rates, so it will show the new tax. Nothing has changed until you press Save — but if you do press Save, that new total is what gets stored.</p></div>
     </section>
 
     <section>
@@ -125,7 +125,7 @@
         <li>Open <strong>Settings</strong> and find <strong>Category Billing</strong>.</li>
         <li>For a category, set <strong>Staff %</strong> — 100% bills a staff member's full normal rate; a lower number (even 0%) bills less, or nothing, for that category's staff time.</li>
         <li>Tick <strong>Requires facility staff</strong> if a booking in that category should refuse to save unless at least one facility staff member is assigned to it.</li>
-        <li>On <strong>Training</strong> only, tick <strong>Same as assisted session</strong> to make Training always bill at whatever percentage Assisted Session currently uses, instead of keeping its own separate number.</li>
+        <li>On <strong>Training</strong> only, <strong>Same as assisted session</strong> is <em>already ticked</em> in a fresh database — which is why Training's own percent box starts greyed out. Untick it to give Training a percentage of its own, or leave it ticked to make Training always bill at whatever percentage Assisted Session currently uses, instead of keeping its own separate number.</li>
         <li>Click <strong>Save Category Billing</strong>.</li>
       </ol>
 
@@ -149,7 +149,7 @@
       <ol class="steps">
         <li>Open <strong>Settings</strong> and find <strong>Grants</strong>, then click <strong>Add Grant</strong>.</li>
         <li>Enter a <strong>Grant Name</strong> (required), an optional <strong>Grant Number</strong>, and an optional <strong>Note</strong>.</li>
-        <li>Build the <strong>Allowed Users</strong> list — the people who can be picked when someone chooses this grant on a project or booking.</li>
+        <li>Build the <strong>Allowed Users</strong> list — your record of who is authorised to spend this grant. It shows as a count in the Grants table. Be aware that the app does <em>not</em> enforce it: the grant stays pickable on any project or booking regardless of who is on the list. Treat it as a note to yourself, not a lock.</li>
         <li>Save. The grant is now selectable from the Grant field on a project and on a booking.</li>
       </ol>
 
@@ -174,8 +174,8 @@
       <p>When a booking is cancelled, two independent choices decide whether its cost still counts toward a project's <strong>Project Costs</strong> card: one for a cancellation before the booking's scheduled start time, one for after it.</p>
       <ol class="steps">
         <li>Open <strong>Settings</strong> and find <strong>Cancellation Billing Rules</strong>.</li>
-        <li>Set <strong>Cancelling Before Start Time</strong> to <strong>Charge dropped</strong> or <strong>Charge kept</strong>.</li>
-        <li>Set <strong>Cancelling After Start Time</strong> to <strong>Charge dropped</strong> or <strong>Charge kept</strong>.</li>
+        <li>Set <strong>Cancelling Before Start Time</strong> to <strong>Charge Dropped</strong> or <strong>Charge Kept</strong>.</li>
+        <li>Set <strong>Cancelling After Start Time</strong> to <strong>Charge Dropped</strong> or <strong>Charge Kept</strong>.</li>
         <li>Click <strong>Save Cancellation Rules</strong>.</li>
       </ol>
 
@@ -183,7 +183,7 @@
 
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A cancellation before the start time means nothing was actually held — no instrument or staff time was ever occupied — so there's normally nothing to bill. One after the start time means the facility had already reserved that time and couldn't offer it to anyone else, which is why the charge stands by default. See <a href="cancelling.html">Cancelling a booking</a> for the full walkthrough of what cancelling does and doesn't touch.</p></div>
 
-      <div class="callout warn"><p><strong>⚠️ Careful — the cancel dialog reads these settings, it doesn't have its own opinion.</strong> Whatever the confirmation message says when someone actually cancels a booking is generated from exactly what's set here — it can never describe a rule the app isn't applying. If you set Before Start Time to "Charge kept," the dialog for a not-yet-started booking will say so plainly, not the old "charge dropped" wording.</p></div>
+      <div class="callout warn"><p><strong>⚠️ Careful — the cancel dialog reads these settings, it doesn't have its own opinion.</strong> Whatever the confirmation message says when someone actually cancels a booking is generated from exactly what's set here — it can never describe a rule the app isn't applying. If you set Before Start Time to "Charge Kept," the dialog for a not-yet-started booking will say so plainly, not the old "charge dropped" wording.</p></div>
 
       <p>Admin Mode can still step in for one specific after-start cancellation: with Admin Mode on, cancelling a started booking that has a cost offers a three-way choice — keep the booking as scheduled, cancel and waive the charge, or cancel and keep the charge — regardless of what's set here. A before-start cancellation never gets that per-booking override; it always follows the rule above automatically, since nothing was held to begin with.</p>
     </section>
@@ -245,10 +245,10 @@
 
     <section>
       <h2 id="rename-lab">Rename a lab or group</h2>
-      <p>Because Lab/Group is free text (see <a href="people-labs.html#labs-departments">Labs &amp; departments</a>), the same lab can end up spelled two different ways — "Bio-Photonics Lab" and "BioPhotonics Lab," say. The <strong>Rename Lab/Group</strong> tool fixes that everywhere in one step, instead of editing every person by hand.</p>
+      <p>Because Lab/Group is free text (see <a href="people-labs.html#labs-departments">Labs &amp; departments</a>), the same lab can end up spelled two different ways — "Bio-Photonics Lab" and "BioPhotonics Lab," say. The <strong>Rename / Merge Lab</strong> tool fixes that everywhere in one step, instead of editing every person by hand.</p>
       <ol class="steps">
         <li>Turn on <strong>Admin Mode</strong> if it isn't already on.</li>
-        <li>Open <strong>Settings</strong> and find <strong>Rename Lab/Group</strong> in the Admin Mode area.</li>
+        <li>Open <strong>Settings</strong> and find <strong>Rename / Merge Lab</strong> in the Admin Mode area.</li>
         <li>Pick the existing (old) lab name from the list.</li>
         <li>Type the new name — either a genuinely new spelling, or the name of another lab that already exists, if you're merging two duplicate labs into one.</li>
         <li>Confirm.</li>
@@ -258,10 +258,11 @@
         <li>Every person currently recorded under the old lab name.</li>
         <li>The lab's row in <a href="#group-discounts">Group Discounts</a> — if you renamed into a lab that already had its own discount row, that lab keeps <em>its</em> discount percentage; the old lab's row disappears rather than the two being averaged or added together.</li>
         <li>The Lab/Group label saved on every past booking made under the old name, so old records and reports read consistently under the new name too.</li>
+        <li>The lab's <a href="#pricing-tiers">pricing tier</a> assignment. It moves with the lab — but if you renamed <em>into</em> a lab that already had a tier, that lab's tier wins and the old assignment is gone. Since a tier sets the overhead percentage, this changes what every <em>future</em> booking for the renamed lab costs. Saved bookings keep their own totals.</li>
       </ul>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A lab name is written in three different places at once — on each person, on the discount editor, and stamped onto every past booking — precisely because it's meant to read the same everywhere. A rename that only fixed the people list would leave old bookings and the discount editor still showing the stale spelling, right back where the duplicate-lab problem started.</p></div>
       <div class="callout warn"><p><strong>⚠️ Careful.</strong> Renaming a lab only changes its <em>label</em> — it never recalculates anything. A past booking's total cost stays exactly the frozen number it was saved with (see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a>), even if that booking's Lab/Group label now reads differently and even if you merged it into a lab with a different discount percentage.</p></div>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded and Admin Mode on, open Rename Lab/Group, pick any existing lab, and rename it to a brand-new spelling. Check the People directory, Group Discounts, and one of that lab's past bookings — all three now show the new name, and the booking's total is unchanged.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded and Admin Mode on, open Rename / Merge Lab, pick any existing lab, and rename it to a brand-new spelling. Check the People directory, Group Discounts, and one of that lab's past bookings — all three now show the new name, and the booking's total is unchanged.</p></div>
     </section>
 
     <section>
@@ -278,7 +279,7 @@
       <details class="quiz-q"><summary>A colleague asks if turning on Admin Mode is like logging in as an administrator. Is that accurate?</summary><p>No. Admin Mode is a plain on/off toggle with no password or account behind it — anyone at that browser can turn it on themselves. It only shows or hides billing controls; it isn't security.</p></details>
       <details class="quiz-q"><summary>You set the Bio-Photonics Lab's discount to 10% today. Does a booking from that lab saved last month, when the discount was 5%, change to 10%?</summary><p>No. A booking freezes the discount percentage it was saved with. Only new bookings made after the change pick up the new 10% — unless an admin explicitly revokes or re-applies a discount on that specific old booking.</p></details>
       <details class="quiz-q"><summary>Where would you look to find out which version of the app you're running?</summary><p>Settings → About.</p></details>
-      <details class="quiz-q"><summary>You discover "Confocal Lab" and "Confocal-Lab" are the same group, entered two different ways. What's the fastest fix, and does it touch past booking totals?</summary><p>Use Rename Lab/Group (Admin Mode) to rename one into the other — it updates every person, the discount row, and the label on past bookings in one step. It never recalculates a booking's frozen total.</p></details>
+      <details class="quiz-q"><summary>You discover "Confocal Lab" and "Confocal-Lab" are the same group, entered two different ways. What's the fastest fix, and does it touch past booking totals?</summary><p>Use Rename / Merge Lab (Admin Mode) to rename one into the other — it updates every person, the discount row, and the label on past bookings in one step. It never recalculates a booking's frozen total.</p></details>
     </section>
 
     <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>

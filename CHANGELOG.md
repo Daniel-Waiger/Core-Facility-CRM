@@ -37,6 +37,14 @@ This project uses [Semantic Versioning](https://semver.org/).
   roadmap said no such thing. The comment now names it as the deliberate narrowing it is, and
   the roadmap records it on item 3.3 — as does 3.4's maintenance slice and 3.2's two columns
   that wait on Tier 4 data.
+- **Two manual claims a reader could have been burned by.** The Grants section said the
+  "Allowed Users" list controls who can be picked when that grant is chosen — it controls
+  nothing; the grant stays pickable by anyone, and the list is a record, not a lock. And a
+  "Try it" exercise asserted that reopening a booking after a tax change leaves its total
+  unmoved; the edit form's breakdown panel always prices at today's rates, so the exercise
+  showed the opposite of what it promised. Both corrected, along with the note that a lab
+  rename also moves (or, on a merge, discards) the lab's pricing-tier assignment — which
+  changes what its future bookings cost.
 - **The Reports export told you to look for a label that does not exist.** Both Notes sheets
   stated that archived projects appear with an "(Archived)" suffix. Nothing in the app has ever
   written one — `UI.retiredName` appends "(Retired)" and there is no archived equivalent — so an

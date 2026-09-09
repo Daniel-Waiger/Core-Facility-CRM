@@ -57,11 +57,11 @@
 
     <section>
       <h2 id="what-you-can-attach">What you can attach to it</h2>
-      <p>A service entry has one required field and seven optional ones:</p>
+      <p>A service entry has one required field and eight optional ones:</p>
       <ol class="steps">
         <li><strong>Description</strong> (required) — a plain sentence saying what the charge was for, e.g. "Retroactive image analysis support."</li>
-        <li><strong>Date</strong> — when the work happened. Leave it blank and the app fills in today's date for you (see <a href="#the-date-rule">below</a> for why that's more than a convenience).</li>
-        <li><strong>Performing Staff</strong> — which facility staff member did the work. Only current Facility Staff show up in this list (the same <a href="people-labs.html#facility-staff-flag">Facility Staff flag</a> a booking's staff picker uses) — unless the entry was already assigned to someone who has since retired, in which case their name stays in the list, marked "(Retired)", so the entry keeps making sense.</li>
+        <li><strong>Date</strong> — when the work happened. The form starts with today already filled in; if you clear it, the app puts today back when you save (see <a href="#the-date-rule">below</a> for why that's more than a convenience).</li>
+        <li><strong>Performing Staff</strong> — which facility staff member did the work. Only current Facility Staff show up in this list, plus whoever is already on this entry — someone who has since retired, or who has simply had their Facility Staff flag removed, stays on it and is labelled accordingly rather than vanishing (the same <a href="people-labs.html#facility-staff-flag">Facility Staff flag</a> a booking's staff picker uses) — unless the entry was already assigned to someone who has since retired, in which case their name stays in the list, marked "(Retired)", so the entry keeps making sense.</li>
         <li><strong>Project</strong> — which project the charge belongs to. Leave it blank and the entry is <strong>facility-wide</strong> — it costs nothing against any one project, but still counts everywhere the facility totals up its own revenue.</li>
         <li><strong>Grant</strong> — which grant to bill it against, if any.</li>
         <li><strong>Instrument</strong> — an instrument this work relates to, if any (e.g. sample prep for a specific microscope). Purely informational here — an entry's instrument doesn't feed into the charge the way a booking's does.</li>
@@ -101,7 +101,7 @@
       <ul>
         <li><strong>Project Costs.</strong> If the entry has a project, it appears as its own row on that project's Costs card, right alongside the project's bookings, and its total folds into the same running total at the top of the card.</li>
         <li><strong>Reports &amp; Utilization.</strong> The Reports screen's own Service Entries card lists every entry inside the date range you're viewing (facility-wide entries included), with the same running total.</li>
-        <li><strong>Exports.</strong> A project's XLSX, DOCX and PDF export each include its service entries alongside its bookings. The facility-wide Reports export carries its own "Service Entries" sheet covering every entry, project-attached or not.</li>
+        <li><strong>Exports.</strong> A project's XLSX, DOCX and PDF export each include its service entries alongside its bookings. The facility-wide Reports export carries its own "Service Entries" sheet covering every entry that falls inside the report's date range, project-attached or not.</li>
       </ul>
       <p>Everywhere a service entry's cost is totaled, the counting rule is identical to a booking's: the charge counts unless the entry is <em>both</em> cancelled <em>and</em> its charge was waived. A cancelled-but-charged entry still counts toward every one of those totals.</p>
     </section>

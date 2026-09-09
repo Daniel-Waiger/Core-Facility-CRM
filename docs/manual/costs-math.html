@@ -116,7 +116,7 @@
       <p>The facility adds overhead on top of whatever is left after the discount. Exactly ONE overhead percentage applies to a given booking, decided by the booking's lab:</p>
       <ol class="steps">
         <li>If the lab has been assigned a named <strong>pricing tier</strong>, that tier's own single percentage is used, on its own — nothing else is added to it.</li>
-        <li>If the lab has no tier assigned, the app falls back to the older rule: <strong>Internal overhead %</strong> plus <strong>External overhead %</strong>, two percentages set once in Settings and simply added together.</li>
+        <li>If the lab has no tier assigned, the app falls back to the older rule: <strong>Internal overhead %</strong> plus <strong>External overhead %</strong> added together — two numbers left over from before pricing tiers existed. They can no longer be edited anywhere in Settings, and a facility set up today has both at zero, so an untiered lab simply gets no overhead. Assigning a pricing tier is now the only way to give a lab an overhead percentage.</li>
         <li>Either way, that one resolved percentage is applied to the post-discount amount, not the original subtotal.</li>
       </ol>
       <p>Our researcher's lab has no pricing tier assigned, so the older fallback applies: Internal overhead 10% + External overhead 5% = a combined 15%.</p>

@@ -40,13 +40,13 @@
 
     <section>
       <h2 id="decision-table">What happens when you cancel a booking</h2>
-      <p>A booking is a record of facility time, not just a calendar entry — see <a href="big-ideas.html#cancelled-vs-deleted">Cancelled vs. deleted</a>. So cancelling one asks a question first: <strong>had the booking's start time already passed?</strong> What happens to its charge from there follows your facility's own <a href="#settings-rule">Cancellation Billing Rules</a> — two independent settings, one for cancelling before a booking's start time and one for after, each set to "Charge dropped" or "Charge kept."</p>
+      <p>A booking is a record of facility time, not just a calendar entry — see <a href="big-ideas.html#cancelled-vs-deleted">Cancelled vs. deleted</a>. So cancelling one asks a question first: <strong>had the booking's start time already passed?</strong> What happens to its charge from there follows your facility's own <a href="#settings-rule">Cancellation Billing Rules</a> — two independent settings, one for cancelling before a booking's start time and one for after, each set to "Charge Dropped" or "Charge Kept."</p>
       <ol class="steps">
         <li>Open the booking (from the Calendar or a project's Meetings list) and choose <strong>Cancel</strong>.</li>
         <li>The confirmation dialog tells you, in plain language, whether the charge will drop or stand — reading straight from whichever of the two rules applies.</li>
         <li>If its start time has already passed and it carries a charge above zero, <a href="big-ideas.html#admin-mode">Admin Mode</a> can additionally offer a one-off, per-booking choice that overrides the after-start rule just for this cancellation.</li>
       </ol>
-      <p>Out of the box — before anyone has touched the Cancellation Billing Rules in Settings — the app behaves exactly as it always has: <strong>before-start cancellations drop the charge, after-start cancellations keep it.</strong> The table below shows those factory defaults; if your facility has changed either setting, read "Charge dropped"/"Charge kept" as whatever you've set it to, not as a fixed rule.</p>
+      <p>Out of the box — before anyone has touched the Cancellation Billing Rules in Settings — the app behaves exactly as it always has: <strong>before-start cancellations drop the charge, after-start cancellations keep it.</strong> The table below shows those factory defaults; if your facility has changed either setting, read "Charge Dropped"/"Charge Kept" as whatever you've set it to, not as a fixed rule.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Start time</th><th>Charge on the booking</th><th>Admin Mode</th><th>What happens</th></tr></thead>
@@ -72,7 +72,7 @@
       <p>Every facility runs a little differently, so the charge-on-cancellation rule isn't fixed in the app — it's a pair of settings your facility sets for itself.</p>
       <ol class="steps">
         <li>Open <strong>Settings</strong> and find the <strong>Cancellation Billing Rules</strong> card.</li>
-        <li>Set <strong>Cancelling Before Start Time</strong> to "Charge dropped" or "Charge kept" — this decides what happens when someone cancels a booking that hasn't started yet.</li>
+        <li>Set <strong>Cancelling Before Start Time</strong> to "Charge Dropped" or "Charge Kept" — this decides what happens when someone cancels a booking that hasn't started yet.</li>
         <li>Set <strong>Cancelling After Start Time</strong> separately — this decides the default for a booking cancelled after its start time has passed, though <a href="big-ideas.html#admin-mode">Admin Mode</a> can still override it per booking (see below).</li>
         <li>Click <strong>Save Cancellation Rules</strong>. The new rule applies to every cancellation from then on — it does not change bookings you've already cancelled.</li>
       </ol>
@@ -161,7 +161,7 @@
       </details>
       <details class="quiz-q">
         <summary>Without Admin Mode turned on, can you cancel a started booking and drop its charge?</summary>
-        <p>Only if your facility's <strong>After Start Time</strong> setting is set to "Charge dropped." With Admin Mode off, a started booking with a charge above zero just follows that setting automatically — by default that means the charge stands, but a facility that has switched the setting to "dropped" will see it dropped even with Admin Mode off. Admin Mode's three-way dialog is what lets you override that setting on a single booking, either way.</p>
+        <p>Only if your facility's <strong>After Start Time</strong> setting is set to "Charge Dropped." With Admin Mode off, a started booking with a charge above zero just follows that setting automatically — by default that means the charge stands, but a facility that has switched the setting to "dropped" will see it dropped even with Admin Mode off. Admin Mode's three-way dialog is what lets you override that setting on a single booking, either way.</p>
       </details>
       <details class="quiz-q">
         <summary>Why might reinstating a cancelled booking fail?</summary>
