@@ -4,7 +4,7 @@ labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
-      value: |
+      value: >
         Thanks for taking the time. You do not need to fill in every box, and a rough idea is
         genuinely welcome. If you would rather just think out loud, the
         [Discussions](https://github.com/Daniel-Waiger/Core-Facility-CRM/discussions) board is
