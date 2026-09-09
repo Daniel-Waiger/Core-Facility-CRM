@@ -1,0 +1,14 @@
+# Blank issues stay switched on deliberately. Someone with a half-formed thought should never
+# hit a wall of required fields, and the first real feature request this project got arrived as
+# an apology for bothering anyone.
+blank_issues_enabled: true
+contact_links:
+  - name: Ideas, questions, and "is this thing meant to do X?"
+    url: https://github.com/Daniel-Waiger/Core-Facility-CRM/discussions
+    about: Nothing formal needed. Say what you are trying to do and we will work it out together.
+  - name: User manual
+    url: https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/
+    about: How each screen works, in plain language. Worth a look before filing, it may already be there.
+  - name: Release notes
+    url: https://daniel-waiger.github.io/Core-Facility-CRM/docs/
+    about: What changed in each version, newest first.
