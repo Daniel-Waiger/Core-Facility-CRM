@@ -1,0 +1,140 @@
+# CMA lessons — Core Facility Tracker (repo scope)
+
+Living file. **Every planner, executor and verifier agent reads this before
+starting work and applies it unprompted.** New lessons are merged in after each
+run: dedupe, add "seen ×N" to recurring ones, and delete lessons that stop
+earning their space.
+
+The CMA tooling itself is **not** in this repository — it is an external skill,
+available to any project. This file is the one repo-scoped piece: what an agent
+needs to know about running that scheme against *this* codebase. It is useful
+on its own even if you never run the scheme, because every lesson below is a
+fact about this project that cost something to learn.
+
+**Scope test — which file does a lesson go in?**
+If the lesson names a file, table, function or convention from *this repo*, it
+belongs here. If it would still be true on a completely different codebase, it
+belongs in the global file at `~/.claude/cma-lessons.md`. When in doubt, ask
+whether a different project would benefit; if yes, it is global.
+
+This file is **not** a second copy of `CLAUDE.md`. `CLAUDE.md` states the
+architecture rules; this file records *how the pipeline keeps breaking them*.
+A lesson that just restates an architecture rule should be deleted — point at
+`CLAUDE.md` instead.
+
+---
+
+## Environment
+
+- **`python3` does not exist on this machine — use `python` (or `py`).**
+  `CLAUDE.md` and `AGENTS.md` both tell agents to run
+  `python3 -m http.server 8000`; that command fails here with
+  "command not found", and an agent that trusts the doc reports the app as
+  unservable. Python 3.14 is installed as `python`. _(2026-09-08)_
+
+## Verification
+
+- **"The code looks correct" is not verification in this repo.** There is no
+  test suite and no build. `node --check js/<file>.js` proves the file parses
+  and nothing more. A verifier must actually load the app in a browser and
+  exercise the changed path, or state plainly that it did not. A pass issued
+  from a read of the diff alone is a false pass. _(2026-09-08)_
+
+- **Serve the app rather than opening `file://` when the change touches
+  storage.** IndexedDB and the service worker behave differently under
+  `file://` on some browsers, so a bug can be invisible or fabricated
+  depending on how the verifier opened the page.
+
+## The trap that makes work look like it did nothing
+
+- **A `js/` or `css/` edit that skips the version bump is invisible.** Three
+  places move together — the `?v=X.Y.Z` strings in `index.html`, `CACHE_VERSION`
+  *and* `PRECACHE_URLS` in `sw.js`, and `APP_VERSION` in `js/consts.js` — plus a
+  `CHANGELOG.md` entry. Miss them and the service worker keeps serving the old
+  asset, so the change is correct on disk and absent in the browser. This is
+  the single most likely way a run here ends with "it works" and a user who
+  sees nothing. Put the bump in the task graph as its own task, not as a
+  footnote inside another task.
+
+- **`docs/` changes need no version bump and no changelog entry.**
+  The versioning rules exist to cache-bust the app shell; the docs page and the
+  manual are not part of it. Bumping for them adds noise and a misleading
+  release. The inverse is the trap: a change touching even one string in `js/`
+  or `css/` **does** need the bump, however cosmetic it looks. _(2026-09-09:
+  a capitalization pass over UI strings is a `js/` change and was released as
+  1.9.1, correctly.)_
+
+## Data-model traps that survive a plausible-looking diff
+
+- **Denormalized display string + join table must both be written.** The seed
+  data once populated `meetings.attendees` (names, for display) without the
+  matching `meeting_people` rows, so a demo meeting showed attendees while
+  every join-based feature saw zero. Any new denormalized/relational pair
+  repeats this by default. See `CLAUDE.md` → "The database is relational".
+
+- **A retired record filtered out of a form is deleted from the record on the
+  next save.** `msEditSave`, `bookingSave`/`bookingEditSave` and the project PI
+  form rebuild their join rows from whatever the form renders. The rule is
+  "selectable = not retired OR already selected here" — a task that adds a
+  picker and does not honour it silently destroys history, and no error
+  surfaces. See `CLAUDE.md` → "History is preserved".
+
+- **Dates are local calendar days.** `new Date(x).toISOString().slice(0,10)`
+  returns *yesterday* east of Greenwich. Any task touching dates must be
+  verified under `TZ='Asia/Jerusalem'`, because the bug is invisible at UTC and
+  UTC−. This already shipped once as issue #14. Use `UI.ymd` / `UI.today`.
+
+## Verifying documentation (2026-09-09, a full run's worth of evidence)
+
+- **Doc claims must be verified against `js/`, never against `CHANGELOG.md`,
+  `README.md` or a code comment.** Across four adversarial passes in one run,
+  **23 false claims** were found in prose that read perfectly plausibly. Two
+  were falsifiable by a reader simply following the manual's own instructions:
+  a "Try it" exercise that demonstrated the opposite of what it promised
+  (the booking edit form re-prices live; only the *saved* total is frozen), and
+  a Grants section claiming the "Allowed Users" list restricts who can be
+  picked, when no picker joins `grant_users` at all. Plausible prose is exactly
+  what a false claim looks like.
+
+- **A correction needs its own adversarial pass.** In the first round, **two of
+  six corrections were themselves wrong** — a claim true of one report asserted
+  of two, and a "complete" gap list that omitted an undisclosed scope
+  narrowing. A fix does not inherit the review's correctness. Re-verify.
+
+- **Code comments are not evidence, and this repo has proved it.**
+  `js/reports.js` justified a narrowing with "per the roadmap spec"; the roadmap
+  said no such thing. `js/exports.js` promised an "(Archived)" suffix in two
+  Notes sheets that no code has ever written. Both shipped and survived review.
+  Only executing code settles a claim.
+
+- **The app's own output strings are documentation too.** The "(Archived)"
+  defect was not in the manual — it was in a spreadsheet the app hands to a
+  user. When auditing docs, audit the strings the app itself emits.
+
+## Run hygiene
+
+- **A session interruption kills every background agent silently.** No
+  completion notification arrives, no error surfaces, and the orchestrator will
+  happily report them as "still running" if it trusts expectation over a check.
+  Confirm liveness (`ListAgents`, file mtimes) before reporting progress, and
+  **commit each unit of work as it lands** rather than batching at the end —
+  what is on disk survives, what is in a dead agent's context does not.
+
+- **Recovery after such a kill is possible but must be audited, not assumed.**
+  Agents that die after writing leave complete, parseable files. Check each
+  survivor's output against its original brief, and treat anything an agent
+  never reported on as unverified — in this run, the two chapters whose authors
+  died contained six defects between them.
+
+- **The manual stores each chapter's number twice** — in `docs/manual/manual.js`
+  and again as a hardcoded `<p class="ch-kicker">Chapter N</p>` in every page.
+  Insert a chapter and every later page silently disagrees with the sidebar.
+  Verify programmatically against the registry after any insertion; better,
+  render the kicker from `manual.js` and delete the duplication.
+
+- **A capitalization or wording pass over `js/` strings breaks docs that quote
+  those labels.** After renaming UI strings, grep `docs/` and `README.md` for
+  every old label — four places quoted labels that no longer existed, and three
+  of those were made stale by the same run that fixed them.
+
+<!-- cma:append-here -->

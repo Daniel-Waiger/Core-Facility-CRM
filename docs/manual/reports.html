@@ -21,9 +21,9 @@
   <main class="content">
     <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Reports &amp; Utilization</span></nav>
     <header class="ch-head">
-      <p class="ch-kicker">Chapter 12</p>
+      <p class="ch-kicker">Chapter 13</p>
       <h1>Reports &amp; Utilization</h1>
-      <p class="lede">Two rules decide what counts as "happened" and what counts as "billed" — once you know them, every number on this screen makes sense.</p>
+      <p class="lede">Two rules decide what counts as "happened" and what counts as "billed" — once you know them, every number on this screen makes sense, from the four original cards to the newest funnel and scorecard.</p>
     </header>
 
     <section class="learn-box">
@@ -32,6 +32,10 @@
         <li>Explain the two rules that govern every figure on the Reports screen.</li>
         <li>Read the instrument, staff, matrix, and project/lab cards, column by column.</li>
         <li>Understand why a booking with two instruments counts double on hours, but not on sessions.</li>
+        <li>Log standalone billable work that never went through a booking, and count consults separately from every other kind of session.</li>
+        <li>Read the instrument stewardship scorecard the way a supervisor would when asked to justify a piece of equipment — and know which two things it deliberately can't tell you yet.</li>
+        <li>Read the breadth, activity mix, and consult-to-output funnel cards, and know exactly what each stage of the funnel counts.</li>
+        <li>Build your own report by picking an entity, a date range, and only the columns you need.</li>
         <li>Pick a date range and know why some rows disappear when you narrow it.</li>
         <li>Trust that the exported spreadsheet always matches what's on screen.</li>
       </ul>
@@ -49,6 +53,9 @@
       <div class="callout why">
         <p><strong>🔍 Why it works this way.</strong> These two rules can point in different directions on the same booking, and that's intentional. A booking cancelled <em>after</em> its start time, with its charge kept, is a real example: the facility held that instrument's time (so it should count as revenue — the slot really was occupied and paid for), but the booking never actually ran a session (so it shouldn't count as occupied hours — nobody was using the instrument). That booking adds money to the Money card but zero hours to the Instrument card. It looks inconsistent until you remember these are two separate questions: "did this booking cost the facility anything?" and "was equipment actually in use?"</p>
       </div>
+      <div class="callout tip">
+        <p><strong>💡 Every card on this page follows both rules.</strong> That used to mean four cards; it now means about ten, plus a custom report builder that covers most of them — Staff × Instrument and Breadth are screen-and-spreadsheet only, and the builder adds one entity of its own, a row-level list of bookings. Standalone service entries (logged outside any booking) follow only the money rule — they never had a schedule slot to occupy, so there's no occupancy question to ask about them.</p>
+      </div>
     </section>
 
     <section>
@@ -60,11 +67,12 @@
         <li>Every card below updates together — there's no per-card range.</li>
       </ol>
       <figure class="shot">
-        <img src="../screenshots/49-reports.png" alt="The Reports screen with its date range bar and the four report cards" loading="lazy"
+        <img src="../screenshots/49-reports.png" alt="The Reports screen's date range bar, with This Month, This Year and All Time presets, Custom Report and Export XLSX buttons alongside it" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/49-reports.png</div>
-        <figcaption>The date range bar at the top scopes every card on the page at once.</figcaption>
+        <figcaption>The date range bar at the top scopes every card on the page at once, including the Custom Report builder when you open it.</figcaption>
       </figure>
+      <p>Below this bar, the cards run in this order: Instrument Utilization, Facility Staff Time, Staff × Instrument, Projects &amp; Groups, Instrument Stewardship, Consults, Service Entries, Breadth, Activity Mix, and Funnel: Consult to Output. This chapter walks through them in that same order, then covers the charts drawn above three of the tables and the Custom Report builder that reads from all of them.</p>
     </section>
 
     <section>
@@ -118,11 +126,144 @@
       </ul>
       <div class="callout tip"><p><strong>💡 Tip.</strong> "Facility-wide" isn't a real project — it's how the app labels bookings that were never attached to one. See <a href="bookings.html#book-a-session">Booking a Session</a> for how a booking's project is (or isn't) chosen.</p></div>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Not every booking is tied to a specific research project — general facility maintenance sessions, walk-in demos, and the like still need to be tracked, so they're grouped under "Facility-wide" instead of being forced onto a project they don't belong to. Lab/Group is optional on a booking in a way project isn't always, so a booking genuinely missing that field is left out of the By-Lab table rather than inventing a fake "unknown lab" bucket.</p></div>
+      <div class="callout tip"><p><strong>💡 Service entries add money here too.</strong> A standalone service entry (see the Service Entries card below) attached to a project adds its charge to that project's Total Cost in the By Project table — it just never adds a booking or hours, since it never held a schedule slot.</p></div>
+    </section>
+
+    <section>
+      <h2 id="stewardship-card">Card 5 — Instrument stewardship scorecard</h2>
+      <p>Where Card 1 answers "how busy is this instrument," this card answers the question a supervisor is actually asked: "why do we still have this instrument, and is it earning its keep?" It's grouped by <strong>supervising staff</strong> — the people set as an instrument's Supervising Staff on its own edit form — with one row per instrument under each supervisor:</p>
+      <ul>
+        <li><strong>Bookings, Hours, Revenue</strong> — the same figures as Card 1, for this instrument alone.</li>
+        <li><strong>Distinct Users</strong> — how many different people actually used the instrument in the range.</li>
+        <li><strong>New Users</strong> — how many of those people were using <em>this instrument</em> for the very first time ever, with that first-ever booking falling inside the range. The app checks the instrument's whole booking history to know this, not just the range you've selected, so a returning user from three years ago is never mislabeled "new."</li>
+        <li><strong>Projects Served</strong> — how many distinct projects booked the instrument.</li>
+        <li><strong>Facility-Wide Sessions</strong> — how many of its bookings weren't attached to any project.</li>
+        <li><strong>Consults</strong> — how many of its bookings were tagged Category = "consult" (see the Consults card below).</li>
+      </ul>
+      <figure class="shot">
+        <img src="../screenshots/65-stewardship-scorecard.png" alt="The Instrument Stewardship card grouped by supervisor, with columns for bookings, hours, revenue, distinct users, new users, projects served, facility-wide sessions and consults" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/65-stewardship-scorecard.png</div>
+        <figcaption>Grouped by supervisor — David Kim's four instruments, Priya Anand's one, Tom Alvarez's two, each with the full row of figures.</figcaption>
+      </figure>
+      <div class="callout warn"><p><strong>⚠️ Careful — a shared instrument appears more than once, on purpose.</strong> If an instrument has two supervisors, its whole row repeats identically under each of them. That's a grouping for review, not a split of ownership — don't add the numbers from both appearances together, and don't read this as each supervisor being responsible for half. An instrument with no supervisor on file appears once, under "Unassigned."</p></div>
+      <div class="callout why"><p><strong>🔍 Why two things are missing.</strong> This card was designed to also show a <strong>trained-user pool trend</strong> (is the base of people qualified to use this instrument growing?) and a <strong>downtime share</strong> (how much of its calendar time was lost to repairs or maintenance?). Both are left out, honestly, because the app has no training records and no downtime log to compute them from — not because they weren't wanted. If your facility tracks either of those elsewhere, this card won't duplicate it for you yet.</p></div>
+    </section>
+
+    <section>
+      <h2 id="consults-card">Card 6 — Consults</h2>
+      <p>Counts bookings whose <strong>Category</strong> field is set to exactly "consult" (the built-in category on the booking form), broken down two ways:</p>
+      <ul>
+        <li><strong>By Instrument</strong> — how many consults touched each instrument.</li>
+        <li><strong>By Period</strong> — how many consults happened each calendar month.</li>
+      </ul>
+      <figure class="shot">
+        <img src="../screenshots/55-consults-report.png" alt="The Consults card showing a total, a By Instrument breakdown and a By Period breakdown, each counting bookings tagged Category = consult" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/55-consults-report.png</div>
+        <figcaption>Three views of the same consult count: a total, a By Instrument table, and a By Period table.</figcaption>
+      </figure>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> A consult conversation with no instrument attached still counts toward the total and toward its month in By Period — it just has nothing to attribute an instrument row to. A cancelled consult never happened, per Rule 1, so it doesn't count anywhere on this card.</p></div>
+    </section>
+
+    <section>
+      <h2 id="service-entries-card">Card 7 — Service Entries</h2>
+      <p>Not every billable thing a facility does goes through a booking — technician time spent reprocessing someone's data, sample prep, a per-sample fee. A <strong>service entry</strong> is a standalone charge you log directly, without creating a booking for it, attached to a project (or left facility-wide), with an optional staff member and instrument for reference, a quantity, a unit, and a rate.</p>
+      <ul>
+        <li>Service entries follow the <strong>money rule only</strong>. There's no occupancy rule to apply, because a service entry never had a start or end time — it never held a schedule slot in the first place.</li>
+        <li>A cancelled entry's charge counts unless it was waived, exactly like a cancelled booking (Rule 2).</li>
+        <li>Cancel and reinstate a service entry the same way you'd cancel a booking — the actions column on this card has both.</li>
+      </ul>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This card exists for the billable work that happens around a booking rather than during one. Forcing it into a fake zero-length booking just to bill it would have muddied every hours-based figure elsewhere on this screen with entries that never actually occupied anything.</p></div>
+    </section>
+
+    <section>
+      <h2 id="breadth-card">Card 8 — Breadth</h2>
+      <p>Utilization tells you how busy the equipment is. Breadth asks a different question: <strong>how many different people and labs is the facility actually serving</strong> — and is that base growing?</p>
+      <ul>
+        <li><strong>By Period</strong> — for each calendar month: how many distinct labs booked something, how many distinct people were attendees on a booking, and how many of those labs were booking the facility for the very first time ever (checked against the facility's whole history, the same way Card 5's "New Users" is).</li>
+        <li><strong>By Instrument</strong> — for each instrument: how many distinct labs and how many distinct people used it in the range.</li>
+      </ul>
+      <p>A booking with no lab/group on file is left out of every lab count here, the same way it's left out of the By Lab/Group table on Card 4 — there's nothing to group it under.</p>
+      <div class="callout tip">
+        <p><strong>💡 Per-lab consult attribution is off by default.</strong> A checkbox below the By Period and By Instrument tables, unchecked every time you load the page, adds a third table: how many consults each lab accounted for. It's opt-in rather than a standing column because attributing consults down to an individual lab is a more sensitive thing to track by default than the rest of this card.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="activity-mix-card">Card 9 — Activity mix</h2>
+      <p>Splits the facility's booked hours by <strong>Category</strong> (the same field the Consults card reads), one row per calendar month, one column per category actually in use.</p>
+      <ul>
+        <li>Category names come straight from your data — if your facility adds its own category on the booking form, it appears here automatically, with no setup needed on this screen.</li>
+        <li>A booking left with no category still counts — it lands in an explicit <strong>"(uncategorized)"</strong> column, always shown last, rather than being silently dropped or folded into another category.</li>
+        <li>Standalone service entries (Card 7) are not part of this mix. They're logged in quantity and units, not a start/end time, so there are no hours here to attribute them to.</li>
+      </ul>
+      <figure class="shot">
+        <img src="../screenshots/68-activity-mix.png" alt="The Activity Mix card: a stacked bar chart of hours per month colored by category (assisted session, consult, sync, training), with a matching table beneath" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/68-activity-mix.png</div>
+        <figcaption>Each bar is one month; each colored segment is hours in one category. The legend maps color to category name.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="funnel-card">Card 10 — Funnel: Consult to Output</h2>
+      <p>This card follows facility activity through six stages, from a first conversation to a published result:</p>
+      <ol class="steps">
+        <li><strong>Consult Volume</strong> — bookings tagged Category = "consult" in the range (same count as Card 6's total). Facility-wide consults (not attached to any project) count here, but since they're not tied to a project, they can't feed into any of the later, project-based stages.</li>
+        <li><strong>Project Created</strong> — projects created in the range.</li>
+        <li><strong>Active (First Booking)</strong> — projects (created any time) whose first-ever non-cancelled booking fell in the range. This isn't limited to the projects counted in the stage above it — a project created last year and only just booked for the first time counts here.</li>
+        <li><strong>Milestones Progressing</strong> — a count of milestone edits in the range, not a count of projects. Any change to a milestone counts, not only a status change, so this is "a milestone got touched," not "a milestone finished a review stage." A project with three milestones edited in the period contributes three, not one.</li>
+        <li><strong>Completed</strong> — projects marked Completed or archived, dated by their end date (or their archive date, if archived) when one is on file. A completed project with neither date has nothing to place it in a bounded range, so a narrow date range leaves it out (the card discloses the count when this happens); "All Time" has no boundary to exclude it from.</li>
+        <li><strong>Research Output</strong> — outputs logged on a project's Research Outputs card (publications, acknowledgements, datasets, and the like) in the range.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/67-funnel-chart.png" alt="The Funnel: Consult to Output card, showing six stage bars with counts and conversion percentages, a stage table, and two time-in-stage medians" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/67-funnel-chart.png</div>
+        <figcaption>Six stages, each with a conversion percentage from the stage before it, plus the two time-in-stage medians below the table.</figcaption>
+      </figure>
+      <div class="callout warn"><p><strong>⚠️ Careful — this isn't one population narrowing down.</strong> The six stages count genuinely different kinds of things: consults and outputs are events, milestone changes are edits, the rest are projects. A conversion percentage can land above 100% (more milestone edits than active projects, say) — that's not a mistake, it just means this stage's count isn't a subset of the stage before it the way a sales funnel's would be. Read each stage as its own measure of facility activity over the period, not a shrinking pool of the same projects.</p></div>
+      <p>Below the table, two <strong>time-in-stage medians</strong> are reported — and only these two, by design:</p>
+      <ul>
+        <li><strong>Created → first booking</strong> — how long, typically, between a project's creation and its first real booking. Measured over the projects <em>created</em> inside your date range.</li>
+        <li><strong>First booking → first output</strong> — how long, typically, from a project's first booking to its first logged research output. Measured over the projects whose <em>first booking</em> falls inside your date range. Both medians use each project's true first booking and first output, even when those fall outside the range — the range picks which projects to look at, not which dates count.</li>
+      </ul>
+      <div class="callout why">
+        <p><strong>🔍 Why some projects are left out of the median, but still counted.</strong> A median needs a real, non-negative number of days to average — and for data that was backfilled or imported from somewhere else, a booking can genuinely be logged with a date <em>before</em> the project record itself was created in this app. A project that has no booking at all, or no output at all, simply isn't in that median's sample either — there is no duration to measure. Only the negative ones are called out under the card, because those are the ones that look like data you should worry about. That's not a bug in your data; it's just not a duration this card can average in. Those projects are dropped from the median calculation, but every one of them is still counted, and the count of how many were excluded is printed right next to the median — both on screen and in the exported spreadsheet — so the number is never silently lower than you'd expect with no explanation.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="charts">The charts</h2>
+      <p>Three cards draw a small chart directly above their table: Instrument Utilization (a horizontal bar per instrument, its top 8 by hours), Funnel: Consult to Output (a bar per stage with its conversion percentage), and Activity Mix (a stacked bar per month, one colored segment per category).</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Every chart is drawn from the exact same numbers as the table sitting right below it — there's no separate calculation feeding the picture. If the Instrument Utilization chart shows more of a bar for one instrument, the table beneath it will show a bigger Booked Hours number for that same instrument. When a chart only has room for a handful of bars (Instrument Utilization caps its chart at the top 8), it says so right underneath — the full list is always in the table.</p></div>
+    </section>
+
+    <section>
+      <h2 id="custom-report">Custom Report builder</h2>
+      <p>Every card above is a fixed shape. If you need a different combination of columns, a narrower date range for one figure, or just a spreadsheet without the other nine cards in it, the <strong>Custom Report</strong> button next to Export XLSX opens a builder:</p>
+      <ol class="steps">
+        <li>Pick an <strong>entity</strong> — one of the cards above (Instrument Utilization, Staff Time, Projects &amp; Groups, Consults, Service Entries, Stewardship, Activity Mix, Funnel, or Bookings (Row-Level) — a plain list with one line per booking, cancelled ones included and labeled, rather than totals).</li>
+        <li>Pick a <strong>date range</strong> — it starts out matching whatever the main Reports screen is currently showing, but you can change it here without touching the main screen.</li>
+        <li>Check or uncheck <strong>columns</strong> to build exactly the table you want.</li>
+        <li><strong>Preview</strong> shows the first 50 rows so you can check it looks right; <strong>Export XLSX</strong> downloads every row.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/69-custom-report.png" alt="The Custom Report dialog: an entity list, From/To date fields, a list of checked column checkboxes, and a live preview table" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/69-custom-report.png</div>
+        <figcaption>Instrument utilization selected, every column checked, and the preview table updating live underneath.</figcaption>
+      </figure>
+      <div class="callout warn">
+        <p><strong>⚠️ Careful — some columns are checked and greyed out, and can't be unchecked.</strong> A few of the entities above repeat the same underlying record across more than one row on purpose — for example, Stewardship repeats a shared instrument's whole row under every supervisor it has, and Projects &amp; groups lists a booking once under its project and again under its lab. The column that tells you <em>which</em> repeat you're looking at (Supervisor, Scope, Breakdown, Category, or Stage, depending on the entity) is locked checked for exactly that reason: without it, two rows can look identical, and someone reading the spreadsheet later would have no way to know they're the same booking or instrument counted twice — and would add its hours or revenue up a second time by mistake.</p>
+      </div>
+      <p>The builder remembers the entity and columns you used last time, so it opens the same way next time you need it. It never remembers the date range — that always starts fresh from whatever the main screen is showing.</p>
     </section>
 
     <section>
       <h2 id="retired-archived">Retired people, retired instruments, archived projects</h2>
-      <p>Reports intentionally does <strong>not</strong> hide retired people, retired instruments, or archived projects — they still show up with their real historical hours and charges, labeled the same "(Retired)" way you'd see them anywhere else in the app.</p>
+      <p>Reports intentionally does <strong>not</strong> hide retired people, retired instruments, or archived projects — they still show up with their real historical hours and charges. Retired people and instruments carry a "(Retired)" suffix; an archived project appears under its ordinary name, with nothing marking it as archived — so a project you archived last year sits in the table looking exactly like a live one. That "(Retired)" labelling includes the newer cards: a retired supervisor's name is labeled the same way on the Stewardship card, and a retired instrument still gets its own row on the Breadth card's By Instrument table.</p>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This is the entire point of <a href="big-ideas.html#retire-vs-delete">retiring instead of deleting</a> — a piece of equipment that was retired last month still ran real sessions before that, and a report that quietly dropped its history the moment it was retired would misstate the facility's actual utilization for the period. See <a href="people-labs.html#retire-restore">Retire &amp; restore</a> and <a href="instruments.html#retire-restore">Instruments: Retire &amp; restore</a>.</p></div>
     </section>
 
@@ -131,9 +272,10 @@
       <ol class="steps">
         <li>Set your date range as usual.</li>
         <li>Choose <strong>Export XLSX</strong>.</li>
-        <li>A spreadsheet downloads with the same figures shown on screen for that range.</li>
+        <li>A spreadsheet downloads with one sheet per card — Instrument Utilisation, Facility Staff Time, Staff x Instrument, Projects &amp; Groups, Stewardship, Consults, Service Entries, Breadth, Activity Mix, (only if you've turned it on) Per-Lab Consults, and Funnel last — plus a Notes sheet at the front, spelling out both rules and the footnotes for the cards that carry one: Staff × Instrument, Stewardship, Breadth, Activity Mix, Per-Lab Consults and Funnel.</li>
       </ol>
-      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> The screen and the exported spreadsheet are generated from exactly the same underlying calculations — there isn't a separate export routine that could drift out of sync. Whatever the screen says, the spreadsheet says too, so you can hand the export to someone else with confidence it matches what you saw.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> The screen and the exported spreadsheet are generated from exactly the same underlying calculations — there isn't a separate export routine that could drift out of sync. Whatever the screen says, the spreadsheet says too, so you can hand the export to someone else with confidence it matches what you saw, even without the app open next to it — that's what the Notes sheet is for.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> The Custom Report builder's <strong>Export XLSX</strong> button is separate from this one — it downloads just your one chosen entity and columns, with its own matching Notes sheet, instead of every card at once.</p></div>
     </section>
 
     <section class="quiz">
@@ -149,6 +291,18 @@
       <details class="quiz-q">
         <summary>A booking has no Lab/Group recorded. Where does it show up, and where doesn't it?</summary>
         <p>It shows up in By Project (as itself or under "Facility-wide" if it has no project either) and in the Instrument/Staff cards as usual — but it's omitted from the By Lab/Group table, since there's no lab to group it under.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>An instrument has two supervisors on file. On the Stewardship card, should you add its Hours and Revenue together where it appears under each of them, to get a combined total?</summary>
+        <p>No. It's the same instrument, the same bookings, repeated once per supervisor so each can see it — not two different instruments or two halves of one. Adding the two appearances together would double-count every booking on it.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>A project's first booking is logged with a date before the project's own created date (the data was backfilled from an older system). Does it appear anywhere in the Funnel card?</summary>
+        <p>Yes — it's still counted in every stage it reaches (Project Created, Active, and so on). It's only left out of the "created → first booking" median specifically, because a negative number of days isn't a real duration to average — and the card discloses how many projects were excluded for exactly that reason.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>You're building a Custom Report on the Stewardship entity and try to uncheck the Supervisor column. What happens, and why?</summary>
+        <p>You can't — it's checked and disabled. Stewardship repeats a shared instrument's identical row under every supervisor it has; without the Supervisor column, two of those rows would look like separate instruments, and someone could add their hours or revenue together and double-count the same bookings.</p>
       </details>
     </section>
 

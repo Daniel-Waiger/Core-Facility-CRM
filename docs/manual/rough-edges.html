@@ -21,7 +21,7 @@
   <main class="content">
     <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Appendix A — Rough Edges &amp; Workarounds</span></nav>
     <header class="ch-head">
-      <p class="ch-kicker">Chapter 15 · Appendix A</p>
+      <p class="ch-kicker">Chapter 16 · Appendix A</p>
       <h1>Rough Edges &amp; Workarounds</h1>
       <p class="lede">Every quirk in the app that's worth knowing about ahead of time, in one place — what you'll notice, why it happens, and what to do about it.</p>
     </header>
@@ -46,7 +46,10 @@
         <li id="cross-lab"><strong>Adding someone from a different lab no longer takes a two-step dance.</strong> A "Show all labs" toggle next to Assign People lists everyone at once. See <a href="bookings.html#group-lab-gate">the Group/Lab gate</a>.</li>
         <li id="single-instrument-nag"><strong>The "Single Instrument Booking?" prompt can now be turned off.</strong> A "Don't ask me again" checkbox on the prompt, and a matching Settings toggle to bring it back. See <a href="bookings.html#single-instrument-prompt">the single-instrument prompt</a>.</li>
         <li id="new-lab-lost"><strong>A new lab or department name now sticks right away.</strong> It's saved the moment you type it with "+ Add New," even if you go on to cancel the form. See <a href="people-labs.html#labs-departments">Labs &amp; departments</a>.</li>
-        <li id="lab-typos"><strong>A misspelled lab name is now easy to fix everywhere at once.</strong> The Rename Lab/Group tool renames a lab across every person, its discount row, and past bookings in one step. See <a href="settings-admin.html#rename-lab">Rename a lab or group</a>.</li>
+        <li id="lab-typos"><strong>A misspelled lab name is now easy to fix everywhere at once.</strong> The Rename / Merge Lab tool renames a lab across every person, its discount row, and past bookings in one step. See <a href="settings-admin.html#rename-lab">Rename a lab or group</a>.</li>
+        <li id="reports-no-charts"><strong>Reports now draws charts, not just tables.</strong> The Instrument Utilisation, Funnel, and Activity Mix cards each draw a bar chart alongside their table. See <a href="reports.html">Reports &amp; Utilization</a>.</li>
+        <li id="calendar-one-month"><strong>The calendar isn't limited to one month at a time anymore.</strong> A Week view and a resource Timeline view sit alongside the original month grid, and the "Today" button now jumps the grid straight back to the current day/week — Today's Agenda is its own separate "Agenda" button next to it. See <a href="bookings.html#calendar-views">Month, Week, and Timeline</a>.</li>
+        <li id="conflicts-on-save"><strong>Booking conflicts now show up while you're still filling out the form.</strong> A live, as-you-type advisory checks the same instrument/staff overlap rule used at save time, so you see a clash before you click save, not only after. See <a href="bookings.html#conflicts">Conflicts</a>.</li>
       </ul>
     </section>
 
@@ -88,9 +91,7 @@
     <section>
       <h2 id="other-small-things">Other small things worth knowing</h2>
       <ul>
-        <li><strong>Reports has no charts, and its export is spreadsheet-only:</strong> every card on the Reports screen is a table with numbers, and the export button always produces an XLSX spreadsheet — there's no chart view and no DOCX/PDF option there. See <a href="reports.html">Reports &amp; Utilization</a>.</li>
-        <li><strong>The calendar only shows one month at a time, and "Today" opens a dialog rather than scrolling:</strong> there's no week view, and clicking the Today button opens the Today's Agenda summary instead of jumping the grid to today's date. See <a href="dashboard.html#todays-agenda">Today's Agenda</a>.</li>
-        <li><strong>Booking conflicts are only caught when you save:</strong> the app doesn't warn you about a double-booked instrument or staff member while you're still filling out the form — only when you click save does it check and, if there's a clash, refuse with an error. See <a href="bookings.html#conflicts">Conflicts</a>.</li>
+        <li><strong>Reports' export is still spreadsheet-only:</strong> the charts on screen (see <a href="#reports-no-charts">above</a>) don't change what you get when you export — the Reports screen's export button always produces an XLSX spreadsheet of the underlying tables, with no DOCX/PDF option and no image of the charts themselves. See <a href="reports.html">Reports &amp; Utilization</a>.</li>
       </ul>
     </section>
 

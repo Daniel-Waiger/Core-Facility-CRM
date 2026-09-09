@@ -205,6 +205,33 @@ the eye, and on a dialog meant to prevent an accident that attention belongs to 
 Always pass `confirmText` naming the actual verb ("Delete", "Retire", "Archive") rather than
 leaving the generic "Confirm". Non-destructive confirmations keep neutral Cancel / primary Confirm.
 
+### UI text: Title Case for controls, sentence case for sentences
+
+One rule, so a screen never mixes both styles in the same row of buttons:
+
+- **Title Case** for anything the user acts on or reads as a column heading — buttons, `<th>`
+  cells, form labels, tab and nav items, dialog and card titles, menu items, and select options
+  that name a thing. `Save Booking`, `Assign People`, `Billed Hours`, `Display Grants By`.
+- **Sentence case** for anything that reads as prose — help and hint text, placeholders, toasts,
+  confirmation-dialog bodies, empty states, validation and conflict messages, sentence-shaped
+  tooltips. `This slot is already booked.`, `Nothing here yet — add your first project.`
+- Inside Title Case, keep short joining words lowercase unless they are first or last: *a, an,
+  and, as, at, but, by, for, in, nor, of, on, or, per, the, to, vs, with*. Acronyms stay as they
+  are (PI, XLSX, PDF, DOCX, JSON, PWA, VAT).
+- A confirmation dialog's `confirmText` is a control, so it is Title Case and names the verb
+  ("Delete", "Retire", "Archive") — see the section above.
+
+**The trap:** plenty of user-visible strings are also data. A vocabulary value, a `data-act`
+name, an XLSX sheet name, anything compared with `===` or used as an object key — recapitalising
+one of those changes behaviour, silently, with no error. Before changing any string's case, grep
+the exact text across `js/`: if it appears anywhere but the one place that renders it, leave it
+alone. Category and status values stored in the database are display strings *and* comparison
+targets, so they keep whatever case the data already has.
+
+Prose in `docs/` and `README.md` is written for facility managers, not developers: no CRUD,
+schema, join table, denormalized, boolean, modal (say "dialog"), or foreign key. Explain a rule
+by what it does for the reader.
+
 ### Modal system
 
 `UI.openModal(html, onMount)` injects a `.modal` into a `.modal-dim` overlay; `data-act="close"`

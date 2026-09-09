@@ -21,16 +21,20 @@
   <main class="content">
     <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Settings, Admin Mode &amp; Discounts</span></nav>
     <header class="ch-head">
-      <p class="ch-kicker">Chapter 14</p>
+      <p class="ch-kicker">Chapter 15</p>
       <h1>Settings, Admin Mode &amp; Discounts</h1>
-      <p class="lede">Set your preferences and billing rates, unlock the billing controls with Admin Mode, and give labs their standing discounts.</p>
+      <p class="lede">Set your preferences, decide how tax, overhead, staff time and cancellations are billed — and grants are tracked — unlock the extra billing controls with Admin Mode, and give labs their standing discounts.</p>
     </header>
 
     <section class="learn-box">
       <h2 id="what-youll-learn">What you'll be able to do</h2>
       <ul>
         <li>Find and change the general preferences</li>
-        <li>Set your facility's overhead, tax, and currency — and know when a change takes effect</li>
+        <li>Set your facility's tax and currency — and know when a change takes effect</li>
+        <li>Set up named Pricing Tiers so different kinds of lab pay a different overhead percentage, with optional per-instrument overrides</li>
+        <li>Decide what percent of a facility staff member's rate each booking category actually bills, and which categories require a facility staff member at all</li>
+        <li>Track a funding Grant with a name and number, pick it on projects and bookings, and choose whether the app shows grants by name or by number</li>
+        <li>Set whether a cancelled booking's charge still counts toward Project Costs, separately for a cancellation before and after the booking's start time</li>
         <li>Turn Admin Mode on and off, and understand exactly what it does and doesn't protect</li>
         <li>Set a standing discount percentage for a lab or group</li>
         <li>Rename or merge a lab/group everywhere it appears, in one step</li>
@@ -61,32 +65,132 @@
 
     <section>
       <h2 id="billing-rates">Billing rates</h2>
-      <p>These four numbers control how every booking's cost is calculated across the whole facility.</p>
+      <p>This card used to hold four numbers — Internal Overhead %, External Overhead %, Tax % and Currency. It now holds two: overhead moved to <a href="#pricing-tiers">Pricing Tiers</a> below, where each lab can be given its own named overhead percentage instead of one flat facility-wide pair. Tax and currency still apply the same way to every booking, so they stayed here.</p>
       <ol class="steps">
         <li>Open <strong>Settings</strong> and find <strong>Billing Rates</strong>.</li>
-        <li>Set <strong>Internal Overhead %</strong> — the overhead percentage applied to bookings from your own facility's projects.</li>
-        <li>Set <strong>External Overhead %</strong> — the overhead percentage for outside users.</li>
-        <li>Set <strong>Tax %</strong> — applied on top of the discounted amount plus overhead.</li>
+        <li>Set <strong>Tax %</strong> — applied on top of a booking's after-overhead total.</li>
         <li>Set your <strong>Currency symbol</strong> so totals display the way your facility expects.</li>
       </ol>
 
       <figure class="shot">
-        <img src="../screenshots/28-settings-billing-rates.png" alt="Settings billing rates fields for internal overhead, external overhead, tax, and currency" loading="lazy"
+        <img src="../screenshots/28-settings-billing-rates.png" alt="Settings billing rates fields for tax and currency" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/28-settings-billing-rates.png</div>
-        <figcaption>The Billing Rates section: Internal Overhead %, External Overhead %, Tax %, and Currency symbol.</figcaption>
+        <figcaption>The Billing Rates section: Tax % and Currency symbol.</figcaption>
       </figure>
 
-      <div class="callout math"><p><strong>🧮 The math.</strong> The two overhead percentages aren't combined in a fancy way — they're simply added together. If Internal Overhead is 10% and External Overhead is 5%, a booking that counts as both (which shouldn't normally happen, but if your facility only uses one at a time, only that one applies) would use 15% overhead. In practice you're really choosing one of the two rates per booking's situation, and the app adds whichever applies. See the full worked example in <a href="costs-math.html#overhead">How Costs Are Calculated</a>.</p></div>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A flat Internal/External split assumes every lab fits into exactly one of two buckets, which doesn't hold for a facility that also serves academic collaborators or industry clients at different rates. Naming as many tiers as you actually need — Internal, Academia, Industry, or anything else — replaces that assumption with a real choice per lab. See <a href="#pricing-tiers">Pricing tiers</a> below for how a lab gets one, and what happens if you never set one up.</p></div>
 
-      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Changing a rate here only affects <em>new</em> bookings from that moment on. Every booking that's already been saved keeps the totals it was calculated with when it was created — changing today's tax rate will never quietly rewrite last month's invoices. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> for why, and <a href="costs-math.html#worked-example">the worked example</a> for how the numbers actually combine.</p></div>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Changing tax or currency here only affects <em>new</em> bookings from that moment on. Every booking that's already been saved keeps the total it was calculated with when it was saved — unless you open it and save it again, which reprices it at today's rates — changing today's tax rate will never quietly rewrite last month's invoices. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> for why, and <a href="costs-math.html#worked-example">the worked example</a> for how the numbers actually combine.</p></div>
 
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, note the total cost on one existing booking. Then go change the Tax % in Settings and reopen that same booking. Its total hasn't moved — only a brand-new booking would use the new tax rate.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, note what one existing booking contributes to its project's <strong>Project Costs</strong> card. Change the Tax % in Settings, then look at that card again — the saved total hasn't moved.</p><p>Opening that booking's own edit form is a different thing, and worth knowing about: the live <em>Cost &amp; Time Breakdown</em> panel inside the form always prices at today's rates, so it will show the new tax. Nothing has changed until you press Save — but if you do press Save, that new total is what gets stored.</p></div>
+    </section>
+
+    <section>
+      <h2 id="pricing-tiers">Pricing tiers</h2>
+      <p>A pricing tier is a name — Internal, Academia, Industry, or anything your facility calls its own rate categories — paired with one overhead percentage. Create as many as you need, then give each lab one of them so its bookings are overheaded at that lab's own rate instead of one facility-wide pair.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find <strong>Pricing Tiers</strong>.</li>
+        <li>Click <strong>Add Tier</strong>, give it a name and an overhead percentage, and save.</li>
+        <li>Assign a tier to a lab from the <strong>Group (Lab / Organization) Discounts &amp; Pricing Tiers</strong> editor under <a href="#admin-mode">Admin Mode</a> — see <a href="#group-discounts">Group discounts</a> below. Each lab gets at most one tier.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/60-pricing-tiers.png" alt="Settings Pricing Tiers table listing named tiers with their overhead percentage, assigned groups and billed bookings" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/60-pricing-tiers.png</div>
+        <figcaption>The Pricing Tiers table: name, overhead %, how many labs are assigned it and how many bookings have been billed under it, with edit/retire actions.</figcaption>
+      </figure>
+
+      <div class="callout tip"><p><strong>💡 Tip — two things that matter most.</strong> First: a facility that never creates a tier keeps behaving exactly as before — any lab with no tier assigned keeps pricing at the same overhead sum your facility always used. Second: changing a tier's name or percentage never re-prices a booking already saved under it — each booking keeps the overhead percent it actually got, the same way it keeps its own tax rate and discount. Only a booking saved (or re-saved) after the change uses the new percentage.</p></div>
+
+      <p>An instrument can also have its own rate for one specific tier, overriding its normal cost just for bookings billed under that tier:</p>
+      <ol class="steps">
+        <li>Turn on <strong>Admin Mode</strong> (below) if it isn't already on.</li>
+        <li>Open the instrument's <strong>Edit</strong> screen and find <strong>Per-Tier Rate Overrides</strong>.</li>
+        <li>Type a rate for any tier that should charge differently on this instrument; leave a tier's box blank to keep using the instrument's normal Cost for it.</li>
+      </ol>
+
+      <p>A lab with no tier assigned prices at the overhead your facility used before Pricing Tiers existed — those two old numbers are no longer editable from Billing Rates, so the only way to give a lab its own rate now is to assign it a tier here.</p>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A rename or a percentage change is exactly the kind of edit that must never quietly reach into the past — a facility that renegotiates its Academia rate next year shouldn't discover that every booking that tier ever billed just changed too. Freezing the percent into each booking at save time (see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a>) is what makes an old invoice trustworthy without a screenshot.</p></div>
+
+      <p>Retiring a tier follows the same rule as everywhere else in this app: a tier that's never been assigned to a lab or billed on a booking can be deleted outright; one that has is retired instead — labelled "(Retired)" and no longer offered for new assignments, but every lab and booking that used it keeps reading correctly, and it can be restored at any time.</p>
+    </section>
+
+    <section>
+      <h2 id="category-billing">Category Billing</h2>
+      <p>Every booking has a category — Sync, Consult, Assisted Session, Training, or anything else your facility has added. This card decides, per category, how much of a facility staff member's normal hourly rate that category's bookings actually bill.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find <strong>Category Billing</strong>.</li>
+        <li>For a category, set <strong>Staff %</strong> — 100% bills a staff member's full normal rate; a lower number (even 0%) bills less, or nothing, for that category's staff time.</li>
+        <li>Tick <strong>Requires facility staff</strong> if a booking in that category should refuse to save unless at least one facility staff member is assigned to it.</li>
+        <li>On <strong>Training</strong> only, <strong>Same as assisted session</strong> is <em>already ticked</em> in a fresh database — which is why Training's own percent box starts greyed out. Untick it to give Training a percentage of its own, or leave it ticked to make Training always bill at whatever percentage Assisted Session currently uses, instead of keeping its own separate number.</li>
+        <li>Click <strong>Save Category Billing</strong>.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/63-category-billing.png" alt="Settings Category Billing rows, one per booking category, each with a staff percent field and a requires-staff checkbox" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/63-category-billing.png</div>
+        <figcaption>Category Billing: one row per booking category, with its staff billing percent, whether it requires a facility staff member, and Training's "Same as assisted session" link.</figcaption>
+      </figure>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way — no more duplicate zero-rate people.</strong> Before this existed, the only way to have a facility staff member help on a booking without charging for their time was to add a second copy of that person to the People directory with their rate set to zero, just for that kind of session. That splits one real staff member's history across two records — half their sessions under their real record, half under a fake zero-rate stand-in. Category Billing lets the <em>category</em> decide the percentage instead of the person, so a Consult can bill 0% staff time while the actual staff member who ran it stays properly recorded on that session, and their one record shows their whole history — Consults, Training, everything — in one place.</p></div>
+
+      <p>This only scales facility staff time — instrument charges are governed by <a href="#pricing-tiers">Pricing tiers</a> and Billing Rates and are unaffected by a category's percentage. And like every other rate in this app, a category's percentage only applies the next time a booking is saved; a booking already on the books keeps the percentage it was actually billed at.</p>
+
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Out of the box, every category bills at 100% (unscaled — nothing changes until you touch this card), and Assisted Session and Training both start requiring a facility staff member, matching how those two categories already worked before this card existed.</p></div>
+    </section>
+
+    <section>
+      <h2 id="grants">Grants</h2>
+      <p>A grant records one funding source — a name, an optional grant number, and a free-text note — so it can be picked on a project or on a booking and later reconciled against everything billed to it.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find <strong>Grants</strong>, then click <strong>Add Grant</strong>.</li>
+        <li>Enter a <strong>Grant Name</strong> (required), an optional <strong>Grant Number</strong>, and an optional <strong>Note</strong>.</li>
+        <li>Build the <strong>Allowed Users</strong> list — your record of who is authorised to spend this grant. It shows as a count in the Grants table. Be aware that the app does <em>not</em> enforce it: the grant stays pickable on any project or booking regardless of who is on the list. Treat it as a note to yourself, not a lock.</li>
+        <li>Save. The grant is now selectable from the Grant field on a project and on a booking.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/53-grants-settings.png" alt="Settings Grants table listing grants with their number, note, allowed-user count, and a name/number display setting above it" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/53-grants-settings.png</div>
+        <figcaption>The Grants card: the name/number display setting, and a table of grants with their number, note and allowed-user count.</figcaption>
+      </figure>
+
+      <p>One setting, <strong>Display Grants By</strong> (Name or Number), decides how every grant appears everywhere in the app at once — on a project, on a booking, in Project Costs, and in every exported report. There's no separately stored grant name sitting on a project or a booking that this could leave out of date: switching the setting and saving changes what every one of them shows immediately. If the field you've chosen to display is blank on a particular grant, the other one shows instead, so a grant entered with only a number still displays as something.</p>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A stored grant name on a project or booking would freeze at whatever it said the day it was saved, so switching the display setting later would leave old records showing the wrong choice while new ones showed the new one — the same drift problem <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> is designed to avoid for money. A grant's own name and number aren't billing figures, so nothing is lost by having every display resolve them fresh instead.</p></div>
+
+      <p>Grants are retired, not deleted, following the same rule as people, instruments and pricing tiers: a grant billed against no project, booking, or logged service entry can be deleted outright as a typo with nothing to protect; one that's already billed against real work is retired instead — labelled "(Retired)", no longer offered for new work, but every project and booking that used it keeps reading correctly, and it can be restored at any time.</p>
+
+      <p>Grants also show up in a project's <strong>Project Costs</strong> card and in every exported report (XLSX, DOCX and PDF), so a grant's running total can be checked against the projects and bookings actually billed against it.</p>
+    </section>
+
+    <section>
+      <h2 id="cancellation-billing-rules">Cancellation Billing Rules</h2>
+      <p>When a booking is cancelled, two independent choices decide whether its cost still counts toward a project's <strong>Project Costs</strong> card: one for a cancellation before the booking's scheduled start time, one for after it.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find <strong>Cancellation Billing Rules</strong>.</li>
+        <li>Set <strong>Cancelling Before Start Time</strong> to <strong>Charge Dropped</strong> or <strong>Charge Kept</strong>.</li>
+        <li>Set <strong>Cancelling After Start Time</strong> to <strong>Charge Dropped</strong> or <strong>Charge Kept</strong>.</li>
+        <li>Click <strong>Save Cancellation Rules</strong>.</li>
+      </ol>
+
+      <p>Out of the box, before-start cancellations drop the charge and after-start cancellations keep it — exactly how this app always behaved, so a facility that never opens this card keeps working exactly as before.</p>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A cancellation before the start time means nothing was actually held — no instrument or staff time was ever occupied — so there's normally nothing to bill. One after the start time means the facility had already reserved that time and couldn't offer it to anyone else, which is why the charge stands by default. See <a href="cancelling.html">Cancelling a booking</a> for the full walkthrough of what cancelling does and doesn't touch.</p></div>
+
+      <div class="callout warn"><p><strong>⚠️ Careful — the cancel dialog reads these settings, it doesn't have its own opinion.</strong> Whatever the confirmation message says when someone actually cancels a booking is generated from exactly what's set here — it can never describe a rule the app isn't applying. If you set Before Start Time to "Charge Kept," the dialog for a not-yet-started booking will say so plainly, not the old "charge dropped" wording.</p></div>
+
+      <p>Admin Mode can still step in for one specific after-start cancellation: with Admin Mode on, cancelling a started booking that has a cost offers a three-way choice — keep the booking as scheduled, cancel and waive the charge, or cancel and keep the charge — regardless of what's set here. A before-start cancellation never gets that per-booking override; it always follows the rule above automatically, since nothing was held to begin with.</p>
     </section>
 
     <section>
       <h2 id="admin-mode">Admin Mode</h2>
-      <p>Admin Mode is a single toggle that unlocks the billing-sensitive controls in the app: group discounts, per-booking manual discounts, revoking or applying a discount after the fact, and the option to waive a charge when cancelling a booking that already started.</p>
+      <p>Admin Mode is a single toggle that unlocks the billing-sensitive controls in the app: the Group Discounts and Pricing Tier assignment editor, per-instrument pricing-tier rate overrides, the per-booking manual discount, revoking or applying a discount after the fact, and the option to waive a charge when cancelling a booking that already started. Pricing Tiers, Category Billing, Grants and Cancellation Billing Rules themselves are not behind Admin Mode — anyone can open those cards and change them without turning it on.</p>
       <ol class="steps">
         <li>Open <strong>Settings</strong> and find the <strong>Admin Mode</strong> toggle.</li>
         <li>Turn it on to reveal the Group Discounts editor and the extra billing controls elsewhere in the app.</li>
@@ -100,19 +204,20 @@
 
     <section>
       <h2 id="group-discounts">Group discounts</h2>
-      <p>A group discount is a standing percentage off time-billed instrument costs for every booking made under a particular Lab/Group — set once here, instead of typing a discount into every booking by hand.</p>
+      <p>A group discount is a standing percentage off time-billed instrument costs for every booking made under a particular Lab/Group — set once here, instead of typing a discount into every booking by hand. The same editor also carries each lab's <a href="#pricing-tiers">Pricing Tier</a> assignment, side by side with its discount.</p>
       <ol class="steps">
         <li>Turn on <strong>Admin Mode</strong> (above) if it isn't already on.</li>
         <li>Open <strong>Settings</strong> and find the <strong>Group Discounts</strong> editor.</li>
-        <li>You'll see one row per Lab/Group that has at least one person on record — labs with nobody in them yet don't get a row, since there's nothing to attach a discount to.</li>
+        <li>You'll see one row per Lab/Group that has at least one person on record — labs with nobody in them yet don't get a row, since there's nothing to attach a discount or a tier to.</li>
         <li>Type a percentage into a lab's row to set its standing discount.</li>
+        <li>Pick a <strong>Pricing Tier</strong> from the same row's dropdown to decide that lab's overhead percentage, or leave it on <strong>"No tier (legacy)"</strong> to keep pricing that lab at your facility's old Internal + External overhead sum.</li>
       </ol>
 
       <figure class="shot">
         <img src="../screenshots/29-settings-admin-group-discounts.png" alt="Group Discounts editor listing labs with an editable percentage field for each" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/29-settings-admin-group-discounts.png</div>
-        <figcaption>The Group Discounts editor: one percentage field per lab that already has people on record.</figcaption>
+        <figcaption>The Group Discounts editor: one percentage field per lab that already has people on record, alongside its Pricing Tier picker.</figcaption>
       </figure>
 
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A discount is meaningless attached to a lab nobody belongs to — there'd be no booking that could ever use it. Building the list from labs that actually have people keeps the editor short and relevant instead of an endless list of hypothetical group names. It also means a lab name typo creates its own separate row here too — see <a href="rough-edges.html#lab-typos">Lab name typos create duplicate labs</a>.</p></div>
@@ -140,10 +245,10 @@
 
     <section>
       <h2 id="rename-lab">Rename a lab or group</h2>
-      <p>Because Lab/Group is free text (see <a href="people-labs.html#labs-departments">Labs &amp; departments</a>), the same lab can end up spelled two different ways — "Bio-Photonics Lab" and "BioPhotonics Lab," say. The <strong>Rename Lab/Group</strong> tool fixes that everywhere in one step, instead of editing every person by hand.</p>
+      <p>Because Lab/Group is free text (see <a href="people-labs.html#labs-departments">Labs &amp; departments</a>), the same lab can end up spelled two different ways — "Bio-Photonics Lab" and "BioPhotonics Lab," say. The <strong>Rename / Merge Lab</strong> tool fixes that everywhere in one step, instead of editing every person by hand.</p>
       <ol class="steps">
         <li>Turn on <strong>Admin Mode</strong> if it isn't already on.</li>
-        <li>Open <strong>Settings</strong> and find <strong>Rename Lab/Group</strong> in the Admin Mode area.</li>
+        <li>Open <strong>Settings</strong> and find <strong>Rename / Merge Lab</strong> in the Admin Mode area.</li>
         <li>Pick the existing (old) lab name from the list.</li>
         <li>Type the new name — either a genuinely new spelling, or the name of another lab that already exists, if you're merging two duplicate labs into one.</li>
         <li>Confirm.</li>
@@ -153,10 +258,11 @@
         <li>Every person currently recorded under the old lab name.</li>
         <li>The lab's row in <a href="#group-discounts">Group Discounts</a> — if you renamed into a lab that already had its own discount row, that lab keeps <em>its</em> discount percentage; the old lab's row disappears rather than the two being averaged or added together.</li>
         <li>The Lab/Group label saved on every past booking made under the old name, so old records and reports read consistently under the new name too.</li>
+        <li>The lab's <a href="#pricing-tiers">pricing tier</a> assignment. It moves with the lab — but if you renamed <em>into</em> a lab that already had a tier, that lab's tier wins and the old assignment is gone. Since a tier sets the overhead percentage, this changes what every <em>future</em> booking for the renamed lab costs. Saved bookings keep their own totals.</li>
       </ul>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A lab name is written in three different places at once — on each person, on the discount editor, and stamped onto every past booking — precisely because it's meant to read the same everywhere. A rename that only fixed the people list would leave old bookings and the discount editor still showing the stale spelling, right back where the duplicate-lab problem started.</p></div>
       <div class="callout warn"><p><strong>⚠️ Careful.</strong> Renaming a lab only changes its <em>label</em> — it never recalculates anything. A past booking's total cost stays exactly the frozen number it was saved with (see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a>), even if that booking's Lab/Group label now reads differently and even if you merged it into a lab with a different discount percentage.</p></div>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded and Admin Mode on, open Rename Lab/Group, pick any existing lab, and rename it to a brand-new spelling. Check the People directory, Group Discounts, and one of that lab's past bookings — all three now show the new name, and the booking's total is unchanged.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded and Admin Mode on, open Rename / Merge Lab, pick any existing lab, and rename it to a brand-new spelling. Check the People directory, Group Discounts, and one of that lab's past bookings — all three now show the new name, and the booking's total is unchanged.</p></div>
     </section>
 
     <section>
@@ -173,7 +279,7 @@
       <details class="quiz-q"><summary>A colleague asks if turning on Admin Mode is like logging in as an administrator. Is that accurate?</summary><p>No. Admin Mode is a plain on/off toggle with no password or account behind it — anyone at that browser can turn it on themselves. It only shows or hides billing controls; it isn't security.</p></details>
       <details class="quiz-q"><summary>You set the Bio-Photonics Lab's discount to 10% today. Does a booking from that lab saved last month, when the discount was 5%, change to 10%?</summary><p>No. A booking freezes the discount percentage it was saved with. Only new bookings made after the change pick up the new 10% — unless an admin explicitly revokes or re-applies a discount on that specific old booking.</p></details>
       <details class="quiz-q"><summary>Where would you look to find out which version of the app you're running?</summary><p>Settings → About.</p></details>
-      <details class="quiz-q"><summary>You discover "Confocal Lab" and "Confocal-Lab" are the same group, entered two different ways. What's the fastest fix, and does it touch past booking totals?</summary><p>Use Rename Lab/Group (Admin Mode) to rename one into the other — it updates every person, the discount row, and the label on past bookings in one step. It never recalculates a booking's frozen total.</p></details>
+      <details class="quiz-q"><summary>You discover "Confocal Lab" and "Confocal-Lab" are the same group, entered two different ways. What's the fastest fix, and does it touch past booking totals?</summary><p>Use Rename / Merge Lab (Admin Mode) to rename one into the other — it updates every person, the discount row, and the label on past bookings in one step. It never recalculates a booking's frozen total.</p></details>
     </section>
 
     <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>

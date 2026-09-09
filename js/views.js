@@ -32,14 +32,14 @@
 
     return `
     <div class="grid cols-4 mb-16">
-      <div class="card stat"><span class="n">${total}</span><span class="l">Total projects</span></div>
+      <div class="card stat"><span class="n">${total}</span><span class="l">Total Projects</span></div>
       <div class="card stat"><span class="n" style="color:var(--primary)">${active}</span><span class="l">Active</span></div>
-      <div class="card stat"><span class="n" style="color:var(--danger)">${overdue.length}</span><span class="l">Overdue milestones</span></div>
+      <div class="card stat"><span class="n" style="color:var(--danger)">${overdue.length}</span><span class="l">Overdue Milestones</span></div>
       <div class="card stat"><span class="n" style="color:var(--success)">${counts['Completed'] || 0}</span><span class="l">Completed</span></div>
     </div>
     <div class="grid cols-2">
       <div class="card">
-        <div class="card-title">${ic('target')} Upcoming milestones (Next 30 days)</div>
+        <div class="card-title">${ic('target')} Upcoming Milestones (Next 30 Days)</div>
         <div class="card-body">
           ${upcoming.length ? upcoming.map((m) => `
             <div class="row milestone-quick-row">
@@ -55,7 +55,7 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-title" style="color:var(--danger)">${ic('alert')} Overdue milestones</div>
+        <div class="card-title" style="color:var(--danger)">${ic('alert')} Overdue Milestones</div>
         <div class="card-body">
           ${overdue.length ? overdue.map((m) => `
             <div class="row milestone-quick-row">
@@ -279,7 +279,7 @@
             <span class="badge ${p.priority === 'High' ? 'danger' : p.priority === 'Low' ? 'neutral' : 'warning'}">${esc(p.priority || 'Medium')} Priority</span>
           </div>
           <div class="faint small mt-8" style="display:flex;gap:16px;flex-wrap:wrap">
-            <span><strong>Code:</strong> <span class="mono">${esc(p.code)}</span> <button class="btn btn-ghost btn-xs" data-act="copy" data-copy="${esc(p.code)}" data-copy-label="Project code copied" title="Copy project code">${ic('copy')}</button></span>
+            <span><strong>Code:</strong> <span class="mono">${esc(p.code)}</span> <button class="btn btn-ghost btn-xs" data-act="copy" data-copy="${esc(p.code)}" data-copy-label="Project code copied" title="Copy Project Code">${ic('copy')}</button></span>
             <span><strong>PI:</strong> ${esc(p.pi_name || 'None')}</span>
             <span><strong>Created:</strong> ${fmt(p.created_at)}</span>
             <span><strong>Timeline:</strong> ${fmt(p.start_date)} → ${fmt(p.end_date)}</span>
@@ -308,7 +308,7 @@
               ${st}
             </button>
           `).join('')}
-          <button class="btn btn-sm btn-secondary" data-act="vocab-add" data-cat="STATUS" data-target="" data-label="Status" data-tooltip="Add a custom project status">${ic('plus')} Add status</button>
+          <button class="btn btn-sm btn-secondary" data-act="vocab-add" data-cat="STATUS" data-target="" data-label="Status" data-tooltip="Add a custom project status">${ic('plus')} Add Status</button>
         </div>
       </div>
     </div>
@@ -348,8 +348,8 @@
                 <span class="k">${esc(r.key)}</span>
                 <span class="v">${esc(r.value)}</span>
                 <div class="row" style="gap:4px">
-                  <span class="del" data-act="kv-edit" data-id="${r.id}" title="Edit field">${ic('edit')}</span>
-                  <span class="del" data-act="kv-del" data-id="${r.id}" title="Delete field">${ic('x')}</span>
+                  <span class="del" data-act="kv-edit" data-id="${r.id}" title="Edit Field">${ic('edit')}</span>
+                  <span class="del" data-act="kv-del" data-id="${r.id}" title="Delete Field">${ic('x')}</span>
                 </div>
               </div>`).join('')}
           </div>` : ''}
@@ -370,7 +370,7 @@
                 <div style="font-weight:600">${esc(global.UI.retiredName(r.name, r.is_retired))} <span class="badge neutral" style="font-size:10.5px">${esc(r.type)}</span></div>
                 <div class="faint small">${r.role ? 'Role: ' + esc(r.role) + ' · ' : ''}${esc(r.email || '')}</div>
               </div>
-              <button class="btn btn-ghost btn-sm" data-act="remove-project-person" data-id="${r.id}" title="Remove member">${ic('trash')}</button>
+              <button class="btn btn-ghost btn-sm" data-act="remove-project-person" data-id="${r.id}" title="Remove Member">${ic('trash')}</button>
             </div>`).join('') : emptyState('users', 'No team members', 'Add collaborators, PIs, or technicians to this project.')}
         </div>
       </div>
@@ -391,8 +391,8 @@
               <span class="k"><span class="badge neutral" style="text-transform:capitalize">${esc(o.type)}</span> ${esc(o.title)}</span>
               <span class="v">${o.reference ? esc(o.reference) + ' — ' : ''}${o.date ? fmt(o.date) : fmt(o.created_at)}</span>
               <div class="row" style="gap:4px">
-                <span class="del" role="button" tabindex="0" aria-label="Edit output" data-act="output-edit" data-id="${o.id}" title="Edit output">${ic('edit')}</span>
-                <span class="del" role="button" tabindex="0" aria-label="Delete output" data-act="output-del" data-id="${o.id}" title="Delete output">${ic('x')}</span>
+                <span class="del" role="button" tabindex="0" aria-label="Edit Output" data-act="output-edit" data-id="${o.id}" title="Edit Output">${ic('edit')}</span>
+                <span class="del" role="button" tabindex="0" aria-label="Delete Output" data-act="output-del" data-id="${o.id}" title="Delete Output">${ic('x')}</span>
               </div>
             </div>`).join('')}
         </div>` : emptyState('tag', 'No research outputs yet', 'Log a publication, acknowledgement, dataset, or other output once this project produces one.')}
@@ -413,7 +413,7 @@
               <div class="row">
                 <span class="font-medium grow">${esc(global.UI.retiredName(i.name, i.is_retired))}</span>
                 <span class="badge neutral">${esc(i.status)}</span>
-                <button class="btn btn-ghost btn-sm" data-act="remove-project-instrument" data-id="${i.instrument_id}" title="Remove instrument">${ic('trash')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="remove-project-instrument" data-id="${i.instrument_id}" title="Remove Instrument">${ic('trash')}</button>
               </div>
               <div class="faint small mt-8">${esc(i.kind || 'Facility Instrument')}</div>
             </div>`).join('')}
@@ -495,10 +495,10 @@
                   <td class="mono small" style="text-align:right">${esc(costCur)}${(e.rate || 0).toFixed(2)}</td>
                   <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(costCur)}${(e.total_cost || 0).toFixed(2)}</span>` : esc(costCur) + (e.total_cost || 0).toFixed(2)}</td>
                   <td style="text-align:right">
-                    <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${e.id}" title="Edit entry">${ic('edit')}</button>
+                    <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${e.id}" title="Edit Entry">${ic('edit')}</button>
                     ${e.is_cancelled
                       ? `<button class="btn btn-ghost btn-xs" data-act="se-reinstate" data-id="${e.id}" title="Reinstate">${ic('rocket')}</button>`
-                      : `<button class="btn btn-ghost btn-xs" data-act="se-cancel" data-id="${e.id}" title="Cancel entry">${ic('archive')}</button>`}
+                      : `<button class="btn btn-ghost btn-xs" data-act="se-cancel" data-id="${e.id}" title="Cancel Entry">${ic('archive')}</button>`}
                   </td>
                 </tr>`; }).join('')}
             </tbody>
@@ -527,7 +527,7 @@
               ${box}
               <div class="grow faint small">${meta} · ${fmt(f.created_at)}</div>
               ${f.kind === 'upload' ? `<button class="btn btn-secondary btn-sm" data-act="download-file" data-id="${f.id}" data-name="${esc(f.name)}">Download</button>` : ''}
-              <button class="btn btn-ghost btn-sm" data-act="file-del" data-id="${f.id}" title="Delete file">${ic('trash')}</button>
+              <button class="btn btn-ghost btn-sm" data-act="file-del" data-id="${f.id}" title="Delete File">${ic('trash')}</button>
             </div>`;
           }).join('') : emptyState('file', 'No files linked', 'Attach data files, scripts, or external links.')}
         </div>
@@ -545,8 +545,8 @@
               <div class="row">
                 <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
-                <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email attendees">${ic('mail')}</button>
-                <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit meeting">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email Attendees">${ic('mail')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit Meeting">${ic('edit')}</button>
                 ${m.is_cancelled
                   ? `<button class="btn btn-ghost btn-sm" data-act="booking-reinstate" data-id="${m.id}" title="Reinstate — puts it back in the schedule">${ic('rocket')}</button>`
                   : `<button class="btn btn-ghost btn-sm" data-act="meeting-cancel" data-id="${m.id}" title="Cancel — keeps the record, frees the slot">${ic('archive')}</button>`}
@@ -577,8 +577,8 @@
           <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable"
                 data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
           ${isOverdue ? '<span class="badge danger">overdue</span>' : ''}
-          <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}" title="Edit milestone">${ic('edit')}</button>
-          <button class="btn btn-ghost btn-sm" data-act="ms-del" data-id="${m.id}" title="Delete milestone">${ic('trash')}</button>
+          <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}" title="Edit Milestone">${ic('edit')}</button>
+          <button class="btn btn-ghost btn-sm" data-act="ms-del" data-id="${m.id}" title="Delete Milestone">${ic('trash')}</button>
         </div>
         <div class="meta mt-8">
           <span class="mono">${fmt(m.due_date)}</span>
@@ -1436,7 +1436,7 @@
         <div class="faint small mb-8">Grants are picked on bookings and projects for billing reconciliation. There is no stored grant name on those records — every display resolves fresh through the setting below, so a rename never leaves a stale string behind.</div>
         <div class="row mb-16" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
           <div class="field" style="margin:0;max-width:220px">
-            <label>Display grants by</label>
+            <label>Display Grants By</label>
             <select class="input" id="cfg-grant-display">
               <option value="name" ${grantDisplay === 'number' ? '' : 'selected'}>Name</option>
               <option value="number" ${grantDisplay === 'number' ? 'selected' : ''}>Number</option>
@@ -1476,15 +1476,15 @@
           <div class="field">
             <label>Cancelling Before Start Time</label>
             <select class="input" id="cfg-cancel-before-charge">
-              <option value="0" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? '' : 'selected'}>Charge dropped</option>
-              <option value="1" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? 'selected' : ''}>Charge kept</option>
+              <option value="0" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? '' : 'selected'}>Charge Dropped</option>
+              <option value="1" ${global.DB.getConfigNum('cancel_before_start_charge', 0) === 1 ? 'selected' : ''}>Charge Kept</option>
             </select>
           </div>
           <div class="field">
             <label>Cancelling After Start Time</label>
             <select class="input" id="cfg-cancel-after-charge">
-              <option value="0" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? '' : 'selected'}>Charge dropped</option>
-              <option value="1" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? 'selected' : ''}>Charge kept</option>
+              <option value="0" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? '' : 'selected'}>Charge Dropped</option>
+              <option value="1" ${global.DB.getConfigNum('cancel_after_start_charge', 1) === 1 ? 'selected' : ''}>Charge Kept</option>
             </select>
           </div>
         </div>
@@ -1529,13 +1529,13 @@
         ${renameOrgs.length ? `
         <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
           <div class="field" style="margin:0">
-            <label>Existing name</label>
+            <label>Existing Name</label>
             <select class="input" id="rename-org-from" style="min-width:200px">
               ${renameOrgs.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}
             </select>
           </div>
           <div class="field" style="margin:0">
-            <label>New name</label>
+            <label>New Name</label>
             <input class="input" id="rename-org-to" placeholder="e.g. Bio-Photonics Lab" style="min-width:200px" />
           </div>
           <button class="btn btn-primary btn-sm" data-act="rename-org">${ic('edit')} Rename</button>

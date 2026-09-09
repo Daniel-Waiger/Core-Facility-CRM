@@ -13,25 +13,34 @@ Track research projects from initiation to completion with full lifecycle tracki
 ## Key Features
 
 - **Zero-Install & Zero-Server:** Runs on PC, Mac, Linux, Android, and iPad in modern web browsers (Chrome, Edge, Firefox, Safari). No Node.js, Python, or account required. On desktop you can open `index.html` directly; **on tablets you need to open it from a web address for saving to work** — see [Running on Tablets](#running-on-tablets-android--ipad).
-- **Installable (PWA):** When served over `https`, it can be added to your home screen and works offline like a native app.
-- **Embedded SQLite Database:** Uses `sql.js` (asm.js single-file build) backed by browser `IndexedDB` storage with automatic debounced autosave.
+- **Installable:** Served over `https`, it can be added to your home screen and opens like any other app — including offline, with no connection. (This is what a "progressive web app", or PWA, means.)
+- **A Real Database, Inside the Browser:** Your data lives in a genuine SQLite database that runs in the browser itself (`sql.js`) and is saved into the browser's own storage as you work — no server holds it, and nothing is uploaded anywhere.
 - **Welcome & Onboarding Experience:**
   - **Seeded Example & Walkthrough:** Load a realistic bioimaging facility dataset (Multiphoton, STED, Lightsheet, etc.) with an interactive step-by-step tour.
-  - **Start Fresh (Empty Workspace):** One-click initialization of a clean, empty database ready for direct entry.
-- **Full CRUD Capabilities:**
+  - **Start Fresh (Empty Workspace):** One click sets up a clean, empty database, ready for your own records.
+- **Everything You Track (add it, find it, change it):**
   - **Projects:** Title, unique project code generation (`PRJ-YYMM-###`), status lifecycle (`Initiated` → `Active` → `On-hold` → `Completed` → `Archived`), priority, funding sources, modality/techniques, sample types, risk flags, timelines, tags, and notes. Includes inline researcher/PI registration.
-  - **Milestones:** Deliverables with due dates, notes, assigned staff/collaborators, assigned instruments, and single-click status cycling (`pending` → `in-progress` → `done`). Overall project progress is automatically derived.
+  - **Milestones:** Deliverables with due dates, notes, assigned staff and collaborators, assigned instruments, and a status you advance with one click (`pending` → `in-progress` → `done`). The project's overall progress is worked out from them.
   - **Team & Lab Registry:** Principal Investigators, lab members, postdoctoral fellows, students, and core technicians with Lab/Group/Company affiliations.
   - **Core Instruments:** Microscopes, cytometers, workstations, and equipment tracking with operational status (`Available`, `In-use`, `Maintenance`, `Down`).
-  - **Meetings & Consultations:** Consultation notes, known attendee tagging with lab affiliations, inline attendee registration, discussion summaries, and next step action items.
-  - **Custom Metadata (KV):** Extensible project attributes (e.g. grant numbers, ethics protocol IDs, billing codes).
+  - **Meetings, Bookings & Consultations:** Consultation notes, known attendee tagging with lab affiliations, inline attendee registration, discussion summaries, and next step action items. Each entry can carry a **Category** (sync, consult, training, assisted session — extensible), which is what lets the reports count consults and split facility hours by activity; it is optional: untagged entries get an explicit "(uncategorized)" slice in the activity mix, and simply aren't consults, so they never enter the consult counts.
+  - **Research Outputs:** Publications, acknowledgements, datasets and other outputs logged against a project — the far end of the consult-to-output funnel, and their own sheet in the exports.
+  - **Custom Fields:** Add your own named fields to a project for whatever this facility needs to record — ethics protocol IDs, internal billing codes, a laser wavelength.
   - **Attachments & Links:** Local file storage (embedded safely in IndexedDB) and network/cloud link management.
-- **Interactive Derived Calendar:** 7-day monthly schedule grid showing upcoming milestone deadlines and consultation meetings with direct navigation and "Today" quick view.
+- **Calendar — Month, Week and Timeline:** A month grid of milestone deadlines and bookings, an hourly **Week** grid (with an all-day lane for milestones and untimed bookings), and a per-instrument **Timeline** with one lane per instrument across the week. Month and Week share one query and one event-chip renderer, so they can't caption the same day differently; Timeline is per-instrument by nature, so its lanes show only bookings that have an instrument attached, and no milestones. Clicking an empty **hour slot** in Week or Timeline starts a booking pre-filled with that date and hour — plus, in Timeline, that lane's instrument (skipped for a retired instrument, which still shows its history but takes no new work); clicking a month cell or an all-day lane pre-fills the date only.
+- **Scheduling With Guardrails:** Bookings are conflict-checked **as you type** and hard-blocked at save by the very same rule set, so the advisory can never drift from the gate. Each instrument can carry an optional minimum/maximum session duration, a minimum gap between bookings, and a minimum advance notice (0 = unconstrained). **Recurring bookings** repeat every N weeks until a date (capped at 52 occurrences), with every occurrence conflict-checked up front so the save is all-or-nothing — the as-you-type advisory only reads the first one. A cancelled booking releases its slot; reinstating one re-checks that slot for conflicts before it starts holding it again, waiving only the advance-notice rule, which a slot booked long ago can no longer satisfy.
 - **Collapsible Navigation & Adaptive Theme:** Compact icon-only sidebar mode and smart next-theme switcher (`🌙 Dark Mode` / `☀️ Light Mode`).
 - **Search & Live Filtering:** Search by project title, code, PI name, modality, funding, sample type, or tags.
-- **Reports & Utilization:** A date-ranged reporting screen answering the questions a facility actually gets asked: how many hours each instrument was booked for, how much facility-staff time went into each instrument, and what each project and lab consumed. Booked hours exclude cancelled bookings (a cancellation releases the slot, so the instrument was never occupied), while revenue follows the same rule as Project Costs — a cancelled booking's charge counts only if it was retained. Staff time is reported both as hours actually worked and as hours billed, since billing rounds up to whole hours. Exportable to XLSX.
+- **Billing, Rates, Grants & Service Entries:**
+  - **Pricing tiers:** named overhead tiers (e.g. Internal / Academia / Industry) assigned per lab/group, with optional per-instrument rate overrides. The tier and percent resolved at save are **snapshotted onto the booking**, so a later rate change never silently reprices past work.
+  - **Per-category staff billing:** each booking category sets what percent of a Facility Staff member's normal rate it bills — a consult can bill **0%** while the staff member stays properly assigned to the session — and whether that category requires a staff assignee before it can be saved.
+  - **Grants:** name, number, note and an allowed-users list; pickable on projects and bookings, shown by name *or* by number facility-wide via one Settings toggle, and carried into Project Costs and the project and facility-wide exports for reconciliation (on the Reports workbook it rides along on the Service Entries sheet).
+  - **Standalone service entries:** technician time, sample prep or per-unit items billed outside any booking (quantity × rate into a frozen cost snapshot), counted into Project Costs, the reports and the exports alongside bookings.
+  - **Configurable cancellation rules:** whether a before-start or an after-start cancellation's charge still counts toward Project Costs is a per-facility setting, defaulting to the app's original behaviour (before = dropped, after = kept).
+- **Reports & Utilization:** A date-ranged reporting screen answering the questions a facility actually gets asked — instrument hours and revenue, facility-staff time per instrument, spend per project and per lab, consults per instrument and month, standalone service entries, an **instrument stewardship scorecard** grouped by supervising staff (bookings, hours, revenue, distinct and new users, projects served, facility-wide sessions, consults), **breadth** (how many labs and people you serve, and how many are new, with per-lab consult attribution behind an off-by-default toggle) and an **activity mix** splitting facility hours by whichever categories are tagged on bookings, plus a **consult-to-output funnel** with a conversion rate at every stage and two medians — time from project created to first booking, and from first booking to first research output. Two rules hold everywhere: booked hours exclude cancelled bookings (a cancellation releases the slot, so the instrument was never occupied), and money follows the Project Costs rule — a cancelled booking's charge counts only if it was retained. Staff time is reported both as hours actually worked and as hours billed, since billing rounds up to whole hours.
+- **Charts, and a Custom Report Generator:** Utilization, funnel and activity-mix cards each carry an inline SVG chart (hand-drawn, no chart library, themed light/dark) that reads the exact same numbers as the table beneath it. A **Custom Report** builder lets you pick an entity, the columns you want and a date range, preview it live, and export precisely that — driven from the same aggregation code as the screen, so a figure you exported and a figure you read off a card can never disagree. (One entity, the row-level Bookings listing, exists only inside the custom builder — it has no card of its own.)
 - **Multi-Format Report Export:**
-  - **XLSX:** Comprehensive multi-sheet workbook (Overview, Milestones, Team, Instruments, Meetings, Files) via SheetJS.
+  - **XLSX:** Three workbooks, all via SheetJS. Per project: Overview, Milestones, Team, Instruments, Meetings, Service Entries, Files, Research Outputs. Facility-wide ("Export All", and the copy the silent auto-backup drops beside the JSON): Projects, Milestones, People, Instruments, Meetings, Bookings & Costs, Service Entries, Research Outputs. The Reports screen has its own workbook — a **Notes** sheet first, carrying each table's caveats, then utilization, staff time, staff × instrument, projects & groups, stewardship, consults, service entries, breadth, activity mix and funnel, plus a Per-Lab Consults sheet when that opt-in toggle is on.
   - **DOCX:** Formatted Word document summary via `docx`.
   - **PDF:** Multi-page paginated report with headers, footers, and page numbers via `jsPDF`.
 - **Single-File Backup & Recovery:** Export your entire facility database (including attached files) into a self-contained `.json` backup file and restore it on any machine anytime. An automatic backup also runs roughly once every 24 hours while the app is open (toggleable in Settings), so you're never relying solely on browser storage — in Chrome/Edge, point it at the app's folder once and it writes silently into a `backups/` subfolder there with no download prompts; otherwise it falls back to a normal file download.
@@ -110,7 +119,7 @@ A selection follows.
 
 <img src="docs/screenshots/13-calendar.png" width="720" alt="Derived monthly calendar">
 
-*Figure 13 — Interactive derived calendar combining milestone deadlines and scheduled consultations.*
+*Figure 13 — The calendar's month view, combining milestone deadlines and scheduled bookings. A Week (hourly grid) and a per-instrument Timeline view sit behind the same Month/Week/Timeline toggle.*
 
 **Settings & data portability**
 
@@ -152,7 +161,7 @@ A selection follows.
 
 <img src="docs/screenshots/37-cancel-booking-admin.png" width="520" alt="Three-way cancellation dialog offering Keep Booking, Cancel and Waive Charge, or Cancel and Keep Charge">
 
-*Figure 22 — Bookings are cancelled, not deleted: the session stays logged with its line items and its instrument slot is freed for someone else. Whether the charge still counts toward Project Costs follows from when it was cancelled — dropped if it never started, kept if the slot was held. For a late cancellation, Admin Mode offers this three-way choice to waive it instead.*
+*Figure 22 — Bookings are cancelled, not deleted: the session stays logged with its line items and its instrument slot is freed for someone else. Whether the charge still counts toward Project Costs follows from when it was cancelled — by default dropped if it never started and kept if the slot was held, and each facility can set those two cases independently in Settings. For a late cancellation, Admin Mode offers this three-way choice to waive it instead.*
 
 <img src="docs/screenshots/47-booking-cancelled-costs.png" width="720" alt="Project Costs card showing a cancelled booking badged as charged and still counted in the running total">
 
@@ -208,7 +217,8 @@ Core-Facility-CRM/
 │   ├── db.js             # sql.js engine, schema, IndexedDB persistence, sample dataset & clear
 │   ├── ui.js             # Toasts, modals, theme switcher, icons, interactive tour engine
 │   ├── views.js          # Screen renderers (Dashboard, Projects, Detail, People, Instruments, Calendar, Settings)
-│   ├── reports.js        # Reports & Utilization screen (instrument hours, facility-staff time, project/group spend)
+│   ├── reports.js        # Reports & Utilization (utilization, staff time, project/lab spend, consults,
+│   │                     #   service entries, stewardship, breadth, activity mix, funnel, charts, custom reports)
 │   ├── exports.js        # Multi-page PDF, DOCX, and XLSX export engines
 │   └── app.js            # Routing, startup welcome modal, action dispatcher, CRUD modal logic
 ├── libs/
@@ -266,7 +276,7 @@ Browsers only allow permanent saving (IndexedDB) in a "secure context" — an `h
 
 ### If you open it as a file anyway
 
-The app still opens, but you'll get a **"Storage unavailable"** screen explaining the situation, with a **"Continue anyway (temporary session)"** option. In that mode a warning banner stays visible and **nothing is saved when you close the tab** — use **Settings → Export Backup** before closing if you want to keep anything.
+The app still opens, but you'll get a **"Storage unavailable"** screen explaining the situation, with a **"Continue Anyway (Temporary Session)"** option. In that mode a warning banner stays visible and **nothing is saved when you close the tab** — use **Settings → Export Backup** before closing if you want to keep anything.
 
 ---
 
