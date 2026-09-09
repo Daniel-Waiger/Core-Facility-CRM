@@ -1,0 +1,99 @@
+name: Bug report
+description: Something behaves differently than you expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sorry it broke. Two boxes below are required, the rest only if you know them.
+
+        **Please do not attach your backup file or a screenshot of your real records.** A backup
+        holds real names, email addresses and billing figures for everyone in your facility, and
+        an issue here is public. If a specific record is involved, describe it in words, or blur
+        the names first.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect instead?
+      placeholder: >
+        I cancelled a booking that had already started and expected the charge to be dropped,
+        but it still shows in Project Costs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you click, in order?
+      description: Rough steps are fine. Even three lines helps a lot.
+      placeholder: |
+        1. Opened the Calendar and clicked a booking from last week
+        2. Pressed Cancel Booking and chose Cancel and Waive Charge
+        3. Went to the project and looked at Project Costs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: screen
+    attributes:
+      label: Which part of the app?
+      options:
+        - Not sure
+        - Dashboard
+        - Projects
+        - Milestones
+        - Calendar and bookings
+        - People and labs
+        - Instruments
+        - Service entries
+        - Reports and utilization
+        - Settings, billing, grants
+        - Exports (XLSX, DOCX, PDF)
+        - Backups and restore
+        - Something else
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings shows it at the bottom, next to "Version".
+      placeholder: "1.9.1"
+    validations:
+      required: false
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      placeholder: Chrome on Windows, or Safari on an iPad
+    validations:
+      required: false
+
+  - type: dropdown
+    id: opened-how
+    attributes:
+      label: How do you open the app?
+      description: >
+        This one matters more than it looks. Opening the file directly stops some browsers from
+        saving your data, especially on tablets.
+      options:
+        - From a web address (hosted, or a local server)
+        - By double-clicking index.html on my computer
+        - Installed to my home screen or desktop
+        - Not sure
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Have you tried these?
+      description: Not required. It just saves us both a round of questions.
+      options:
+        - label: A hard refresh (Ctrl+Shift+R, or Cmd+Shift+R on a Mac), in case an old version was cached
+          required: false
+        - label: I have a recent backup, so my data is safe either way
+          required: false
