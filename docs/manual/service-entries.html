@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service Entries — Core Facility Tracker Manual</title>
+<link rel="stylesheet" href="manual.css?v=2">
+<script id="theme-fouc-guard">
+  (function () {
+    try {
+      var t = localStorage.getItem('theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+</head>
+<body data-chapter="service-entries.html">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="content">
+    <nav class="breadcrumbs"><a href="index.html">Manual</a> <span>›</span> <span>Service Entries</span></nav>
+    <header class="ch-head">
+      <p class="ch-kicker">Chapter 11</p>
+      <h1>Service Entries</h1>
+      <p class="lede">Billable work that never touched a microscope — technician time, sample prep, a per-unit charge — logged and costed without opening a booking.</p>
+    </header>
+
+    <section class="learn-box">
+      <h2 id="what-youll-learn">What you'll be able to do</h2>
+      <ul>
+        <li>Recognize the kind of work that belongs in a service entry instead of a booking.</li>
+        <li>Fill in every field a service entry can carry, and know which ones are optional.</li>
+        <li>Work out an entry's charge by hand — it's simpler than a booking's.</li>
+        <li>Explain why a blank date is quietly filled in with today's date, and why that matters.</li>
+        <li>Cancel a service entry the right way, and answer the one question that decides whether its charge still counts.</li>
+        <li>Find a service entry again afterwards — on a project, in Reports, and in every export.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2 id="what-is-a-service-entry">What a service entry is, and when to use one</h2>
+      <p>Every other charge in this app comes from a booking — an instrument reserved for a block of time. A <strong>service entry</strong> is different: it's a standalone billable line with no start time, no end time, and no instrument session behind it at all. Use one whenever the facility is charging for work that a booking's start/end time doesn't fit —</p>
+      <ul>
+        <li>A technician's time spent on something that wasn't tied to a specific instrument slot.</li>
+        <li>Sample preparation done ahead of, or instead of, a session.</li>
+        <li>A per-unit charge — so many samples, so many plates, a flat consulting fee — that bills by count rather than by the hour.</li>
+      </ul>
+      <p>You can log a service entry from a project's <strong>Project Costs</strong> card (it prefills that project) or from the <strong>Reports &amp; Utilization</strong> screen (it starts facility-wide, with no project attached, until you pick one).</p>
+      <figure class="shot">
+        <img src="../screenshots/61-service-entries.png" alt="The New Service Entry form, with Description, Date, Performing Staff, Project, Grant, Instrument, Quantity, Unit, Rate and the live Total" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/61-service-entries.png</div>
+        <figcaption>The New Service Entry form — everything on it is optional except Description.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2 id="what-you-can-attach">What you can attach to it</h2>
+      <p>A service entry has one required field and seven optional ones:</p>
+      <ol class="steps">
+        <li><strong>Description</strong> (required) — a plain sentence saying what the charge was for, e.g. "Retroactive image analysis support."</li>
+        <li><strong>Date</strong> — when the work happened. Leave it blank and the app fills in today's date for you (see <a href="#the-date-rule">below</a> for why that's more than a convenience).</li>
+        <li><strong>Performing Staff</strong> — which facility staff member did the work. Only current Facility Staff show up in this list (the same <a href="people-labs.html#facility-staff-flag">Facility Staff flag</a> a booking's staff picker uses) — unless the entry was already assigned to someone who has since retired, in which case their name stays in the list, marked "(Retired)", so the entry keeps making sense.</li>
+        <li><strong>Project</strong> — which project the charge belongs to. Leave it blank and the entry is <strong>facility-wide</strong> — it costs nothing against any one project, but still counts everywhere the facility totals up its own revenue.</li>
+        <li><strong>Grant</strong> — which grant to bill it against, if any.</li>
+        <li><strong>Instrument</strong> — an instrument this work relates to, if any (e.g. sample prep for a specific microscope). Purely informational here — an entry's instrument doesn't feed into the charge the way a booking's does.</li>
+        <li><strong>Quantity</strong>, <strong>Unit</strong> (hour, sample, unit, day, or other) and <strong>Rate</strong> — see the next section for how these become the charge.</li>
+      </ol>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Pick a Performing Staff member and the Rate field fills itself in with that person's own rate automatically. You can still type over it if this particular job should bill differently.</p></div>
+    </section>
+
+    <section>
+      <h2 id="the-math">How the charge is worked out</h2>
+      <p>A service entry's math is deliberately the simplest number in the whole app:</p>
+      <div class="callout math"><p><strong>🧮 The math.</strong> Total = Quantity × Rate. Log 3 samples at 40/sample and the total is 3 × 40 = <strong>120</strong> — that's the whole calculation.</p></div>
+      <p>Nothing else on this page touches it. There's no discount, no overhead, and no tax step the way a booking works through in <a href="costs-math.html">How Costs Are Calculated</a> — the number you type is the number that counts.</p>
+      <p>Once you save the entry, that total is the price it was saved with. If you later change the facility's rates in Settings, or edit the person's own rate, an already-saved entry doesn't move — exactly like a booking's total, it stays exactly what it was when you saved it. Editing the entry itself and changing its Quantity or Rate is the only way to change what it charges, and even then only going forward from that edit.</p>
+    </section>
+
+    <section>
+      <h2 id="the-date-rule">A blank date becomes today — on purpose</h2>
+      <p>If you save a service entry without picking a date, the app doesn't leave the date empty — it quietly fills in today's date for you, both when you first create the entry and if you ever clear the date while editing one.</p>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Reports &amp; Utilization, its exports, and every other date-ranged view in this app work by asking "does this row's date fall inside the range I picked?" A row with no date at all can't answer that question, so it would simply vanish from every such view — not shown as facility-wide or undated, just silently absent from a report someone is trusting to be complete. Defaulting to today keeps every entry inside the range that includes the day it was actually logged.</p></div>
+    </section>
+
+    <section>
+      <h2 id="cancelling-a-service-entry">Cancelling, not deleting</h2>
+      <p>There's no delete button for a service entry. Once one exists, the only way to take it off the books is to <strong>cancel</strong> it — the same idea as <a href="cancelling.html">cancelling a booking</a>: the entry stays on the record, but you decide whether its charge still counts.</p>
+      <ol class="steps">
+        <li>Open the entry (from a project's Costs card or the Reports screen) and choose <strong>Cancel Entry</strong>.</li>
+        <li>If the entry has a charge above zero, you're asked directly: <strong>Keep Entry</strong> (don't cancel after all), <strong>Cancel &amp; Waive Charge</strong>, or <strong>Cancel &amp; Keep Charge</strong>.</li>
+        <li>If the entry's total is already zero, there's nothing to reconcile — a plain Cancel/Keep confirmation is all you get.</li>
+      </ol>
+      <p>A cancelled entry shows a <strong>"Cancelled"</strong> badge (charge dropped) or a <strong>"Cancelled · charged"</strong> badge (charge stands), the same two badges a cancelled booking uses on the Project Costs card. <strong>Reinstate</strong> undoes it, restoring the entry to active with no charge decision to make again.</p>
+      <div class="callout warn"><p><strong>⚠️ Careful — this is unlike a booking.</strong> A booking's charge-keeps-standing rule turns on whether its start time has already passed, and without <a href="settings-admin.html#admin-mode">Admin Mode</a> on, a started booking's charge can't be waived at all. A service entry has no start time to check and no Admin Mode gate — the waive-or-keep choice is offered plainly, every time, to whoever cancels it.</p></div>
+    </section>
+
+    <section>
+      <h2 id="where-they-show-up">Where a service entry shows up afterwards</h2>
+      <ul>
+        <li><strong>Project Costs.</strong> If the entry has a project, it appears as its own row on that project's Costs card, right alongside the project's bookings, and its total folds into the same running total at the top of the card.</li>
+        <li><strong>Reports &amp; Utilization.</strong> The Reports screen's own Service Entries card lists every entry inside the date range you're viewing (facility-wide entries included), with the same running total.</li>
+        <li><strong>Exports.</strong> A project's XLSX, DOCX and PDF export each include its service entries alongside its bookings. The facility-wide Reports export carries its own "Service Entries" sheet covering every entry, project-attached or not.</li>
+      </ul>
+      <p>Everywhere a service entry's cost is totaled, the counting rule is identical to a booking's: the charge counts unless the entry is <em>both</em> cancelled <em>and</em> its charge was waived. A cancelled-but-charged entry still counts toward every one of those totals.</p>
+    </section>
+
+    <section>
+      <h2 id="history-not-deletion">Why a person or instrument used on an entry can't just be deleted</h2>
+      <p>Once a service entry names a Performing Staff member or an instrument, that record carries real history — proof of who did billable work, or what the work related to. So a person or instrument used on even one service entry can no longer be deleted outright; the app offers to <strong>retire</strong> it instead, the same rule described in <a href="people-labs.html#retire-restore">Retire &amp; restore</a> and <a href="instruments.html#retire-restore">Instruments</a>. Retiring never touches the entry itself — it keeps showing that person's or instrument's real name, marked "(Retired)", exactly as it was recorded.</p>
+    </section>
+
+    <section class="quiz">
+      <h2 id="check-yourself">Check yourself</h2>
+      <details class="quiz-q">
+        <summary>You log a service entry for 5 samples at 12/sample and leave Instrument blank. What's the total, and does the missing instrument stop you from saving it?</summary>
+        <p>5 × 12 = 60, and no — Instrument is optional. It's informational only; it never enters the charge.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>You save a new service entry without touching the Date field. What date does it end up with, and why does the app bother?</summary>
+        <p>Today's date. Reports and exports only pick up rows that fall inside a date range, so an entry with no date at all would silently disappear from every one of them.</p>
+      </details>
+      <details class="quiz-q">
+        <summary>True or false: like a started booking, a service entry's charge stands by default unless Admin Mode is on.</summary>
+        <p>False. A service entry has no start time and no Admin Mode gate — cancelling one with a charge above zero always asks directly whether to waive or keep it.</p>
+      </details>
+    </section>
+
+    <nav class="pager" id="pager"></nav>
+  </main>
+</div>
+<script src="manual.js?v=2"></script>
+</body>
+</html>

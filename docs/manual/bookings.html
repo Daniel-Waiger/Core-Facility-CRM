@@ -29,33 +29,34 @@
     <section class="learn-box">
       <h2 id="what-youll-learn">What you'll be able to do</h2>
       <ul>
-        <li>Read the Calendar screen itself — its month grid, its two kinds of event, and the Today's Agenda dialog.</li>
-        <li>Start a new booking from the calendar and fill in every field with confidence.</li>
+        <li>Read the Calendar screen in all three of its views — Month, Week, and per-instrument Timeline — and know exactly what a click on each one pre-fills.</li>
+        <li>Start a new booking from the calendar and fill in every field with confidence, including a Category and an optional Grant.</li>
+        <li>Repeat a booking across several weeks in a single save.</li>
         <li>Understand the Group/Lab gate — why the people picker locks, and how to unlock it.</li>
-        <li>Use the three pickers (people, instruments, facility staff) and read their badges.</li>
+        <li>Use the three pickers (people, instruments, facility staff), search a long list by typing, and read their badges.</li>
         <li>Register a brand-new person without losing your half-finished booking.</li>
         <li>Answer the "Single Instrument Booking?" prompt sensibly, and turn it off (or back on) if you'd rather not see it each time.</li>
-        <li>Read the live cost panel, add rich-text notes, and understand booking conflicts.</li>
+        <li>Recognize when an instrument's own booking limits are blocking you, and why.</li>
+        <li>Read the live cost panel, add rich-text notes, and catch a scheduling conflict while you're still typing — not just when you hit Save.</li>
         <li>Edit an existing booking, and understand why a retired person can still show up on it.</li>
       </ul>
     </section>
 
     <section id="calendar">
       <h2 id="calendar-screen">The Calendar screen</h2>
-      <p>The Calendar is a month grid, weeks running Monday to Sunday, and it's where you'll do most of your booking work.</p>
+      <p>The Calendar is where you'll do most of your booking work. It has three views — Month, Week, and Timeline — and every one of them opens the same New Booking form when you click empty space; only what gets pre-filled changes.</p>
       <ul>
-        <li>Each day's cell can hold two kinds of event: <strong>📅 bookings</strong> (sessions on the facility's equipment) and <strong>🎯 milestones</strong> (project deadlines — see <a href="milestones.html#add-a-milestone">Milestones</a>).</li>
+        <li>An event on the calendar is either a <strong>📅 booking</strong> (a session on the facility's equipment) or a <strong>🎯 milestone</strong> (a project deadline — see <a href="milestones.html#add-a-milestone">Milestones</a>).</li>
         <li>Within a day, events with a set time sort first, earliest to latest; untimed events (including all milestones, which have no time of their own) follow after.</li>
-        <li><strong>Prev</strong> and <strong>Next</strong> move the grid a month at a time; <strong>Today</strong> jumps back to the current month and opens the <strong>Today's Agenda</strong> dialog — a focused list of just today's bookings and milestones (see <a href="dashboard.html#todays-agenda">Dashboard &amp; Today's Agenda</a>).</li>
-        <li>Click any <strong>empty</strong> space on a day to start a new booking pre-filled with that date.</li>
-        <li>Click an <strong>existing event</strong> to open it — a booking opens for editing (see <a href="#edit-a-booking">below</a>), a milestone opens its own edit form.</li>
+        <li><strong>Prev</strong> and <strong>Next</strong> move the view back or forward — a month at a time in Month view, a week at a time in Week or Timeline. <strong>Today</strong> jumps back to the current month or week and opens the <strong>Today's Agenda</strong> dialog — a focused list of just today's bookings and milestones (see <a href="dashboard.html#todays-agenda">Dashboard &amp; Today's Agenda</a>).</li>
+        <li>Click any <strong>existing event</strong> to open it — a booking opens for editing (see <a href="#edit-a-booking">below</a>), a milestone opens its own edit form. Everywhere else described below, "empty space" means anywhere that isn't already an event.</li>
       </ul>
 
       <figure class="shot">
         <img src="../screenshots/13-calendar.png" alt="Calendar month grid with bookings and milestones on various days" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/13-calendar.png</div>
-        <figcaption>The Calendar's month grid — Prev/Today/Next above, weeks running Monday to Sunday below.</figcaption>
+        <figcaption>The Calendar's Month view — Prev/Today/Next above, weeks running Monday to Sunday below.</figcaption>
       </figure>
 
       <figure class="shot">
@@ -64,15 +65,46 @@
         <div class="ph">Snapshot pending — ../screenshots/33-calendar-timed-bookings.png</div>
         <figcaption>Timed bookings on a busy day sort earliest to latest, ahead of any untimed events on the same day.</figcaption>
       </figure>
+
+      <h3 id="calendar-views">Month, Week, and Timeline</h3>
+      <p>Three buttons sit above the grid, in every view, to switch between them. Switching between Week and Timeline keeps you looking at the same week; switching to or from Month resets you to the current month or week, since a month and a week aren't the same kind of "when" to jump back to.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>View</th><th>What it shows</th><th>Clicking empty space pre-fills</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Month</strong></td><td>One cell per day, current month.</td><td>Just the date.</td></tr>
+            <tr><td><strong>Week</strong></td><td>An hour-by-hour grid, Monday–Sunday, with an "All day" lane above it for untimed events.</td><td>Clicking an hour on the grid pre-fills that <strong>date and hour</strong> (as a one-hour start/end). Clicking the "All day" lane pre-fills only the <strong>date</strong>.</td></tr>
+            <tr><td><strong>Timeline</strong></td><td>One row per instrument, across the same Monday–Sunday week, with each booking shown as a block in its instrument's row.</td><td>Clicking an hour in a row pre-fills the <strong>date, hour, and that row's instrument</strong> — <em>except</em> when the row belongs to a retired instrument, where only the date and hour are pre-filled and you choose an instrument yourself.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="shot">
+        <img src="../screenshots/56-week-view.png" alt="Calendar Week view showing an hourly grid with an all-day lane above it and timed bookings as blocks" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/56-week-view.png</div>
+        <figcaption>Week view — click an hour to pre-fill that date and time, or the "All day" lane above it to pre-fill just the date.</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="../screenshots/57-resource-timeline.png" alt="Calendar Timeline view showing one lane per instrument with bookings laid out across the week" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/57-resource-timeline.png</div>
+        <figcaption>Timeline view — one lane per instrument. An empty slot in a lane pre-fills that instrument too, so you can see at a glance which equipment is free.</figcaption>
+      </figure>
+      <div class="callout why">
+        <p><strong>🔍 Why a retired instrument's lane doesn't pre-fill it.</strong> A retired instrument still shows its history in Timeline — its past bookings render in its lane exactly like any other — but an empty slot in that lane shouldn't quietly start a brand-new booking against equipment that's no longer available. The instrument picker on the form wouldn't have offered it anyway (see <a href="#pickers">the three pickers</a> below), so this just keeps the shortcut consistent with that.</p>
+      </div>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> Whichever view pre-fills less than you need, the rest is one field away — Week and Month both open the same New Booking form, so you can always add the instrument, or adjust the time, once it's open.</p>
+      </div>
     </section>
 
     <section>
       <h2 id="book-a-session">Starting a new booking</h2>
       <p>The most direct way to book a session is from the Calendar:</p>
       <ol class="steps">
-        <li>Go to <strong>Calendar</strong> in the sidebar.</li>
-        <li>Find the day you want and click anywhere on that day's <em>empty</em> space (not on an existing event — clicking an existing booking opens it for editing instead, see <a href="#edit-a-booking">Editing a booking</a>).</li>
-        <li>A New Booking form opens, already pre-filled with the date you clicked.</li>
+        <li>Go to <strong>Calendar</strong> in the sidebar, in whichever view suits you (see <a href="#calendar-views">above</a>).</li>
+        <li>Click the empty space for the date (and, in Week or Timeline, the hour) you want — not an existing event, which opens it for editing instead (see <a href="#edit-a-booking">Editing a booking</a>).</li>
+        <li>A New Booking form opens, pre-filled with whatever your click implied.</li>
       </ol>
       <figure class="shot">
         <img src="../screenshots/50-calendar-date.png" alt="A calendar day chip on the exact day that was clicked to start the booking" loading="lazy"
@@ -89,14 +121,41 @@
       <p>Now work through the fields, top to bottom:</p>
       <ol class="steps">
         <li><strong>Title</strong> (required) — a short description of the session, e.g. "Confocal imaging — cell viability."</li>
-        <li><strong>Date</strong> — already filled in from your calendar click; change it if needed.</li>
-        <li><strong>Start time</strong> and <strong>End time</strong> — these two decide the booking's length, which feeds directly into the cost calculation (see <a href="#live-cost-panel">the cost panel</a> below) and into whether this booking conflicts with another (see <a href="#conflicts">Conflicts</a>).</li>
+        <li><strong>Date</strong>, <strong>Start time</strong> and <strong>End time</strong> — the date is pre-filled from your click; times may be too, if you clicked an hour in Week or Timeline. Start and end decide the booking's length, which feeds directly into the cost calculation (see <a href="#live-cost-panel">the cost panel</a> below) and into whether this booking conflicts with another (see <a href="#conflicts">Conflicts</a>).</li>
+        <li><strong>Repeat</strong> (optional) — leave it blank to book just this one date, or fill it in to create several evenly-spaced bookings in one save; see <a href="#repeat-a-booking">Repeating a booking</a> below.</li>
         <li><strong>Project</strong> — optional. Pick the project this session is for, or leave it blank for a facility-wide session with no specific project attached.</li>
+        <li><strong>Grant</strong> — optional. If your facility tracks research grants separately from projects, pick one here for billing reconciliation; leave it blank if this booking isn't tied to a specific grant.</li>
         <li><strong>Group/Lab</strong> — see the next section; this one field controls what shows up in the people picker.</li>
+        <li><strong>Category</strong> — optional. What kind of session this was (a sync, a consult, training, an assisted session…) — see <a href="#booking-categories">Booking categories</a> below.</li>
         <li>The three pickers: <strong>Assign People</strong>, <strong>Assign Instruments</strong>, <strong>Assign Facility Staff</strong> — see <a href="#pickers">below</a>.</li>
         <li><strong>Notes</strong> and <strong>Next Steps / Action Items</strong> — see <a href="#rich-notes">Rich-text notes</a>.</li>
         <li>Save.</li>
       </ol>
+    </section>
+
+    <section>
+      <h2 id="repeat-a-booking">Repeating a booking</h2>
+      <p>The <strong>Repeat</strong> field on a new booking (right under Start/End time) lets you create several copies of the same session — a weekly training slot, say — in one save, instead of clicking through the calendar once per week.</p>
+      <ol class="steps">
+        <li>Leave the "until" date blank to book only the one date you started with — this is the default, and nothing about a plain booking changes.</li>
+        <li>To repeat, choose how many <strong>week(s)</strong> apart each occurrence should fall, and pick an <strong>until</strong> date. A booking is created on your start date, then again every N weeks, up to and including that date.</li>
+        <li>Save — every date in the schedule is booked in one click, all priced and staffed identically.</li>
+      </ol>
+      <figure class="shot">
+        <img src="../screenshots/59-recurring-booking.png" alt="The New Booking form's Repeat field, showing an every-N-weeks interval and an until date" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/59-recurring-booking.png</div>
+        <figcaption>Repeat is optional and only appears on a new booking — leave "until" blank for a one-off session.</figcaption>
+      </figure>
+      <div class="callout why">
+        <p><strong>🔍 Why it's all-or-nothing.</strong> Before anything is saved, the app checks every single date in the schedule for a conflict — the same check described in <a href="#conflicts">Conflicts</a> below, including any per-instrument booking limit. If even one date in the run clashes with something already on the calendar, <strong>nothing is saved</strong> — not even the dates that were fine. That way you never end up with a partial series where three of ten weeks quietly went missing.</p>
+      </div>
+      <div class="callout warn">
+        <p><strong>⚠️ Careful, two things.</strong> A repeat schedule is capped at <strong>52 occurrences</strong> — a backstop against an "until" date typed decades out by mistake, not a real limit on how long a recurring booking can run in practice. And the as-you-type conflict warning on the form (see <a href="#conflicts">Conflicts</a>) only ever looks at your <em>first</em> date — a clash on week 6 of a ten-week schedule won't show up until you actually try to Save, at which point the all-or-nothing check above still catches it.</p>
+      </div>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> Repeat only exists on the New Booking form. Once a series is created, each date is its own independent booking — editing one to change its time, its attendees, or anything else never touches the others.</p>
+      </div>
     </section>
 
     <section>
@@ -155,6 +214,13 @@
         <div class="ph">Snapshot pending — ../screenshots/15-booking-pickers.png</div>
         <figcaption>Each picker's dropdown adds a badge; click a badge's remove control to take it back off.</figcaption>
       </figure>
+      <p>Each picker also has a small <strong>search box</strong> above its dropdown — type a few letters of a name and the dropdown narrows to matches, which is a lot faster than scrolling a long directory or instrument list.</p>
+      <figure class="shot">
+        <img src="../screenshots/62-picker-search.png" alt="A booking picker's search box narrowing a dropdown to names matching the typed text" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/62-picker-search.png</div>
+        <figcaption>Typing in a picker's search box narrows its dropdown — badges already added are unaffected.</figcaption>
+      </figure>
       <div class="callout why">
         <p><strong>🔍 Why it works this way.</strong> A retired person or a retired instrument never appears in a picker's dropdown — you can't newly add someone who's left. But if they were already added to this booking before they retired, their badge keeps showing, because it's a record of what actually happened at the time. See <a href="#edit-a-booking">Editing a booking</a> below for more on this.</p>
       </div>
@@ -195,9 +261,53 @@
       </div>
     </section>
 
+    <section>
+      <h2 id="booking-categories">Booking categories</h2>
+      <p>Category is an optional field that says what <em>kind</em> of session this was, rather than what instrument or project it used — is this a quick sync, a consult, a training session, or a session where a staff member assisted throughout? Four categories ship with the app: <strong>sync</strong>, <strong>consult</strong>, <strong>training</strong>, and <strong>assisted session</strong>. Choose "Add New" in the dropdown to add your own facility's term, the same way you'd add a new Modality or Department elsewhere in the app. Leave it blank for a plain session with nothing to categorize.</p>
+      <p>Category is what lets the <a href="reports.html">Reports &amp; Utilization</a> screen count consults separately from hands-on instrument time, and split facility-staff hours out by activity — none of that bookkeeping is possible without it.</p>
+      <figure class="shot">
+        <img src="../screenshots/63-category-billing.png" alt="The booking form's Category field with a warning that this category requires a facility staff member" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/63-category-billing.png</div>
+        <figcaption>Picking a category that requires staff shows a warning badge immediately — before you've even tried to save.</figcaption>
+      </figure>
+      <div class="callout why">
+        <p><strong>🔍 Why "training" and "assisted session" ask for a staff member.</strong> Both of those two categories are, by default, run by a member of your staff rather than the researcher working alone — so picking either one without anyone in <strong>Assign Facility Staff</strong> shows a warning badge right on the form, and blocks the save outright with the same message if you don't add one. "sync" and "consult" carry no such requirement.</p>
+      </div>
+      <div class="callout tip">
+        <p><strong>💡 Tip.</strong> Which categories require staff, and whether a category's staff time bills at a reduced percentage of the normal rate, are both configured per category in Settings — this chapter only covers what you see on the booking form itself. See <a href="settings-admin.html">Settings, Admin Mode &amp; Discounts</a> for configuring category policies.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2 id="booking-limits">Per-instrument booking limits</h2>
+      <p>An instrument's own record can carry optional limits on how it may be booked, set on its <a href="instruments.html#add-an-instrument">Add or Edit Instrument</a> form under "Booking Constraints." Every one of them defaults to <strong>0, meaning no limit at all</strong> — a facility only sees these rules once it sets one.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Limit</th><th>What it checks</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Min Duration</strong> (minutes)</td><td>The booking must run at least this long on that instrument.</td></tr>
+            <tr><td><strong>Max Duration</strong> (minutes)</td><td>The booking can't run longer than this on that instrument.</td></tr>
+            <tr><td><strong>Min Gap</strong> (minutes)</td><td>Another booking on the same instrument can't start or end closer than this to the one you're saving.</td></tr>
+            <tr><td><strong>Min Notice</strong> (hours)</td><td>The booking's start time must be at least this many hours from right now.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure class="shot">
+        <img src="../screenshots/58-booking-constraints.png" alt="An instrument's edit form showing Min Duration, Max Duration, Min Gap, and Min Notice fields" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/58-booking-constraints.png</div>
+        <figcaption>Booking Constraints on an instrument's own form — every field defaults to 0, meaning no limit.</figcaption>
+      </figure>
+      <p>Break one of these and the booking is stopped exactly like a double-booking — see <a href="#conflicts">Conflicts</a> below — with a message naming the instrument and the rule you tripped.</p>
+      <div class="callout why">
+        <p><strong>🔍 Why an edit can skip the Min Notice check.</strong> Editing an existing booking without changing its date or start time never re-checks Min Notice — so you can go back and add a note to a session from last month without the app complaining that "last month" isn't 24 hours away from now. Change the date or start time and the notice check applies again like normal. Min Duration, Max Duration, and Min Gap always apply, on a new booking and on any edit.</p>
+      </div>
+    </section>
+
     <section id="live-cost-panel">
       <h2 id="live-cost-panel-heading">The live cost panel</h2>
-      <p>As you fill in times, instruments, and facility staff, a <strong>Cost & Time Breakdown</strong> panel on the form updates itself in real time — you see the running total before you've even saved the booking.</p>
+      <p>As you fill in times, instruments, and facility staff, a <strong>Cost & Time Breakdown</strong> panel on the form updates itself in real time — you see the running total before you've even saved the booking. If the booking's Category changes how staff time bills, a short note about that appears right under the total too.</p>
       <figure class="shot">
         <img src="../screenshots/22-booking-cost-breakdown.png" alt="The live cost breakdown panel showing instrument lines, staff lines, discount, overhead, tax, and a total" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
@@ -231,32 +341,42 @@
     </section>
 
     <section>
-      <h2 id="conflicts">Conflicts are blocked at save time</h2>
-      <p>The app won't let you double-book an instrument or a facility staff member. If, when you try to save, this booking's time overlaps with another booking on the <em>same day</em> that uses the <strong>same instrument</strong> or the <strong>same facility staff member</strong>, the save is refused outright and an error tells you why.</p>
+      <h2 id="conflicts">Conflicts: warned as you type, blocked at Save</h2>
+      <p>The app won't let you double-book an instrument or a facility staff member, and it enforces any <a href="#booking-limits">per-instrument booking limit</a> the same way. If this booking's time overlaps with another booking on the <em>same day</em> that uses the <strong>same instrument</strong> or the <strong>same facility staff member</strong> — or breaks one of that instrument's own limits — you'll hear about it twice:</p>
+      <ul>
+        <li><strong>As you type.</strong> The moment date, start time, and end time are all filled in, a box under the pickers tells you either "No conflicts with existing bookings" or names exactly what clashes and why. Change any of those fields, or the instruments/staff assigned, and it re-checks immediately — nothing here blocks you from continuing to type.</li>
+        <li><strong>At Save.</strong> The exact same check runs again, and this time it's a hard stop: if anything still conflicts, the save is refused outright and an error names what overlaps.</li>
+      </ul>
+      <figure class="shot">
+        <img src="../screenshots/52-live-conflicts.png" alt="The booking form's live conflict box warning about an overlapping booking while the form is still open" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/52-live-conflicts.png</div>
+        <figcaption>The live conflict box updates as you type — this is a warning, not a block, until you hit Save.</figcaption>
+      </figure>
       <figure class="shot">
         <img src="../screenshots/23-booking-conflict-blocked.png" alt="An error toast saying the booking conflicts with an existing booking on the same instrument or staff member" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/23-booking-conflict-blocked.png</div>
-        <figcaption>A conflicting booking is refused at save time, with a message naming what overlaps.</figcaption>
+        <figcaption>A conflicting booking is still refused at Save time, with a message naming what overlaps.</figcaption>
       </figure>
       <div class="callout why">
         <p><strong>🔍 Why it works this way.</strong> This is a hard rule, not a suggestion — it stops the same microscope, or the same technician, from being double-booked to two sessions at once. If you need to free up a slot that's blocking you, cancelling the booking that's in the way frees it immediately: <strong>a cancelled booking never blocks a conflict check</strong>, even if it hasn't been deleted. See <a href="cancelling.html#decision-table">Cancelling & Billing Rules</a> for how cancelling works.</p>
       </div>
       <div class="callout warn">
-        <p><strong>⚠️ Careful.</strong> Conflicts are only checked when you try to save — there's no warning while you're still filling in the form, so you won't know about an overlap until you hit Save.</p>
+        <p><strong>⚠️ Careful with a repeating booking.</strong> The as-you-type box only ever checks your booking's <em>first</em> date — it has no way to preview every date in a Repeat schedule at once. A clash on a later occurrence still surfaces at Save, where the all-or-nothing check described in <a href="#repeat-a-booking">Repeating a booking</a> catches it before anything is written.</p>
       </div>
     </section>
 
     <section>
       <h2 id="edit-a-booking">Editing an existing booking</h2>
-      <p>Click any booking on the Calendar (an event that already exists, not empty space) to open it for editing. The same form appears, pre-filled with everything already saved.</p>
+      <p>Click any booking on the Calendar (an event that already exists, not empty space) to open it for editing. The same form appears, pre-filled with everything already saved — except the <strong>Repeat</strong> field, which only exists on a brand-new booking; each date created by a repeating booking becomes its own independent booking from then on, edited one at a time.</p>
       <div class="callout why">
         <p><strong>🔍 Why retired people and instruments still show as badges.</strong> When you save an edited booking, the app rebuilds its list of attendees, instruments, and staff from exactly what the form shows at that moment. If a retired person's badge were silently hidden from the form, saving the edit would quietly erase them from the booking's history — which would be wrong, since they really were there. So the form always keeps showing every badge that's already on the booking, retired or not; retirement only ever affects the <em>dropdown</em> of new choices, never an existing badge.</p>
       </div>
       <div class="callout warn">
         <p><strong>⚠️ Careful.</strong> Because saving rebuilds the lists from what's on the form, don't remove a retired person's badge unless you actually mean to erase them from this booking's record — there's no way to "just leave it alone" other than not touching that badge.</p>
       </div>
-      <p>Everything else about editing works the same as creating: the Group/Lab gate, the three pickers, the live cost panel, and the conflict check at save all apply exactly as described above.</p>
+      <p>Everything else about editing works the same as creating: the Group/Lab gate, the three pickers, Category, the live cost panel, and the conflict check at Save all apply exactly as described above — with one small mercy for old records: a legacy booking that was already saved under a category requiring staff, with none assigned, can still be edited (a note fixed, an amount corrected) without the app retroactively demanding a staff member — as long as you don't change its category or touch its staff assignment. Change either one and the requirement applies normally.</p>
       <div class="callout try">
         <p><strong>🧪 Try it.</strong> Load the sample data, retire a person who attended one of the demo bookings, then open that booking to edit it. Confirm their badge is still there, now labelled "(Retired)," and that they no longer appear in the Assign People dropdown for adding someone new.</p>
       </div>
@@ -265,7 +385,11 @@
     <section class="quiz">
       <h2 id="check-yourself">Check yourself</h2>
       <details class="quiz-q"><summary>You open a new booking and the Assign People dropdown won't open. What's the fastest fix?</summary><p>Pick a Project (which auto-fills the Group/Lab from the project's PI) or pick a Group/Lab directly — the people picker unlocks as soon as a Group/Lab is set.</p></details>
+      <details class="quiz-q"><summary>In Timeline view, you click an empty slot at 14:00 on Thursday in the confocal microscope's row. What does the New Booking form come up with already filled in?</summary><p>Thursday's date, a 14:00 start time, and the confocal microscope already added to Assign Instruments — unless that instrument is retired, in which case only the date and time are pre-filled.</p></details>
       <details class="quiz-q"><summary>Someone from a different lab needs to be added as an attendee, but the people picker only shows the booking's current lab. What do you do?</summary><p>Tick <strong>Show all labs</strong> next to Assign People — it lists everyone in the directory regardless of lab. The booking's Group/Lab field, and the discount tied to it, don't change just because you added them.</p></details>
+      <details class="quiz-q"><summary>An instrument's Min Notice is set to 24 hours. A colleague tries to book it starting in 3 hours. What happens?</summary><p>The save is refused with a message naming the instrument and its 24-hour notice requirement — the same as any other conflict. It would have shown as a warning on the form as soon as the time was entered, too.</p></details>
+      <details class="quiz-q"><summary>You set a booking to repeat every week for 10 weeks, and week 6 already clashes with something else on the calendar. What gets saved?</summary><p>Nothing. Repeat is all-or-nothing — every date is checked before anything is written, so one clash anywhere in the schedule stops the whole save, not just that one week.</p></details>
+      <details class="quiz-q"><summary>You pick "training" as a booking's Category and try to save with no one in Assign Facility Staff. What happens?</summary><p>The save is refused — "training" requires a facility staff member by default, and a warning badge on the form would already have told you before you tried to save.</p></details>
       <details class="quiz-q"><summary>You cancel a booking that was holding the only available slot on an instrument today. Can a new booking now use that same instrument at that time?</summary><p>Yes — a cancelled booking stops blocking its slot immediately, so the conflict check no longer sees it in the way.</p></details>
       <details class="quiz-q"><summary>While editing an old booking, you notice a retired instrument's badge is still there. Should you remove it to "clean up"?</summary><p>No — leave it. That badge is the real record of what instrument was used on that booking. Removing it and saving would erase that history from the record.</p></details>
     </section>
