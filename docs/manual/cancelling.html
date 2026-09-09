@@ -23,14 +23,15 @@
     <header class="ch-head">
       <p class="ch-kicker">Chapter 10</p>
       <h1>Cancelling &amp; Billing Rules</h1>
-      <p class="lede">Cancelling a booking isn't the same as deleting it — here's exactly what happens to the charge, and how to undo it.</p>
+      <p class="lede">Cancelling a booking isn't the same as deleting it — here's exactly what happens to the charge, how your facility can set that rule for itself, and how to undo a cancellation.</p>
     </header>
 
     <section class="learn-box">
       <h2 id="what-youll-learn">What you'll be able to do</h2>
       <ul>
         <li>Cancel a booking and predict, before you click, whether its charge will stand or drop.</li>
-        <li>Use Admin Mode's three-way choice to waive a charge on purpose.</li>
+        <li>Set your own facility's cancellation rule in Settings, separately for before-start and after-start cancellations.</li>
+        <li>Use Admin Mode's three-way choice to waive or keep a charge on a single late cancellation, regardless of the standing rule.</li>
         <li>Reinstate a cancelled booking, and know why it might fail.</li>
         <li>Recognize when the app offers a true delete instead of a cancel.</li>
         <li>Read a cancelled booking's badges on the Project Costs list.</li>
@@ -39,20 +40,22 @@
 
     <section>
       <h2 id="decision-table">What happens when you cancel a booking</h2>
-      <p>A booking is a record of facility time, not just a calendar entry — see <a href="big-ideas.html#cancelled-vs-deleted">Cancelled vs. deleted</a>. So cancelling it asks one question first: <strong>had the booking's start time already passed?</strong></p>
+      <p>A booking is a record of facility time, not just a calendar entry — see <a href="big-ideas.html#cancelled-vs-deleted">Cancelled vs. deleted</a>. So cancelling one asks a question first: <strong>had the booking's start time already passed?</strong> What happens to its charge from there follows your facility's own <a href="#settings-rule">Cancellation Billing Rules</a> — two independent settings, one for cancelling before a booking's start time and one for after, each set to "Charge dropped" or "Charge kept."</p>
       <ol class="steps">
         <li>Open the booking (from the Calendar or a project's Meetings list) and choose <strong>Cancel</strong>.</li>
-        <li>If its start time hasn't arrived yet, the app simply cancels it and drops any charge — nothing was ever held.</li>
-        <li>If its start time has already passed and it carries a charge above zero, what happens next depends on whether <a href="big-ideas.html#admin-mode">Admin Mode</a> is on.</li>
+        <li>The confirmation dialog tells you, in plain language, whether the charge will drop or stand — reading straight from whichever of the two rules applies.</li>
+        <li>If its start time has already passed and it carries a charge above zero, <a href="big-ideas.html#admin-mode">Admin Mode</a> can additionally offer a one-off, per-booking choice that overrides the after-start rule just for this cancellation.</li>
       </ol>
+      <p>Out of the box — before anyone has touched the Cancellation Billing Rules in Settings — the app behaves exactly as it always has: <strong>before-start cancellations drop the charge, after-start cancellations keep it.</strong> The table below shows those factory defaults; if your facility has changed either setting, read "Charge dropped"/"Charge kept" as whatever you've set it to, not as a fixed rule.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Start time</th><th>Charge</th><th>Admin Mode</th><th>What happens</th></tr></thead>
+          <thead><tr><th>Start time</th><th>Charge on the booking</th><th>Admin Mode</th><th>What happens</th></tr></thead>
           <tbody>
-            <tr><td>Not started yet</td><td>Any amount</td><td>Off or On</td><td>Cancelled, charge dropped — nothing was held.</td></tr>
+            <tr><td>Not started yet</td><td>0 (nothing billed)</td><td>Off or On</td><td>Cancelled, no charge either way — there was nothing to keep or drop.</td></tr>
+            <tr><td>Not started yet</td><td>Above 0</td><td>Off or On</td><td>Cancelled, charge follows the <strong>Before Start Time</strong> setting — <em>default: dropped.</em> Admin Mode has no effect here; only the Settings rule decides.</td></tr>
             <tr><td>Already started</td><td>0 (nothing billed)</td><td>Off or On</td><td>Cancelled, no charge either way — there was nothing to keep or drop.</td></tr>
-            <tr><td>Already started</td><td>Above 0</td><td>Off</td><td>Cancelled, but the charge <strong>stands</strong> — the message says only Admin Mode can waive it.</td></tr>
-            <tr><td>Already started</td><td>Above 0</td><td>On</td><td>A three-way choice appears: <strong>Keep Booking</strong> (don't cancel after all), <strong>Cancel &amp; Waive Charge</strong>, or <strong>Cancel &amp; Keep Charge</strong>.</td></tr>
+            <tr><td>Already started</td><td>Above 0</td><td>Off</td><td>Cancelled, charge follows the <strong>After Start Time</strong> setting — <em>default: kept.</em> The message names whichever way it's currently set.</td></tr>
+            <tr><td>Already started</td><td>Above 0</td><td>On</td><td>A three-way choice appears instead of applying the setting automatically: <strong>Keep Booking</strong> (don't cancel after all), <strong>Cancel &amp; Waive Charge</strong>, or <strong>Cancel &amp; Keep Charge</strong>.</td></tr>
           </tbody>
         </table>
       </div>
@@ -60,17 +63,31 @@
         <img src="../screenshots/37-cancel-booking-admin.png" alt="The three-way Cancel Booking dialog with Keep Booking, Cancel & Waive Charge, and Cancel & Keep Charge buttons" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/37-cancel-booking-admin.png</div>
-        <figcaption>The three-way dialog only appears in Admin Mode, on a started booking that still carries a charge.</figcaption>
+        <figcaption>The three-way dialog only appears in Admin Mode, on a started booking that still carries a charge — and it overrides whatever the After Start Time setting says, for that one booking.</figcaption>
       </figure>
     </section>
 
     <section>
-      <h2 id="waive-or-keep">Why "after start = charge stands"</h2>
-      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Once a booking's start time has passed, the facility already held that instrument (and possibly staff) reserved for it — that slot couldn't be given to anyone else. Cancelling afterward doesn't undo that reservation, so the charge stands by default. Waiving it is a deliberate exception, which is why it's gated behind <a href="big-ideas.html#admin-mode">Admin Mode</a> — the same gate used everywhere else in the app that a billing amount can be overridden (see the group-discount Revoke/Apply control in <a href="bookings.html#book-a-session">Booking a Session</a>).</p></div>
+      <h2 id="settings-rule">Setting your own cancellation rule</h2>
+      <p>Every facility runs a little differently, so the charge-on-cancellation rule isn't fixed in the app — it's a pair of settings your facility sets for itself.</p>
+      <ol class="steps">
+        <li>Open <strong>Settings</strong> and find the <strong>Cancellation Billing Rules</strong> card.</li>
+        <li>Set <strong>Cancelling Before Start Time</strong> to "Charge dropped" or "Charge kept" — this decides what happens when someone cancels a booking that hasn't started yet.</li>
+        <li>Set <strong>Cancelling After Start Time</strong> separately — this decides the default for a booking cancelled after its start time has passed, though <a href="big-ideas.html#admin-mode">Admin Mode</a> can still override it per booking (see below).</li>
+        <li>Click <strong>Save Cancellation Rules</strong>. The new rule applies to every cancellation from then on — it does not change bookings you've already cancelled.</li>
+      </ol>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> "The slot was held, so the charge stands" is a reasonable default, but not every facility bills that way — some waive after-start cancellations far more readily, others charge for a no-show even if it's cancelled ahead of time. Making both directions configurable, independently of each other, lets your facility's own policy drive the app instead of the other way around. The factory defaults reproduce the app's original, hard-coded behavior exactly, so a facility that never opens this card sees no change at all.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> These two settings only decide what happens automatically. Admin Mode's three-way choice (next section) still lets an admin waive or keep the charge on any single late cancellation, whichever way the setting is currently pointed.</p></div>
+    </section>
+
+    <section>
+      <h2 id="waive-or-keep">Admin Mode's per-booking override</h2>
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Once a booking's start time has passed, the facility already held that instrument (and possibly staff) reserved for it — that slot couldn't be given to anyone else. That's exactly why the After Start Time setting defaults to keeping the charge. But a facility's standing rule can't anticipate every individual case, so Admin Mode still offers a one-off exception on a started booking with a charge — the same gate used everywhere else in the app that a billing amount can be overridden (see the group-discount Revoke/Apply control in <a href="bookings.html#book-a-session">Booking a Session</a>).</p></div>
       <ul>
         <li><strong>Cancel &amp; Waive Charge</strong> — the booking is cancelled and its charge is dropped from Project Costs, as if it hadn't been held.</li>
         <li><strong>Cancel &amp; Keep Charge</strong> — the booking is cancelled but its charge still counts, because the slot really was held.</li>
       </ul>
+      <p>This choice only ever appears for a <em>started</em> booking with a charge above zero — cancelling before the start time always just follows the Before Start Time setting, with no per-booking override.</p>
       <div class="callout try"><p><strong>🧪 Try it.</strong> Turn on Admin Mode (Settings → Admin Mode). Load the sample data, find a past booking with a cost above zero, and cancel it — you should see the three-way choice. Try Cancel &amp; Waive Charge, then check the project's Costs card: the row should show as cancelled with its amount struck through and counted as 0.</p></div>
     </section>
 
@@ -131,15 +148,20 @@
       <p>This is the same rule the <a href="reports.html#two-rules">Reports &amp; Utilization</a> screen uses for money, so a project's Costs card and the facility-wide Reports totals never disagree about what's owed.</p>
     </section>
 
+    <section>
+      <h2 id="service-entries">Service entries are cancelled the same way — with their own dialog</h2>
+      <p>A standalone <strong>service entry</strong> — billable work logged directly against a project, without going through a booking — follows the same core idea: cancelling one never deletes it, and a charge above zero gets its own waive-or-keep decision. It isn't tied to a start time the way a booking is (a service entry has no schedule slot to hold), so its cancel dialog always asks the waive-or-keep question directly, rather than reading the Before/After Start Time settings above. See <a href="service-entries.html">Service Entries</a> for the full walkthrough.</p>
+    </section>
+
     <section class="quiz">
       <h2 id="check-yourself">Check yourself</h2>
       <details class="quiz-q">
         <summary>You cancel a booking that starts tomorrow and already has a cost of 150 on it. Does the 150 still count?</summary>
-        <p>No. Its start time hasn't passed, so nothing was held — the charge is dropped regardless of Admin Mode.</p>
+        <p>Its start time hasn't passed, so this follows your facility's <strong>Before Start Time</strong> setting — dropped by default, unless your facility has changed that setting to keep it. Admin Mode has no effect on a before-start cancellation either way.</p>
       </details>
       <details class="quiz-q">
         <summary>Without Admin Mode turned on, can you cancel a started booking and drop its charge?</summary>
-        <p>No — without Admin Mode, cancelling a started booking with a charge above zero keeps the charge standing. Only Admin Mode's three-way dialog can waive it.</p>
+        <p>Only if your facility's <strong>After Start Time</strong> setting is set to "Charge dropped." With Admin Mode off, a started booking with a charge above zero just follows that setting automatically — by default that means the charge stands, but a facility that has switched the setting to "dropped" will see it dropped even with Admin Mode off. Admin Mode's three-way dialog is what lets you override that setting on a single booking, either way.</p>
       </details>
       <details class="quiz-q">
         <summary>Why might reinstating a cancelled booking fail?</summary>

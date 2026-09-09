@@ -33,6 +33,7 @@
         <li>Read and change a project's code, status, and quick-status bar, and add your own custom statuses</li>
         <li>Add metadata, tags, and custom fields to keep track of anything the built-in fields don't cover</li>
         <li>Build a project's team, and manage its files and links</li>
+        <li>Log a project's research outputs — publications, acknowledgements, datasets, and more</li>
         <li>Duplicate a project to reuse its setup for similar work</li>
         <li>Archive a finished project (and restore it later), and know when a true delete is offered instead</li>
       </ul>
@@ -44,7 +45,7 @@
         <li>Click <strong>New Project</strong> — it's available from the sidebar footer and from the top of the Projects registry.</li>
         <li>Type a <strong>Title</strong>. This is the only field that's required.</li>
         <li>Choose the <strong>PI</strong> (Principal Investigator) from the existing list of people, or register a brand-new one right there — see <a href="#inline-pi">Registering a new PI inline</a> below.</li>
-        <li>Fill in whatever else applies: modality, funding source, sample type (each a dropdown built from existing values, plus "+ Add New" — see <a href="big-ideas.html#add-new">"Other" really means "Add New"</a>), flags such as At-risk / Blocked / Needs-review, start and end dates, tags, and notes.</li>
+        <li>Fill in whatever else applies: modality, funding source, sample type (each a dropdown built from existing values, plus "+ Add New" — see <a href="big-ideas.html#add-new">"Other" really means "Add New"</a>), a grant to bill it against (picked from the grants you've set up in <a href="settings-admin.html">Settings</a> — leave it as "No Grant" if there isn't one yet), flags such as At-risk / Blocked / Needs-review, start and end dates, tags, and notes.</li>
         <li>Click <strong>Save</strong>. The project appears in the registry immediately, with an auto-generated project code.</li>
       </ol>
 
@@ -188,6 +189,36 @@
     </section>
 
     <section>
+      <h2 id="research-outputs">Research outputs</h2>
+      <p>A project's Research Outputs list is where you record what the project actually produced — separate from its files (below), which are the working documents and links you keep along the way.</p>
+      <ul>
+        <li><strong>Publication</strong> — a paper, poster, or preprint that came out of the work.</li>
+        <li><strong>Acknowledgement</strong> — a mention or thank-you for the facility's help in someone else's paper, grant report, or renewal.</li>
+        <li><strong>Dataset</strong> — a deposited dataset, raw or processed, that the project's imaging produced.</li>
+        <li><strong>Other</strong> — anything that doesn't fit the three above.</li>
+      </ul>
+      <ol class="steps">
+        <li>Open a project's detail page and find its <strong>Research Outputs</strong> card.</li>
+        <li>Click <strong>Add Output</strong>, choose a <strong>Type</strong>, and type a <strong>Title</strong> — both are required.</li>
+        <li>Optionally add a <strong>Reference</strong> (a journal citation, a DOI, a grant report title — whatever points back to the actual thing), a <strong>Date</strong>, and a <strong>Note</strong>.</li>
+        <li>Save. To change an output later, use its edit action; to remove one, delete it — you'll be asked to confirm first.</li>
+      </ol>
+
+      <figure class="shot">
+        <img src="../screenshots/66-research-outputs.png" alt="Research Outputs card on a project's detail page, listing a publication and an acknowledgement" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/66-research-outputs.png</div>
+        <figcaption>Each output shows its type, title, reference, and date in one row.</figcaption>
+      </figure>
+
+      <div class="callout tip"><p><strong>💡 Tip.</strong> The Date field is optional. If you leave it blank, the output doesn't drop to the bottom of the list — it sorts by the day you logged it instead, right alongside dated outputs from around the same time. Fill in the Date when you know it (e.g. a paper's actual publication date); leave it blank for something you're logging as it happens.</p></div>
+
+      <p>Research outputs aren't only visible here. They also feed the <a href="reports.html#funnel-card">Funnel: Consult to Output</a> card on the Reports &amp; Utilization screen — a project's first output is what counts as reaching the funnel's final stage — and they're included whenever you export a project (XLSX, DOCX, or PDF), plus in their own "Research Outputs" sheet in the facility-wide spreadsheet from the Projects registry's <strong>Export All</strong> button. See <a href="backups-exports.html">Backups, Restore &amp; Exports</a>.</p>
+
+      <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Bookings and milestones tell you a project is active; outputs are the point of it all — proof that the work actually went somewhere. Keeping a dedicated, typed record of that (rather than a line in the notes field) is what lets the funnel and the exports count it consistently.</p></div>
+    </section>
+
+    <section>
       <h2 id="files-attachments">Files and attachments</h2>
       <p>A project can hold both uploaded files and web links, side by side in one list.</p>
       <ol class="steps">
@@ -225,8 +256,8 @@
             <tr><td>Basic fields (funding, modality, sample type, notes, tags)</td><td>Meetings / bookings</td></tr>
             <tr><td>Team roster</td><td>Files and attachments</td></tr>
             <tr><td>Assigned instruments</td><td>Start/end dates (cleared)</td></tr>
-            <tr><td>Custom fields</td><td>&nbsp;</td></tr>
-            <tr><td>Milestones (statuses reset to pending, due dates cleared)</td><td>&nbsp;</td></tr>
+            <tr><td>Custom fields</td><td>Grant</td></tr>
+            <tr><td>Milestones (statuses reset to pending, due dates cleared)</td><td>Research outputs</td></tr>
           </tbody>
         </table>
       </div>
@@ -241,7 +272,7 @@
       <h2 id="archive-restore">Archiving and restoring a project</h2>
       <ol class="steps">
         <li>Open the project you want to archive and find its <strong>Archive</strong> action.</li>
-        <li>Read the dialog carefully: if the project has any history at all — team members, instruments, milestones, bookings, files, or custom fields — it lists everything the project holds, including its total billed amount, before you confirm.</li>
+        <li>Read the dialog carefully: if the project has any history at all — team members, instruments, milestones, bookings, service entries, files, custom fields, or research outputs — it lists everything the project holds, including its total billed amount, before you confirm.</li>
         <li>Confirm. The project is archived: it disappears from the dashboard and the main registry, and gets a clear "Archived" banner on its own detail page.</li>
         <li>To bring it back, open it (use the registry's <strong>Show archived</strong> toggle to find it) and click <strong>Restore</strong>.</li>
       </ol>
@@ -270,7 +301,7 @@
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Archiving is the project-level version of the same idea covered in <a href="big-ideas.html#retire-vs-delete">Retire vs. delete</a> and <a href="big-ideas.html#archive">Archive</a>: cost history and milestone history are real facts you don't want to lose just because a project wound down. Archiving keeps them all, while still keeping your everyday project list focused on live work.</p></div>
 
       <h3 id="true-delete">When a true delete is offered instead</h3>
-      <p>If a project has absolutely nothing on it yet — no team beyond default setup, no instruments, no milestones, no bookings, no files, no custom fields — the same action offers a genuine, permanent <strong>Delete</strong> instead of archiving. Use this only for a project created by mistake or as an empty duplicate that turned out unneeded.</p>
+      <p>If a project has absolutely nothing on it yet — no team beyond default setup, no instruments, no milestones, no bookings, no files, no custom fields, no research outputs — the same action offers a genuine, permanent <strong>Delete</strong> instead of archiving. Use this only for a project created by mistake or as an empty duplicate that turned out unneeded.</p>
       <div class="callout warn"><p><strong>⚠️ Careful.</strong> There is no undo for a true delete. If you're not certain a project truly has zero history, archive it instead — you can always restore an archived project, but a deleted one is gone for good.</p></div>
     </section>
 
@@ -278,7 +309,8 @@
       <h2 id="check-yourself">Check yourself</h2>
       <details class="quiz-q"><summary>You create a new project for a PI who isn't in your People directory yet. Do you need to add them as a person first?</summary><p>No — the New Project form lets you register a new PI by name right there. They're added to your People directory and to the project's team as "Principal Investigator" automatically.</p></details>
       <details class="quiz-q"><summary>You duplicate a project that has 12 bookings and 3 uploaded files. How many bookings and files does the new copy start with?</summary><p>Zero of each. Duplicating deliberately does not copy meetings/bookings or files and attachments — only the setup (fields, team, instruments, custom fields, and milestones with statuses and due dates reset).</p></details>
-      <details class="quiz-q"><summary>You try to archive a project and the dialog offers to permanently Delete it instead. What does that tell you?</summary><p>That the project has zero references anywhere — no team beyond setup, no instruments, milestones, bookings, files, or custom fields. A true delete is only ever offered when there's no history to protect; anything with history gets archived instead.</p></details>
+      <details class="quiz-q"><summary>You try to archive a project and the dialog offers to permanently Delete it instead. What does that tell you?</summary><p>That the project has zero references anywhere — no team beyond setup, no instruments, milestones, bookings, files, custom fields, or research outputs. A true delete is only ever offered when there's no history to protect; anything with history gets archived instead.</p></details>
+      <details class="quiz-q"><summary>You log a research output but don't know its exact date yet, so you leave the Date field blank. Does it sink to the bottom of the project's output list?</summary><p>No. An output with no date sorts by the day you logged it, not by an empty value — so it lands with the other recent entries instead of falling to the end of the list.</p></details>
     </section>
 
     <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
