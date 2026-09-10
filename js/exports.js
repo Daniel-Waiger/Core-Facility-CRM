@@ -968,7 +968,10 @@
     if (!global.XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
     const built = buildAllXlsxBlob();
     if (!built) { UI.toast('No projects to export', 'error'); return; }
-    blobDownload(built.blob, `Facility-Projects-Overview-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    // UI.ymd for the same reason every other date in this app uses it: toISOString() re-describes
+    // the instant in UTC, so at a UTC+ offset a file exported just after midnight would be
+    // labelled with the previous day. See CLAUDE.md, "Dates are local calendar days".
+    blobDownload(built.blob, `Facility-Projects-Overview-${UI.ymd(new Date())}.xlsx`);
     UI.toast(`Exported ${built.count} project${built.count === 1 ? '' : 's'} to XLSX`);
   }
 

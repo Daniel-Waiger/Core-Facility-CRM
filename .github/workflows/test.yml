@@ -1,0 +1,58 @@
+name: Tests
+
+# Two jobs, split by what they need. `unit` requires nothing but Node, so it is quick and cannot
+# rot; `browser` installs Playwright to enforce the one guarantee worth a slow job — that a demo
+# tab cannot reach a real facility's records.
+#
+# Both run under TZ=Asia/Jerusalem on purpose. This app stores plain local calendar days, and the
+# date bug behind issue #14 was invisible at UTC and visible only east of Greenwich — so CI sits
+# at a UTC+ offset permanently rather than at the offset where that bug shipped unnoticed.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Jerusalem
+
+jobs:
+  unit:
+    name: Unit tests (no install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No `npm ci` step, and no package.json to run it against: the app is zero-install by
+      # design and the unit tests keep that property. Node's built-in runner is the whole harness.
+      - name: Run unit tests
+        run: node --test 'test/unit/*.test.js'
+
+  browser:
+    name: Browser tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Installed here rather than committed as a dependency, so a contributor cloning the repo
+      # still gets a working `node --test 'test/unit/*.test.js'` with nothing installed.
+      - name: Install Playwright and Chromium
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      # The suites serve the app themselves on an ephemeral port using node:http, so there is no
+      # separate server step and no port to collide with.
+      - name: Run browser tests
+        run: node --test 'test/browser/*.spec.js'

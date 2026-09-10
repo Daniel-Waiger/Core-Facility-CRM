@@ -593,7 +593,12 @@
     const data = await DB.buildBackup();
     const json = JSON.stringify(data);
     const namePart = kind === 'auto' ? 'autobackup' : kind === 'pre-restore' ? 'pre-restore-backup' : 'backup';
-    const dateStamp = new Date().toISOString().slice(0, 10);
+    // UI.ymd, not toISOString().slice(0,10) — see CLAUDE.md's "Dates are local calendar days".
+    // This one is not cosmetic: the silent auto-backup writes
+    // `core-facility-autobackup-<dateStamp>.json` into the user's chosen folder, so a stamp that
+    // reports the PREVIOUS day (which is what UTC conversion does at a UTC+ offset either side of
+    // local midnight) overwrites the file holding that day's backup instead of writing a new one.
+    const dateStamp = UI.ymd(new Date());
     const filename = `core-facility-${namePart}-${dateStamp}.json`;
 
     if (kind === 'auto') {

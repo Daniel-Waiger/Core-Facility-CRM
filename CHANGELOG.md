@@ -3,6 +3,33 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] — 2026-09-10
+
+### Added
+- **A test suite, runnable on a bare copy of the repo.** Node's built-in runner needs no
+  `package.json` and no install, so the zero-install design is intact: `node --test
+  'test/unit/*.test.js'` covers the billing calculator (the 1-hour staff floor, the discount
+  applying only to time-billed instrument cost, the subtotal → discount → overhead → tax order,
+  and the 490 / 546.25 / 589.95 figures a seeded booking has to reproduce), the local-calendar-day
+  date rules that caused issue #14, the database invariants this project had verified once by hand
+  (the `foreign_keys` pragma that `db.export()` silently clears, every cascade, the `projects.pi_id`
+  gap cascade cannot cover, retire/archive, cancellation billing, and the denormalized attendee
+  string staying in step with its join table), and the Reports aggregations agreeing with the
+  booking modal. A second group guards the wiring this app is built on: every `data-act` has a
+  handler and every handler an emitter, every icon name resolves, no file reintroduces the
+  UTC date bug, and the version strings stay in step. Browser checks — the demo sandbox
+  isolation guarantee, all seven screens rendering, and the note sanitizer — live apart and skip
+  cleanly when Playwright is absent. Everything runs on GitHub for pushes and pull requests.
+
+### Fixed
+- **Two backup and export filenames could be stamped with yesterday's date.** Both built their
+  date from `toISOString()`, which re-describes the moment in UTC — so anywhere east of Greenwich,
+  a file saved shortly after midnight was labelled with the previous day. For the silent automatic
+  backup this was not cosmetic: the filename is what identifies the day's backup, so the misdated
+  file **overwrote the previous day's backup** instead of joining it. The "Export All" spreadsheet
+  had the same flaw in its filename. Both now use the same local-calendar-day helper as the rest
+  of the app. Found by the new date-rule check on its first run.
+
 ## [1.10.0] — 2026-09-10
 
 ### Changed

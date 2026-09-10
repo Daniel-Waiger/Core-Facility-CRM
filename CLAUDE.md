@@ -21,8 +21,9 @@ browser's IndexedDB. This has two direct consequences for any feature work:
 
 ## Commands
 
-There is no build, lint, or test suite/framework in this repo (`package.json` doesn't exist).
-"Running" the app means serving the static files and opening it in a browser:
+There is no build step and no lint step, and `package.json` deliberately doesn't exist — the app
+is zero-install by design. "Running" the app means serving the static files and opening it in a
+browser:
 
 ```bash
 python3 -m http.server 8000   # from the repo root
@@ -32,9 +33,33 @@ python3 -m http.server 8000   # from the repo root
 (Opening `index.html` directly via `file://` also works on desktop, but a local server avoids
 storage restrictions on some browsers/tablets — see README's "Running on Tablets" section.)
 
-Verification is manual/in-browser: there are no unit tests to run. `node --check js/<file>.js`
-is useful as a cheap syntax sanity check before testing in a browser, but is not a substitute
-for actually loading the app and exercising the change.
+There **is** a test suite, and it keeps the zero-install property: Node's built-in runner needs
+nothing installed.
+
+```bash
+TZ='Asia/Jerusalem' node --test 'test/unit/*.test.js'      # fast; no install of any kind
+TZ='Asia/Jerusalem' node --test 'test/browser/*.spec.js'   # needs Playwright; skips without it
+```
+
+Pass the glob, not the directory — `node --test test/unit/` tries to *execute* the directory in
+Node 22 rather than searching it. Run under a UTC+ timezone: this app's date bugs are invisible at
+UTC, which is exactly how issue #14 shipped. CI runs both jobs at `Asia/Jerusalem`.
+
+`test/README.md` lists what each file guards. In short, the unit group covers the billing
+calculator (including the 490 / 546.25 / 589.95 figures a seeded booking must reproduce), the
+local-calendar-day date rules, the database invariants described under "Cascading deletes" and
+"History is preserved" below, the Reports aggregations agreeing with the booking modal, and the
+`data-act`/icon/version wiring this app is assembled from. The browser group covers the demo
+sandbox isolation guarantee, every screen rendering without a JavaScript error, and the note
+sanitizer (which needs a real `DOMParser`, so it cannot run under Node).
+
+**What the suite does not do is prove the app loads.** The screens are template strings assembled
+at render time, so a mistake in one surfaces only when that screen is visited. `node --check
+js/<file>.js` remains a cheap syntax check, and neither it nor the unit tests substitute for
+loading the app and exercising the change — for any UI work, run the browser group or open it
+yourself. When adding a rule that matters (a money rule, a date rule, a delete path), add the
+test with it: several of the invariants documented in this file are now executable, and the ones
+that are stay true.
 
 ## Architecture
 

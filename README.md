@@ -235,7 +235,22 @@ Core-Facility-CRM/
 └── README.md             # Documentation
 ```
 
-> **`index.html`, `manifest.json`, `sw.js`, `favicon.svg`, `css/`, `js/`, and `libs/` are the entire runtime app** — that's what needs to travel together (see [Sharing With Colleagues](#sharing-the-app-with-colleagues)). Everything else (`docs/`, `LICENSE`, `README.md`) is documentation only.
+> **`index.html`, `manifest.json`, `sw.js`, `favicon.svg`, `css/`, `js/`, and `libs/` are the entire runtime app** — that's what needs to travel together (see [Sharing With Colleagues](#sharing-the-app-with-colleagues)). Everything else (`docs/`, `test/`, `LICENSE`, `README.md`) is documentation and tests only.
+
+### Tests
+
+There is no build step and nothing to install — Node 22's built-in test runner is the whole
+harness, which keeps the app zero-install as designed.
+
+```bash
+TZ='Asia/Jerusalem' node --test 'test/unit/*.test.js'      # fast checks, no install
+TZ='Asia/Jerusalem' node --test 'test/browser/*.spec.js'   # needs Playwright; skips without it
+```
+
+The fast checks cover the billing calculation, the date handling, the database rules, and whether
+every button is wired to something. The browser checks confirm the demo sandbox cannot reach real
+records and that every screen still loads. See [`test/README.md`](test/README.md) for what each
+file guards — and for what they deliberately do not prove.
 
 ---
 
