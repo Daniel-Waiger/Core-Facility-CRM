@@ -15,7 +15,7 @@
 
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN } = require('./helpers/browser');
+const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript } = require('./helpers/browser');
 
 const playwright = tryRequirePlaywright();
 const skip = playwright ? false : 'Playwright is not installed — see test/README.md (unit tests need nothing)';
@@ -29,17 +29,13 @@ describe('every screen renders', { skip }, () => {
     srv = await startServer();
     browser = await playwright.chromium.launch(chromiumLaunchOptions());
     const ctx = await browser.newContext({ timezoneId: 'Asia/Jerusalem' });
-    await ctx.addInitScript(() => {
-      try {
-        localStorage.setItem('crm-hide-startup-modal', '1');
-        localStorage.setItem('crm-seen-device-notice', '1');
-        localStorage.setItem('crm-declined-backup-folder', '1');
-        localStorage.setItem('auto-backup-enabled', '0');
-        // Admin Mode on, so the admin-gated Settings blocks (group discounts, the manual
-        // per-booking discount) are rendered and covered too rather than silently skipped.
-        localStorage.setItem('admin-mode', '1');
-      } catch (_) {}
-    });
+    await ctx.addInitScript(QUIET_FIRST_RUN);
+    // Admin Mode on, so the admin-gated Settings blocks (group discounts, rename/merge lab) are
+    // rendered and covered rather than silently skipped. setFlagScript writes both the bare and
+    // the `demo:`-prefixed key: this suite runs under ?demo=1, where UI.storage namespaces every
+    // key but `theme`, so a bare 'admin-mode' was read as null and those blocks never rendered at
+    // all — the suite believed it covered them for several runs. Raised in review on PR #42.
+    await ctx.addInitScript(setFlagScript('admin-mode', '1'));
 
     page = await ctx.newPage();
     errors = [];
@@ -106,6 +102,19 @@ describe('every screen renders', { skip }, () => {
   test('the staff hourly rate carries a currency symbol', async () => {
     const info = await viewText('people');
     assert.ok(/\$\d/.test(info.txt), `expected a currency symbol: ${info.txt.slice(0, 300)}`);
+  });
+
+  test('Admin Mode is genuinely on, so the admin-gated Settings blocks are covered', async () => {
+    // This assertion exists because the coverage it guards was silently absent for several runs:
+    // the suite set 'admin-mode' under the bare key while a demo tab reads it namespaced, so
+    // Admin Mode was off and these blocks never rendered — and nothing failed, because nothing
+    // checked. Asserting the block's presence is what makes the rest of this suite's Settings
+    // coverage a claim rather than an assumption.
+    const info = await viewText('settings');
+    assert.ok(
+      /Group \(Lab \/ Organization\) Discounts|Rename \/ Merge Lab/.test(info.txt),
+      `the admin-gated Settings block did not render, so Admin Mode is not actually on: ${info.txt.slice(0, 400)}`,
+    );
   });
 
   test('Settings states the otherwise-invisible legacy overhead percentage', async () => {

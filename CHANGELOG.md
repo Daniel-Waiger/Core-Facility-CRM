@@ -6,6 +6,13 @@ This project uses [Semantic Versioning](https://semver.org/).
 ## [1.10.2] — 2026-09-10
 
 ### Fixed
+- **A browser test believed it was covering the admin-only Settings screens and was not.** The
+  suites set the app's preferences under plain keys, but a sandbox tab reads them under its own
+  prefixed names, so the flags were ignored there — including the one that turns Admin Mode on.
+  The group-discount and rename-lab editors were therefore never displayed during the run, and
+  nothing failed, because nothing checked. The flags are now written under both names, and the
+  test asserts those editors really are on screen, so the coverage is a claim rather than an
+  assumption. No effect on the app itself.
 - **The welcome screen stayed open behind the demo sandbox.** Opening the sandbox from the
   welcome screen launches a new tab, which means the original tab is never navigated away — so
   the welcome screen sat there in front of the app, waiting to be dismissed by hand, and the

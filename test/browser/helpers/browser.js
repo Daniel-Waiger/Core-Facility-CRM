@@ -81,14 +81,46 @@ function startServer(root = REPO) {
 
 /* The first-run screens (welcome dialog, per-device storage notice) would sit in front of every
    assertion, and automatic backups have no business firing in a test. Suppress both the way a
-   returning user's browser already would. */
+   returning user's browser already would.
+
+   Each key is written TWICE, bare and `demo:`-prefixed, because UI.storage namespaces its keys in
+   a demo tab (everything except `theme`). A bare key alone is read as null under ?demo=1, so the
+   suppression silently did nothing there — and worse, a flag a test sets to shape behaviour was
+   quietly ignored: `admin-mode` read null, so the admin-gated Settings blocks a suite believed it
+   was covering were never rendered at all. Writing both is deliberate over branching on
+   location.search: the same context is reused for real and demo tabs in some suites, and a flag
+   that applies to whichever tab opens is the behaviour every caller actually wants.
+   Raised in review on PR #42. */
+const TEST_FLAGS = {
+  'crm-hide-startup-modal': '1',
+  'crm-seen-device-notice': '1',
+  'crm-declined-backup-folder': '1',
+  'auto-backup-enabled': '0',
+};
+
 const QUIET_FIRST_RUN = () => {
+  // Inlined rather than referencing TEST_FLAGS: this function is serialised into the page by
+  // Playwright's addInitScript, so it cannot close over anything from this module.
   try {
-    localStorage.setItem('crm-hide-startup-modal', '1');
-    localStorage.setItem('crm-seen-device-notice', '1');
-    localStorage.setItem('crm-declined-backup-folder', '1');
-    localStorage.setItem('auto-backup-enabled', '0');
+    const flags = {
+      'crm-hide-startup-modal': '1',
+      'crm-seen-device-notice': '1',
+      'crm-declined-backup-folder': '1',
+      'auto-backup-enabled': '0',
+    };
+    for (const [k, v] of Object.entries(flags)) {
+      localStorage.setItem(k, v);
+      localStorage.setItem('demo:' + k, v);   // UI.storage namespaces every key but `theme`
+    }
   } catch (_) { /* a browser that blocks storage will show the notice; harmless here */ }
 };
 
-module.exports = { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, REPO };
+/* Set an arbitrary app preference from a test, under both namespaces, for the same reason. */
+function setFlagScript(key, value) {
+  return `(() => { try {
+    localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)});
+    localStorage.setItem(${JSON.stringify('demo:' + key)}, ${JSON.stringify(value)});
+  } catch (_) {} })()`;
+}
+
+module.exports = { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript, TEST_FLAGS, REPO };
