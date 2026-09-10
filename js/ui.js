@@ -8,15 +8,34 @@
      blocked browser degrades to an in-memory value instead of crashing the page. */
   const memoryStorageFallback = {};
   let localStorageBlocked = false;
+
+  /* Demo-sandbox key namespacing. localStorage is shared by every tab on this origin, so without
+     this the demo tab would write straight into the real app's preferences — and two of those
+     keys do real damage: 'last-auto-backup-at' would make the real app think it had already
+     backed up today (skipping a backup it should have taken), and the two first-run notice flags
+     would permanently dismiss guidance the user never actually saw. The rest ('admin-mode',
+     'sidebar-collapsed', …) would just be confusing.
+     'theme' is deliberately SHARED and unprefixed: the sandbox should look like the user's own
+     app, and a remembered light/dark choice is not state worth isolating. */
+  const SHARED_KEYS = { theme: 1 };
+  function nsKey(key) {
+    return (global.IS_DEMO && !SHARED_KEYS[key]) ? 'demo:' + key : key;
+  }
   function storageGet(key) {
+    key = nsKey(key);
     if (localStorageBlocked) {
       return Object.prototype.hasOwnProperty.call(memoryStorageFallback, key) ? memoryStorageFallback[key] : null;
     }
-    try { return localStorage.getItem(key); } catch (_) { localStorageBlocked = true; return storageGet(key); }
+    try { return localStorage.getItem(key); } catch (_) { localStorageBlocked = true; return storageGetRaw(key); }
+  }
+  // Post-namespacing read, so the catch path above doesn't prefix an already-prefixed key.
+  function storageGetRaw(key) {
+    return Object.prototype.hasOwnProperty.call(memoryStorageFallback, key) ? memoryStorageFallback[key] : null;
   }
   function storageSet(key, val) {
+    key = nsKey(key);
     if (localStorageBlocked) { memoryStorageFallback[key] = String(val); return; }
-    try { localStorage.setItem(key, val); } catch (_) { localStorageBlocked = true; storageSet(key, val); }
+    try { localStorage.setItem(key, val); } catch (_) { localStorageBlocked = true; memoryStorageFallback[key] = String(val); }
   }
 
   /* ---------------- OS detection (for tailored guidance text only — never for logic) ---------------- */
@@ -596,6 +615,47 @@
   }
   function isSafeUrl(u) { return /^https?:\/\//i.test(String(u || '').trim()); }
 
+  /* ---------------- Display formatters for values that are ALSO data ----------------
+     Three of these, and they all exist for the same reason: several columns store a raw value
+     that the app must keep byte-for-byte (it is compared with === , written back to the
+     database, or round-tripped through a data- attribute) while showing the user something
+     readable. So these translate at DISPLAY time only and never touch what is stored — the same
+     division of labour as retiredName above.
+
+     fmtMoney lives here rather than in app.js or reports.js because CLAUDE.md requires exactly
+     one copy: "a report that disagrees with the booking modal about money is worse than no
+     report". ui.js is the only file loaded before all four consumers (views, reports, exports,
+     app), which is why the shared hour maths already lives here too. */
+
+  // Currency symbol from Settings + two decimals, with locale thousands separators, e.g. $1,250.00.
+  function fmtMoney(n) {
+    const cur = (global.DB && global.DB.getConfig) ? global.DB.getConfig('currency', '$') : '$';
+    return cur + (Math.round((Number(n) || 0) * 100) / 100)
+      .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  /* An instrument's cost_unit says HOW it is priced: 'time' bills the booking's duration, any
+     other unit bills a quantity typed in on the booking. The stored value is compared against
+     'time' in the cost calculator, so it stays lowercase; only the label changes.
+     UNIT is vocab-extensible (facilities add their own via "+ Add New"), so an unknown value
+     must fall through to itself rather than render blank. */
+  const UNIT_LABELS = { time: 'per hour', unit: 'per unit', weight: 'per weight', other: 'flat rate' };
+  function unitLabel(u) {
+    const v = String(u == null || u === '' ? 'time' : u);
+    return UNIT_LABELS[v] || v;
+  }
+
+  /* Milestone statuses are stored lowercase and hyphenated ('in-progress') because that exact
+     text is compared in SQL (`status != 'done'`) and round-tripped through data-status on the
+     status picker's buttons. 'overdue' is not a stored status at all — it is derived from the due
+     date — but it renders in the same badges, so it is mapped here too. Unknown values fall
+     through to themselves, matching Views.statusBadge's `|| 'neutral'` tolerance. */
+  const MS_STATUS_LABELS = { 'pending': 'Pending', 'in-progress': 'In Progress', 'done': 'Done', 'overdue': 'Overdue' };
+  function msStatusLabel(s) {
+    const v = String(s == null ? '' : s);
+    return MS_STATUS_LABELS[v] || v;
+  }
+
   /* ---------------- Rich-text notes: sanitize + render ----------------
      Notes (meeting bookings) are stored as a small HTML subset produced by a contentEditable
      editor. sanitizeHtml() whitelists tags/attrs so nothing unsafe is ever persisted or shown;
@@ -666,6 +726,9 @@
     billableStaffHours,
     retiredName,
     isSafeUrl,
+    fmtMoney,
+    unitLabel,
+    msStatusLabel,
     detectOS,
     copyToClipboard,
     storage: { getItem: storageGet, setItem: storageSet }

@@ -48,7 +48,7 @@
                 <div class="faint small">${esc(m.project_title)}</div>
               </div>
               <span class="ms-quick-meta">
-                <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
+                <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(global.UI.msStatusLabel(m.status))}</span>
                 <span class="mono small">${fmt(m.due_date)}</span>
               </span>
             </div>`).join('') : emptyState('calendar', 'Nothing due soon', 'No pending milestones in the next 30 days.')}
@@ -64,7 +64,7 @@
                 <div class="faint small">${esc(m.project_title)}</div>
               </div>
               <span class="ms-quick-meta">
-                <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">overdue</span>
+                <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(global.UI.msStatusLabel('overdue'))}</span>
                 <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
               </span>
             </div>`).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
@@ -132,7 +132,15 @@
       </div>
     </div>
 
-    ${!rows.length ? emptyState('folder', 'No matching projects', projectFilter.query || projectFilter.status ? 'Try changing your search or filters.' : 'Create your first project to start tracking.') : `
+    ${!rows.length ? (allProjects.length
+      // Whether a FILTER is set is the wrong question: rows can also be hidden because every
+      // project is archived and the "Show archived" toggle is off, which sets no filter at all.
+      // The only thing that distinguishes the two empty states is whether any project EXISTS —
+      // if one does, something is hiding it and the filter bar is where to look; if none does,
+      // blaming a filter the user never set just sends them hunting. Same rule as people() and
+      // instruments() below.
+      ? emptyState('folder', 'No matching projects', 'Try changing your search or filters.')
+      : emptyState('folder', 'No projects yet', 'Create your first project to start tracking.')) : `
     <div class="card">
       <div class="tbl-wrap">
         <table class="tbl">
@@ -264,7 +272,6 @@
       LEFT JOIN instruments i ON i.id = se.instrument_id
       WHERE se.project_id=?
       ORDER BY se.date DESC, se.id DESC`, [id]);
-    const costCur = global.DB.getConfig('currency', '$');
     const files = global.DB.rows('SELECT * FROM files WHERE project_id=? ORDER BY created_at DESC', [id]);
     const prog = global.DB.projectProgress(p.id);
     const flags = (p.flags || '').split(',').filter(Boolean);
@@ -439,10 +446,10 @@
     <div class="card mb-16">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Project Costs</span></div>
-        <span class="mono font-medium">${esc(costCur)}${(
+        <span class="mono font-medium">${esc(global.UI.fmtMoney(
           mtgs.reduce((s, m) => s + ((m.is_cancelled && !m.billing_retained) ? 0 : (m.total_cost || 0)), 0) +
           entries.reduce((s, e) => s + ((e.is_cancelled && !e.billing_retained) ? 0 : (e.total_cost || 0)), 0)
-        ).toFixed(2)} total</span>
+        ))} total</span>
         <button class="btn btn-ghost btn-sm" data-act="add-service-entry" data-project-id="${p.id}" title="Log standalone billable work outside any booking">${ic('plus')} Service Entry</button>
       </div>
       <div class="card-body">
@@ -465,9 +472,9 @@
                   <td class="small">${bookingGrantStr ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
                   <td class="small">${tierStr === '—' ? '<span class="faint">—</span>' : esc(tierStr)}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
-                  <td class="mono small" style="text-align:right">${esc(costCur)}${(m.subtotal || 0).toFixed(2)}</td>
-                  <td class="mono small" style="text-align:right">${esc(costCur)}${(m.total_before_tax || 0).toFixed(2)}</td>
-                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(costCur)}${(m.total_cost || 0).toFixed(2)}</span>` : esc(costCur) + (m.total_cost || 0).toFixed(2)}</td>
+                  <td class="mono small" style="text-align:right">${esc(global.UI.fmtMoney(m.subtotal || 0))}</td>
+                  <td class="mono small" style="text-align:right">${esc(global.UI.fmtMoney(m.total_before_tax || 0))}</td>
+                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(global.UI.fmtMoney(m.total_cost || 0))}</span>` : esc(global.UI.fmtMoney(m.total_cost || 0))}</td>
                   <td style="text-align:right"><button class="btn btn-ghost btn-xs" data-act="edit-booking" data-id="${m.id}" title="View full cost breakdown">${ic('eye')}</button></td>
                 </tr>`; }).join('')}
             </tbody>
@@ -492,8 +499,8 @@
                   <td class="mono small faint">${fmt(e.date)}</td>
                   <td class="mono small" style="text-align:right">${e.qty || 0}</td>
                   <td class="small">${esc(e.unit || '')}</td>
-                  <td class="mono small" style="text-align:right">${esc(costCur)}${(e.rate || 0).toFixed(2)}</td>
-                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(costCur)}${(e.total_cost || 0).toFixed(2)}</span>` : esc(costCur) + (e.total_cost || 0).toFixed(2)}</td>
+                  <td class="mono small" style="text-align:right">${esc(global.UI.fmtMoney(e.rate || 0))}</td>
+                  <td class="mono font-medium" style="text-align:right">${waived ? `<span class="faint" style="text-decoration:line-through">${esc(global.UI.fmtMoney(e.total_cost || 0))}</span>` : esc(global.UI.fmtMoney(e.total_cost || 0))}</td>
                   <td style="text-align:right">
                     <button class="btn btn-ghost btn-xs" data-act="edit-service-entry" data-id="${e.id}" title="Edit Entry">${ic('edit')}</button>
                     ${e.is_cancelled
@@ -575,8 +582,8 @@
           <span class="ttl">${esc(m.name)}</span>
           <div class="grow"></div>
           <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable"
-                data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${m.status}</span>
-          ${isOverdue ? '<span class="badge danger">overdue</span>' : ''}
+                data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(global.UI.msStatusLabel(m.status))}</span>
+          ${isOverdue ? `<span class="badge danger">${esc(global.UI.msStatusLabel('overdue'))}</span>` : ''}
           <button class="btn btn-ghost btn-sm" data-act="edit-milestone" data-id="${m.id}" title="Edit Milestone">${ic('edit')}</button>
           <button class="btn btn-ghost btn-sm" data-act="ms-del" data-id="${m.id}" title="Delete Milestone">${ic('trash')}</button>
         </div>
@@ -603,7 +610,8 @@
   function people() {
     const allRows = global.DB.rows(`
       SELECT pe.*,
-             (SELECT COUNT(*) FROM project_people pp WHERE pp.person_id = pe.id) as proj_count
+             (SELECT COUNT(*) FROM project_people pp JOIN projects p ON p.id = pp.project_id
+                WHERE pp.person_id = pe.id AND p.is_archived=0) as proj_count
       FROM people pe
       ORDER BY pe.is_retired, pe.type, pe.name`);
     const retiredCount = allRows.filter((r) => r.is_retired).length;
@@ -644,7 +652,9 @@
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('users')} People, Labs &amp; Researchers</span></div>
       </div>
-      ${!rows.length ? emptyState('users', 'No matching people', allRows.length ? 'Try changing your search or filters.' : 'Add Principal Investigators, lab members, and facility technicians.') : `
+      ${!rows.length ? (allRows.length
+        ? emptyState('users', 'No matching people', 'Try changing your search or filters.')
+        : emptyState('users', 'No people yet', 'Add Principal Investigators, lab members, and facility technicians.')) : `
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
@@ -677,7 +687,7 @@
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td><span class="badge primary" title="${r.proj_count} active project${r.proj_count === 1 ? '' : 's'}">${r.proj_count}</span></td>
                 <td>${r.is_staff ? `<span class="badge success" data-tooltip="Facility Staff — billable by the hour on bookings">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
-                <td class="mono small">${r.is_staff ? esc(r.rate || 0) : '—'}</td>
+                <td class="mono small">${r.is_staff ? esc(global.UI.fmtMoney(r.rate || 0)) : '—'}</td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
                   ${r.is_retired
@@ -701,7 +711,8 @@
   function instruments() {
     const allRows = global.DB.rows(`
       SELECT i.*,
-             (SELECT COUNT(*) FROM project_instruments pi WHERE pi.instrument_id = i.id) as proj_count,
+             (SELECT COUNT(*) FROM project_instruments pi JOIN projects p ON p.id = pi.project_id
+                WHERE pi.instrument_id = i.id AND p.is_archived=0) as proj_count,
              (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
                 FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
                 WHERE ist.instrument_id = i.id) as supervisors
@@ -746,14 +757,16 @@
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('cpu')} Core Instruments</span></div>
       </div>
-      ${!rows.length ? emptyState('cpu', 'No matching instruments', allRows.length ? 'Try changing your search or filters.' : 'Add microscopes, cytometers, or analysis workstations.') : `
+      ${!rows.length ? (allRows.length
+        ? emptyState('cpu', 'No matching instruments', 'Try changing your search or filters.')
+        : emptyState('cpu', 'No instruments yet', 'Add microscopes, cytometers, or analysis workstations.')) : `
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
             <col style="width:14%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
             <col style="width:13%"><col style="width:13%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
           </colgroup>
-          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th>Active In</th><th style="text-align:right">Actions</th></tr></thead>
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
@@ -763,8 +776,8 @@
                 <td class="faint small">${esc(r.location || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td class="faint small">${esc(r.supervisors || '—')}</td>
-                <td class="mono small">${esc(r.cost || 0)}</td>
-                <td class="muted small">${esc(r.cost_unit || 'time')}</td>
+                <td class="mono small">${esc(global.UI.fmtMoney(r.cost || 0))}</td>
+                <td class="muted small">${esc(global.UI.unitLabel(r.cost_unit || 'time'))}</td>
                 <td><span class="badge neutral">${r.proj_count} projects</span></td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
@@ -1269,8 +1282,8 @@
       <div class="card-body">
         <div class="row mb-8">
           <div class="grow">
-            <div style="font-weight:600">Startup Welcome Modal</div>
-            <div class="faint small">Show the welcome modal with Quick Demo vs Fresh Start options upon opening the app.</div>
+            <div style="font-weight:600">Startup Welcome Screen</div>
+            <div class="faint small">Show the welcome screen, offering "Seeded Example &amp; Walkthrough" or "Start Fresh (Empty Workspace)", upon opening the app.</div>
           </div>
           <label class="row" style="cursor:pointer;gap:8px">
             <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
@@ -1295,14 +1308,14 @@
       <div class="card-body">
         <div class="row mb-8">
           <div class="grow">
-            <div style="font-weight:600">Facility Sandbox &amp; Interactive Tour</div>
-            <div class="faint small">Load a complete multi-modality research dataset (projects, PIs, microscopes, milestones, meetings, calendar events) or start the guided walkthrough.</div>
+            <div style="font-weight:600">Facility Sandbox &amp; Guided Tour</div>
+            <div class="faint small">Load a complete multi-modality research dataset (projects, PIs, microscopes, milestones, meetings, calendar events) or start the guided tour.</div>
           </div>
         </div>
         <div class="row mt-8" style="gap:10px;flex-wrap:wrap">
           <button class="btn btn-secondary btn-sm" data-act="open-startup-modal">${ic('compass')} Open Welcome Screen</button>
           <button class="btn btn-secondary btn-sm" data-act="load-sample-data">${ic('sparkles')} Load Sample Data</button>
-          <button class="btn btn-tour btn-sm" data-act="tour">${ic('play')} Launch Field Walkthrough</button>
+          <button class="btn btn-tour btn-sm" data-act="tour">${ic('play')} Launch Guided Tour</button>
           <button class="btn btn-ghost btn-sm text-danger" style="color:var(--danger)" data-act="clear-data">${ic('trash')} Clear All Data</button>
         </div>
       </div>
@@ -1369,6 +1382,11 @@
           <div class="field"><label>Currency Symbol</label><input class="input" id="cfg-currency" value="${esc(global.DB.getConfig('currency', '$'))}" maxlength="4" /></div>
         </div>
         <button class="btn btn-primary btn-sm mt-8" data-act="save-billing-rates">${ic('check')} Save Rates</button>
+        <!-- Read-only: the "legacy Internal + External overhead sum" mentioned above and in the
+             Pricing Tiers / Group Discounts cards is a resolved number nowhere else on screen —
+             show it so the text isn't naming a figure the user can't see. Not editable; those two
+             config values have no editor anywhere and this doesn't add one. -->
+        <div class="faint small mt-8">Labs with no pricing tier are charged ${esc(String(global.DB.getConfigNum('overhead_internal', 0) + global.DB.getConfigNum('overhead_external', 0)))}% overhead — the Internal + External rates this app used before named tiers. Assign a tier below to replace it.</div>
       </div>
     </div>
 

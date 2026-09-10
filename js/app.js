@@ -229,7 +229,7 @@
           <div class="topbar">
             <span class="title" id="page-title">Dashboard</span>
             <div class="grow"></div>
-            <span class="saved-dot" id="saved-state" data-tooltip="Real-time SQLite autosave status"><span class="dot"></span><span class="txt">Saved</span></span>
+            <span class="saved-dot" id="saved-state" data-tooltip="Your changes save automatically to this browser"><span class="dot"></span><span class="txt">Saved</span></span>
           </div>
           <div class="main-inner" id="view"></div>
         </div>
@@ -417,17 +417,23 @@
         </div>
 
         <div class="startup-cards-grid">
-          <!-- Option 1: Seeded Example & Walkthrough -->
-          <div class="startup-card startup-card-featured" data-act="startup-demo">
+          <!-- Option 1: Demo Sandbox — a real link (not window.open) to ?demo=1, so a popup
+               blocker never eats it. It opens in its own tab against its own separate storage,
+               so nothing it does can touch this browser's real facility records; see
+               finishBoot()'s demo-mode branch and showDemoBanner() for the rest of the sandbox
+               story. The "never show again" checkbox has no submit step to hang a save off of
+               for a plain navigating link, so its state is saved on click, before the browser
+               follows the href. -->
+          <div class="startup-card startup-card-featured">
             <div class="startup-card-badge"><span class="badge primary">${ic('sparkles')} Explore Sample Data</span></div>
             <div class="startup-card-icon">${ic('compass')}</div>
-            <div class="startup-card-title">Seeded Example &amp; Walkthrough</div>
+            <div class="startup-card-title">Demo Sandbox &amp; Walkthrough</div>
             <div class="startup-card-body">
-              Load realistic facility imaging projects (Multiphoton, STED, Lightsheet), instruments, PIs, milestones, and meeting notes — paired with an interactive guided tour explaining every field.
+              Opens a separate practice copy of the app — with realistic facility imaging projects (Multiphoton, STED, Lightsheet), instruments, PIs, milestones, and booking notes, plus an interactive guided tour — in its own browser tab. It cannot affect your real records.
             </div>
-            <button class="btn btn-tour startup-card-btn" data-act="startup-demo">
-              ${ic('play')} Load Demo &amp; Start Tour
-            </button>
+            <a class="btn btn-tour startup-card-btn" id="startup-demo-anchor" href="?demo=1" target="_blank" rel="noopener noreferrer">
+              ${ic('play')} Open Demo Sandbox
+            </a>
           </div>
 
           <!-- Option 2: Start Fresh -->
@@ -462,16 +468,6 @@
         }
       };
 
-      const handleDemo = async () => {
-        savePref();
-        DB.seedSampleData();
-        UI.closeDim(modalDim);
-        route('dashboard');
-        UI.toast('Sample facility dataset loaded!');
-        await runAfterChoice(); // show the first-run notice before the tour takes over the screen
-        startTour();
-      };
-
       const handleFresh = () => {
         const proceed = async () => {
           savePref();
@@ -482,7 +478,7 @@
           await runAfterChoice();
         };
         if (hasAnyData()) {
-          UI.confirmModal('Start Fresh?', 'This will permanently delete all existing projects, people, instruments, milestones, and meetings currently stored in this browser. This cannot be undone. Continue?', { danger: true }).then((ok) => {
+          UI.confirmModal('Start Fresh?', 'This will permanently delete all existing projects, people, instruments, milestones, and bookings currently stored in this browser. This cannot be undone.', { danger: true, confirmText: 'Delete Everything' }).then((ok) => {
             if (ok) proceed();
           });
         } else {
@@ -490,9 +486,11 @@
         }
       };
 
-      modalDim.querySelectorAll('[data-act="startup-demo"]').forEach(el => {
-        el.onclick = (e) => { e.stopPropagation(); handleDemo(); };
-      });
+      // The demo card is now a genuine navigating <a>, not a dispatched action — but the
+      // "never show again" checkbox still needs its state saved before the browser follows
+      // the href away from this modal, since there's no later step to hang savePref() off of.
+      const demoAnchor = modalDim.querySelector('#startup-demo-anchor');
+      if (demoAnchor) demoAnchor.addEventListener('click', () => savePref());
       modalDim.querySelectorAll('[data-act="startup-fresh"]').forEach(el => {
         el.onclick = (e) => { e.stopPropagation(); handleFresh(); };
       });
@@ -628,6 +626,11 @@
   }
 
   function maybeAutoBackup() {
+    // Belt-and-braces: finishBoot() already never calls this in demo mode, but guard here too
+    // so any future caller can't accidentally have a demo-sandbox write silently clobber the
+    // real device's daily backup file (performBackupDownload names files identically in both
+    // modes — see the comment in finishBoot).
+    if (window.IS_DEMO) return;
     if (!isAutoBackupEnabled()) return;
     if (!hasAnyData()) return;
     const last = UI.storage.getItem('last-auto-backup-at');
@@ -679,7 +682,7 @@
             fromFile
               ? 'Opening index.html directly by double-clicking it can trigger this in some browsers/security settings.'
               : 'Your browser has storage disabled or restricted for this page.',
-            'Run the included local server (see README) or open the hosted version of this app, then reload.'
+            'Run the included local server (see the <a href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/" target="_blank" rel="noopener noreferrer">user manual</a>) or open the hosted version of this app, then reload.'
           ]
         };
       default:
@@ -687,7 +690,7 @@
           headline: 'This browser is blocking permanent saving for the app in its current location.',
           steps: [
             fromFile ? 'Opening the file directly (file://) is the most common cause.' : 'Your browser has storage disabled or restricted for this page.',
-            'Open the hosted version of this app (or run a local server — see README), then reload.'
+            'Open the hosted version of this app (or run a local server — see the <a href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/" target="_blank" rel="noopener noreferrer">user manual</a>), then reload.'
           ]
         };
     }
@@ -702,7 +705,7 @@
           <h1>Storage unavailable</h1>
           <p>${guidance.headline}</p>
           <ol class="boot-steps">${guidance.steps.map((s) => `<li>${s}</li>`).join('')}</ol>
-          <p class="boot-note">Note: your data always stays on <strong>this one device/browser</strong> — it never syncs between devices or people, even once saving works. See the README for how to move data between devices.</p>
+          <p class="boot-note">Note: your data always stays on <strong>this one device/browser</strong> — it never syncs between devices or people, even once saving works. See the <a href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/" target="_blank" rel="noopener noreferrer">user manual</a> for how to move data between devices.</p>
           <div class="boot-actions">
             <button class="btn btn-secondary" id="boot-continue">Continue Anyway (Temporary Session)</button>
           </div>
@@ -748,6 +751,38 @@
     bar.querySelector('.temp-session-banner-close').onclick = () => bar.remove();
   }
 
+  // Persistent (no dismiss) banner shown for the life of a demo (?demo=1) tab. Reuses the
+  // temp-session-banner styling (css/app.css) rather than adding new CSS — `demo-session-banner`
+  // is a sibling class purely so this banner can be told apart from a temporary-session one if
+  // ever both need distinguishing, not because it needs different rules.
+  function showDemoBanner() {
+    if (document.getElementById('demo-session-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'demo-session-banner';
+    bar.className = 'temp-session-banner demo-session-banner';
+    bar.innerHTML = `
+      <span class="temp-session-banner-ic">${ic('sparkles')}</span>
+      <span>Demo sandbox — practice data in its own separate storage. Nothing you do here touches your real facility records.</span>
+      <button class="btn btn-secondary btn-sm" type="button" id="demo-banner-why">Why a separate tab?</button>
+      <button class="btn btn-secondary btn-sm" type="button" data-act="reset-demo-sandbox">Reset Sandbox</button>
+      <a class="btn btn-secondary btn-sm" href="index.html">Back to Real App</a>`;
+    document.body.prepend(bar);
+
+    // "Reset Sandbox" is wired through the normal data-act dispatcher (see handleAct's
+    // 'reset-demo-sandbox' case) rather than a one-off handler here, so the confirm-and-reseed
+    // logic lives in exactly one place.
+    bar.querySelector('#demo-banner-why').onclick = () => {
+      UI.openModal(`
+        <div class="head"><span class="modal-title">${ic('compass')} Why a separate tab?</span></div>
+        <div class="body"><div class="stack">
+          <p>The app keeps each facility's records in one place inside this browser, and a browser tab can only hold one at a time.</p>
+          <p>So the only way to let you try things out — add a project, cancel a booking, delete a person — without any risk to your real records is to give the practice data its own place to live, in its own tab.</p>
+          <p>Closing this tab leaves the real app exactly as it was. Anything you change here is kept, so you can come back to your practice data later — use <strong>Reset Sandbox</strong> below if you'd rather start the walkthrough over from scratch.</p>
+        </div></div>
+        <div class="foot"><button class="btn btn-primary" data-act="close">Got It</button></div>`);
+    };
+  }
+
   // Up-front notice with two INDEPENDENT parts (per user request):
   //   1. The per-device data explanation — dismissible for good via "Don't show this again"
   //      (flag: crm-seen-device-notice).
@@ -768,7 +803,7 @@
     return new Promise((resolve) => {
       const infoHtml = infoNeeded ? `
           <p>Your data is stored <strong>only in this browser, on this device</strong>. It does not sync between devices or people automatically.</p>
-          <p>To move data to another device, or share a snapshot with a colleague, use <strong>Settings → Export Backup</strong>, then <strong>Import Backup</strong> on the other device.</p>
+          <p>To move data to another device, or share a snapshot with a colleague, use <strong>Settings → Export Backup</strong>, then <strong>Restore from Backup</strong> on the other device.</p>
           <p>You can put an exported backup <em>file</em> in a cloud-synced folder (Google Drive, Dropbox, etc.) as a manual convenience — but it's a snapshot, not live sync: it's only as current as your last export, and editing on two devices before re-importing means whichever backup you import last overwrites the other device's changes.</p>` : '';
       const folderHtml = folderNeeded ? `
           <div class="card" id="device-notice-folder-card" style="background:var(--surface-2);border-style:dashed;padding:12px">
@@ -845,25 +880,62 @@
   }
 
   async function finishBoot(status) {
+    // A demo tab opens a DIFFERENT database from the real one (see IDB_NAME in db.js), so its
+    // sandbox starts out genuinely empty — nothing has ever written to it. Fill it before the
+    // first render, or the sandbox opens blank and there is nothing to practise on.
+    //
+    // seedSampleData() is idempotent: it returns early when the sandbox already holds rows, so
+    // reopening or reloading the demo tab keeps whatever the user was in the middle of rather
+    // than resetting their practice work under them. That is also why "was it empty?" has to be
+    // asked BEFORE the call — it is the only way to tell a first open from a return visit, and
+    // the tour should only take over the screen on a first open.
+    const demoFirstOpen = window.IS_DEMO && !hasAnyData();
+    if (window.IS_DEMO) DB.seedSampleData();
+
     renderShell();
     wireGlobal();
     initRouting();
 
     if (!status.persistent) showTemporarySessionBanner();
 
-    requestPersistentStorage();
-    await refreshAutoBackupFolderStatus();
-    maybeAutoBackup();
-    setInterval(maybeAutoBackup, 60 * 60 * 1000);
+    // Demo mode runs against its own separate database (see db.js), seeded just above, so none
+    // of the real-device bookkeeping below applies — and some of it is actively unsafe
+    // to run here:
+    //   - requestPersistentStorage() / refreshAutoBackupFolderStatus() would probe/read the
+    //     REAL browsing context's persistence + backup-folder handle from inside a demo tab,
+    //     which has nothing to do with the sandbox the user is looking at.
+    //   - maybeAutoBackup() (and its hourly interval) is the sharp edge: demo mode always has
+    //     data, so it would fire on open whenever 'last-auto-backup-at' is stale, and
+    //     performBackupDownload() names its files identically in both modes
+    //     ('core-facility-autobackup-<date>.json' / 'core-facility-export-<date>.xlsx') — so a
+    //     demo-triggered write could silently overwrite the day's REAL backup in the user's
+    //     chosen folder, or pop an unexpected download prompt. Skipping it here is belt-and-
+    //     braces; maybeAutoBackup() itself also early-returns in demo mode (see below) so it's
+    //     harmless even if some future path calls it directly.
+    //   - The device notice and startup welcome screen are onboarding for a real, empty
+    //     workspace; a demo tab already has a guided tour to introduce it (see startTour()).
+    if (!window.IS_DEMO) {
+      requestPersistentStorage();
+      await refreshAutoBackupFolderStatus();
+      maybeAutoBackup();
+      setInterval(maybeAutoBackup, 60 * 60 * 1000);
 
-    const noticeParts = shouldShowDeviceNotice();
-    const showNotice = () => (noticeParts.show ? showDeviceNotice(noticeParts) : Promise.resolve());
+      const noticeParts = shouldShowDeviceNotice();
+      const showNotice = () => (noticeParts.show ? showDeviceNotice(noticeParts) : Promise.resolve());
 
-    const hideStartup = UI.storage.getItem('crm-hide-startup-modal') === '1';
-    if (!hideStartup) {
-      openStartupModal(showNotice); // notice pops after the welcome modal, not before it
+      const hideStartup = UI.storage.getItem('crm-hide-startup-modal') === '1';
+      if (!hideStartup) {
+        openStartupModal(showNotice); // notice pops after the welcome modal, not before it
+      } else {
+        await showNotice();
+      }
     } else {
-      await showNotice();
+      showDemoBanner();
+      // The welcome screen's old "Load Demo & Start Tour" card did both things at once. Now that
+      // the demo lives in its own tab, opening that tab IS the "load demo" half, so the tour
+      // still needs to follow it — but only the first time, since a returning practice session
+      // does not want the tour seizing the screen again.
+      if (demoFirstOpen) startTour();
     }
   }
 
@@ -917,13 +989,29 @@
       case 'tour': return startTour();
       case 'open-startup-modal': return openStartupModal();
       case 'load-sample-data': {
-        DB.seedSampleData();
-        refresh();
-        UI.toast('Sample facility dataset loaded!');
+        // DB.seedSampleData() now refuses outside demo mode (see db.js), so this Settings
+        // action no longer seeds the CURRENT (real) database in place — it hands the user off
+        // to the demo sandbox instead, in its own tab against its own separate storage. This is
+        // a direct response to a user click, so window.open here (rather than a plain <a>,
+        // which we can't add — the button markup lives in views.js) isn't popup-blocked.
+        window.open('?demo=1', '_blank', 'noopener');
+        return;
+      }
+      case 'reset-demo-sandbox': {
+        // Surfaced from the demo banner (showDemoBanner), not from Settings — this data-act
+        // only ever fires inside a demo tab, where DB.seedSampleData({ force: true }) is
+        // allowed to actually re-seed over existing sandbox data.
+        UI.confirmModal('Reset Sandbox?', 'This restores the demo sandbox to its original sample data. Anything you changed here will be lost. This does not affect your real facility records.', { danger: true, confirmText: 'Reset Sandbox' }).then((yes) => {
+          if (yes) {
+            DB.seedSampleData({ force: true });
+            refresh();
+            UI.toast('Demo sandbox reset to its original sample data.');
+          }
+        });
         return;
       }
       case 'clear-data': {
-        UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and meetings? This cannot be undone.', { danger: true }).then((yes) => {
+        UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and bookings? This cannot be undone.', { danger: true, confirmText: 'Delete Everything' }).then((yes) => {
           if (yes) {
             DB.clearAllData();
             refresh();
@@ -1420,7 +1508,7 @@
 
     const ok = await UI.confirmModal(
       'Duplicate Project',
-      `Create a copy of "${esc(src.title)}" as a new template? This copies the project details, team, assigned instruments, custom fields, and milestones (reset to pending, dates cleared). Meetings and files are not copied.`
+      `Create a copy of "${esc(src.title)}" as a new template? This copies the project details, team, assigned instruments, custom fields, and milestones (reset to pending, dates cleared). Bookings and files are not copied.`
     );
     if (!ok) return;
 
@@ -1608,7 +1696,7 @@
   async function msDel(id) {
     const ms = DB.row('SELECT name FROM milestones WHERE id=?', [id]);
     if (!ms) return;
-    const ok = await UI.confirmModal('Delete Milestone', `Delete milestone "${esc(ms.name)}"? This cannot be undone.`, { danger: true });
+    const ok = await UI.confirmModal('Delete Milestone', `Delete milestone "${esc(ms.name)}"? This cannot be undone.`, { danger: true, confirmText: 'Delete' });
     if (!ok) return;
 
     // Defensive explicit cleanup as a belt-and-suspenders guard even though cascade is
@@ -2168,9 +2256,12 @@
     }));
   }
 
+  // Delegates to the single shared implementation (ui.js) so the booking modal and Reports can
+  // never disagree about money (CLAUDE.md: "exactly one copy"). Kept as a local wrapper so the
+  // ~20 existing call sites in this file don't all need renaming to UI.fmtMoney. Note this
+  // changes displayed output from e.g. $1250.00 to $1,250.00 (thousands separators) — intended.
   function fmtMoney(n) {
-    const cur = DB.getConfig('currency', '$');
-    return cur + (Number(n) || 0).toFixed(2);
+    return UI.fmtMoney(n);
   }
 
 
@@ -3416,7 +3507,7 @@
     const withoutEmail = people.filter((p) => !p.email || !p.email.trim());
 
     if (!withEmail.length) {
-      UI.toast(people.length ? 'No attendee has an email address' : 'This meeting has no attendees', 'error');
+      UI.toast(people.length ? 'No attendee has an email address' : 'This booking has no attendees', 'error');
       return;
     }
 
@@ -3542,7 +3633,7 @@
   async function kvDel(id) {
     const item = DB.row('SELECT key FROM kv WHERE id=?', [id]);
     if (!item) return;
-    const ok = await UI.confirmModal('Delete Field', `Delete custom field "${esc(item.key)}"? This cannot be undone.`, { danger: true });
+    const ok = await UI.confirmModal('Delete Field', `Delete custom field "${esc(item.key)}"? This cannot be undone.`, { danger: true, confirmText: 'Delete' });
     if (!ok) return;
 
     DB.run('DELETE FROM kv WHERE id=?', [id]);
@@ -3701,7 +3792,7 @@
   async function deleteFile(id) {
     const f = DB.row('SELECT name FROM files WHERE id=?', [id]);
     if (!f) return;
-    const ok = await UI.confirmModal('Delete Attachment', `Delete "${esc(f.name)}"? This cannot be undone.`, { danger: true });
+    const ok = await UI.confirmModal('Delete Attachment', `Delete "${esc(f.name)}"? This cannot be undone.`, { danger: true, confirmText: 'Delete' });
     if (!ok) return;
 
     DB.run('DELETE FROM files WHERE id=?', [id]);
@@ -4654,7 +4745,7 @@
               ${msToday.length ? msToday.map((m) => `
                 <div class="row milestone-quick-row">
                   <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable"
-                        data-act="toggle-ms-status" data-id="${m.id}" data-tooltip="Click to toggle status">${m.status}</span>
+                        data-act="toggle-ms-status" data-id="${m.id}" data-tooltip="Click to set status">${UI.msStatusLabel(m.status)}</span>
                   <div class="grow" style="cursor:pointer" data-goto="project" data-id="${m.project_id}">
                     <div style="font-weight:600">${esc(m.name)}</div>
                     <div class="faint small">${esc(m.project_title)}${m.owners ? ' · ' + esc(m.owners) : ''}</div>
@@ -4680,7 +4771,7 @@
                   ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
                   ${m.note ? `<div class="small muted mt-8 rte-content">${UI.noteHtml(m.note)}</div>` : ''}
                   ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
-                </div>`).join('') : '<div class="faint small">No consultation meetings scheduled for today.</div>'}
+                </div>`).join('') : '<div class="faint small">No consultations scheduled for today.</div>'}
             </div>
           </div>
 
@@ -4691,7 +4782,7 @@
             <div class="card-body">
               ${msOverdue.map((m) => `
                 <div class="row milestone-quick-row">
-                  <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" data-tooltip="Mark Done">overdue</span>
+                  <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" data-tooltip="Click to set status">${UI.msStatusLabel('overdue')}</span>
                   <div class="grow" style="cursor:pointer" data-goto="project" data-id="${m.project_id}">
                     <div style="font-weight:600">${esc(m.name)}</div>
                     <div class="faint small">${esc(m.project_title)} · Due: <span style="color:var(--danger)">${UI.fmtDate(m.due_date)}</span></div>
@@ -4723,6 +4814,25 @@
 
   /* ---------------- Onboarding Tour (Multi-Screen Walkthrough) ---------------- */
   function startTour() {
+    // The tour's steps open real dialogs and point at real cards (milestones, team, exports)
+    // that simply don't exist yet on an empty, freshly-started real workspace — touring nothing
+    // teaches nothing. Offer the demo sandbox instead, which always has data to point at. This
+    // check only applies to the REAL app: a demo tab (window.IS_DEMO) always has data (db.js
+    // seeds it on first boot), so it always falls through to the real tour below.
+    if (!window.IS_DEMO && !hasAnyData()) {
+      UI.openModal(`
+        <div class="head"><span class="modal-title">${ic('compass')} Take the Tour on Practice Data</span></div>
+        <div class="body"><div class="stack">
+          <p>Your workspace is empty right now, so the guided tour would just be pointing at blank screens.</p>
+          <p>Open the demo sandbox instead — a separate practice copy of the app, in its own tab, already filled with sample projects, milestones, and bookings for the tour to walk through. It cannot affect your real records.</p>
+        </div></div>
+        <div class="foot">
+          <button class="btn btn-secondary" data-act="close">Not Now</button>
+          <a class="btn btn-tour" href="?demo=1" target="_blank" rel="noopener noreferrer" data-act="close">${ic('play')} Open Demo Sandbox</a>
+        </div>`);
+      return;
+    }
+
     // If no project exists, check first project ID
     const firstProj = DB.row('SELECT id FROM projects ORDER BY id ASC LIMIT 1');
     const pid = firstProj ? firstProj.id : 1;
@@ -4735,120 +4845,120 @@
       {
         route: 'dashboard',
         sel: '.grid.cols-4',
-        title: '1. Facility Dashboard',
+        title: 'Facility Dashboard',
         body: 'Welcome to Core Facility Tracker! These tiles give you live counts — total and active projects, overdue milestones, and completed work — with the lists below showing what is due soon.'
       },
       {
         sel: '#app-sidebar',
-        title: '2. Sidebar Navigation & Collapse',
-        body: 'Switch between Projects, People &amp; Labs, Instruments, Calendar, and Settings. The chevron at the top collapses the sidebar to widen your working canvas.'
+        title: 'Sidebar Navigation & Collapse',
+        body: 'Switch between Dashboard, Projects, People &amp; Labs, Instruments, Calendar, and Reports. Settings, the guided tour, and the user manual live in the footer at the bottom of the sidebar. The chevron at the top collapses the sidebar to widen your working canvas.'
       },
       {
         route: 'projects',
         sel: '.filter-bar',
-        title: '3. Projects Registry & Filters',
+        title: 'Projects Registry & Filters',
         body: 'Search across titles, codes, PIs, tags, and funding. Filter by Status, Priority, and Modality — and start a new project or export every project to one spreadsheet from here.'
       },
       {
         route: 'projects',
         action: () => newProject(),
         sel: '.modal',
-        title: '4. New Project Dialog',
+        title: 'New Project Dialog',
         body: 'Initiate a project: title, status, priority, and PI — or register a brand-new PI inline. Editable dropdowns (Modality, Funding, Sample) each carry a "+ Add New" option that saves a facility-wide term on the spot.'
       },
       {
         route: 'project',
         projectId: pid,
         sel: '.project-header-card',
-        title: '5. Project Details & Grant Metadata',
+        title: 'Project Details & Grant Metadata',
         body: 'The header consolidates the PI, project code, timeline, status, and priority. The quick-status bar below flips a project through its lifecycle in one click.'
       },
       {
         route: 'project',
         projectId: pid,
         sel: '[data-tour="proj-milestones"]',
-        title: '6. Milestones & Deliverables',
-        body: 'Each milestone shows its status (done, in-progress, pending, overdue), due date, assigned owners, and required instruments. Click a status dot or badge to cycle it.'
+        title: 'Milestones & Deliverables',
+        body: 'Each milestone shows its status (done, in-progress, pending, overdue), due date, assigned owners, and required instruments. Click a status dot or badge to open a picker and set its status directly.'
       },
       {
         action: () => addMilestone(),
         sel: '.modal',
-        title: '7. Add Milestone Dialog',
+        title: 'Add Milestone Dialog',
         body: 'Add a deliverable with a due date, then assign responsible people and the instruments it needs. Edits reuse this same dialog.'
       },
       {
         route: 'project',
         projectId: pid,
         sel: '[data-tour="proj-team"]',
-        title: '8. Team & Collaborators',
-        body: 'Add PIs, postdocs, students, and technicians with their role on the project. The cards around this one cover assigned instruments, meeting minutes, files, and custom metadata fields.'
+        title: 'Team & Collaborators',
+        body: 'Add PIs, postdocs, students, and technicians with their role on the project. The cards around this one cover assigned instruments, booking notes, files, and custom metadata fields.'
       },
       {
         action: () => addKV(),
         sel: '.modal',
-        title: '9. Custom Metadata Field Dialog',
+        title: 'Custom Metadata Field Dialog',
         body: 'Attach any key/value your facility tracks — laser lines, objective NA, biosafety level, grant sub-account — as a custom field on the project.'
       },
       {
         action: () => addFile(),
         sel: '.modal',
-        title: '10. Attach File or Link Dialog',
+        title: 'Attach File or Link Dialog',
         body: 'Link a protocol, a dataset on the NAS, or any external URL. Links render as tidy buttons on the project page.'
       },
       {
         route: 'project',
         projectId: pid,
         sel: '[data-tour="proj-exports"]',
-        title: '11. One-Click Report Generation',
+        title: 'One-Click Report Generation',
         body: 'The XLSX, DOCX, and PDF buttons export official documentation in one click — multi-page paginated PDF reports with headers and page numbers, Word documents, and spreadsheets. Duplicate clones the whole project as a template.'
       },
       {
         route: 'people',
         sel: '.filter-bar',
-        title: '12. People, Labs & Researchers',
+        title: 'People, Labs & Researchers',
         body: 'A central registry of PIs, postdocs, students, and staff. The table below carries separate Lab / Group and Department columns, emails, and each person’s active project count.'
       },
       {
         action: () => addPerson(),
         sel: '.modal',
-        title: '13. Register Person Dialog',
+        title: 'Register Person Dialog',
         body: 'Register a researcher: Position / Role plus separate Lab / Group and Department dropdowns, each with a quick "+ Add New" mini-dialog for values you don\'t have yet.'
       },
       {
         route: 'instruments',
         sel: '.filter-bar',
-        title: '14. Core Instruments Inventory',
+        title: 'Core Instruments Inventory',
         body: 'Track microscopes and workstations — status (Available, In-use, Maintenance, Down), modality, location, and which projects currently use them. Filter by status or modality here.'
       },
       {
         action: () => addInstrument(),
         sel: '.modal',
-        title: '15. Add Instrument Dialog',
+        title: 'Add Instrument Dialog',
         body: 'Register a microscope or workstation with its modality, status, physical location, and configuration notes.'
       },
       {
         route: 'calendar',
         sel: '.cal-grid',
-        title: '16. Schedule & Milestone Calendar',
+        title: 'Schedule & Milestone Calendar',
         body: 'A monthly grid combining milestone deadlines and scheduled facility consultations. Click any day to create a booking on it; use Prev / Next to move months.'
       },
       {
         action: () => newBooking(UI.today()),
         sel: '.modal',
-        title: '17. New Booking Dialog',
+        title: 'New Booking Dialog',
         body: 'Assign people and instruments from dropdowns that fill up with removable badges (hover for role / modality), register a new person mid-booking (the mint button), and write rich-text notes — bold, italics, bullets, and font sizes.'
       },
       {
         route: 'calendar',
         action: () => openTodayModal(),
         sel: '.modal',
-        title: '18. Today’s Agenda Dialog',
+        title: 'Today’s Agenda Dialog',
         body: 'A focused view of everything due or scheduled today — milestones and consultations — for a quick morning stand-up.'
       },
       {
         route: 'settings',
         sel: '[data-tour="settings-backup"]',
-        title: '19. Portable Data & Backups',
+        title: 'Portable Data & Backups',
         body: 'Your whole facility database lives in this browser. Export a single-file JSON backup anytime, restore one, enable automatic daily backups, or point them at a silent folder. Theme and sample-data controls are on this page too.'
       }
     ]);

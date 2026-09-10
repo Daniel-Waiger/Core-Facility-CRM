@@ -296,7 +296,7 @@
     XLSX.utils.book_append_sheet(wb, ws2, 'Milestones');
 
     // Sheet 3: Team
-    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Facility Staff', 'Rate/hr']];
+    const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Facility Staff', `Rate/hr (${DB.getConfig('currency', '$')})`]];
     d.ppl.forEach((pe) => {
       teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
@@ -305,9 +305,11 @@
     XLSX.utils.book_append_sheet(wb, ws3, 'Team');
 
     // Sheet 4: Instruments
-    const instRows = [['Instrument Name', 'Kind / Modality', 'Status', 'Cost', 'Unit']];
+    // Cost stays a bare number (not fmtMoney) so spreadsheet users can sum/sort the column; the
+    // configured currency symbol goes on the header instead, same as Rate/hr above.
+    const instRows = [['Instrument Name', 'Kind / Modality', 'Status', `Cost (${DB.getConfig('currency', '$')})`, 'Unit']];
     d.inst.forEach((i) => {
-      instRows.push([i.name, i.kind || '—', i.status || '—', i.cost || 0, i.cost_unit || 'time']);
+      instRows.push([i.name, i.kind || '—', i.status || '—', i.cost || 0, UI.unitLabel(i.cost_unit || 'time')]);
     });
     const ws4 = XLSX.utils.aoa_to_sheet(instRows);
     ws4['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 10 }];
@@ -432,7 +434,7 @@
     children.push(new Paragraph({ text: 'Assigned Instruments', heading: HeadingLevel.HEADING_2 }));
     if (d.inst.length) {
       d.inst.forEach((i) => {
-        children.push(new Paragraph({ text: `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${i.cost || 0} per ${i.cost_unit || 'time'}` }));
+        children.push(new Paragraph({ text: `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}` }));
       });
     } else {
       children.push(new Paragraph({ text: 'No instruments assigned.' }));
@@ -589,7 +591,9 @@
       pdf.setFontSize(9);
       d.ms.forEach((m) => {
         checkPage(12);
-        const statusPrefix = m.status === 'done' ? '[✓ DONE]' : m.status === 'in-progress' ? '[IN PROGRESS]' : '[PENDING]';
+        // Derive from the shared UI.msStatusLabel map (not a hand-rolled ternary) so a
+        // facility-added status shows its own label here instead of silently reading "PENDING".
+        const statusPrefix = `[${m.status === 'done' ? '✓ ' : ''}${UI.msStatusLabel(m.status).toUpperCase()}]`;
         pdf.setFont('helvetica', 'bold');
         pdf.text(`${statusPrefix} ${m.name}`, margin, y);
         pdf.setFont('helvetica', 'normal');
@@ -637,7 +641,7 @@
       pdf.setFontSize(9);
       d.inst.forEach((i) => {
         checkPage(6);
-        pdf.text(`• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${i.cost || 0} per ${i.cost_unit || 'time'}`, margin, y);
+        pdf.text(`• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}`, margin, y);
         y += 5;
       });
     } else {
@@ -842,7 +846,7 @@
     XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
 
     // Sheet 3: People
-    const peopleRows = [['Name', 'Status', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Facility Staff', 'Rate/hr']];
+    const peopleRows = [['Name', 'Status', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Facility Staff', `Rate/hr (${DB.getConfig('currency', '$')})`]];
     DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate, is_retired FROM people ORDER BY is_retired, name').forEach((pe) => {
       peopleRows.push([pe.name, pe.is_retired ? 'Retired' : 'Active', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
@@ -851,14 +855,16 @@
     XLSX.utils.book_append_sheet(wb, wsPe, 'People');
 
     // Sheet 4: Instruments
-    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Supervisor(s)', 'Cost', 'Unit']];
+    // Cost stays a bare number (not fmtMoney) so spreadsheet users can sum/sort the column; the
+    // configured currency symbol goes on the header instead, same as Rate/hr above.
+    const instRows = [['Name', 'In Service', 'Kind / Modality', 'Status', 'Location', 'Notes', 'Supervisor(s)', `Cost (${DB.getConfig('currency', '$')})`, 'Unit']];
     DB.rows(`
       SELECT i.name, i.kind, i.status, i.location, i.note, i.cost, i.cost_unit, i.is_retired,
              (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
                 FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
                 WHERE ist.instrument_id = i.id) as supervisors
       FROM instruments i ORDER BY i.is_retired, i.name`).forEach((i) => {
-      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.supervisors || '—', i.cost || 0, i.cost_unit || 'time']);
+      instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.supervisors || '—', i.cost || 0, UI.unitLabel(i.cost_unit || 'time')]);
     });
     const wsI = XLSX.utils.aoa_to_sheet(instRows);
     wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 24 }, { wch: 10 }, { wch: 10 }];
@@ -1036,13 +1042,17 @@
     wsNotes['!cols'] = [{ wch: 100 }];
     XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
 
-    // Sheet 2: Instrument utilisation
+    // Sheet 2: Instrument utilization
     const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Billed Revenue', 'Share of Total Hours %']];
     instr.rows.forEach((r) => {
       instrRows.push([UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), round2(r.sharePct)]);
     });
     const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
     wsInstr['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
+    // Sheet NAME, i.e. data — deliberately kept as the British spelling. docs/manual/reports.html
+    // quotes this exact string to the user, so "fixing" the spelling here would desync the manual
+    // (see CLAUDE.md: user-visible strings that are also data must not be recapitalized/respelled
+    // without grepping every place they're compared or quoted).
     XLSX.utils.book_append_sheet(wb, wsInstr, 'Instrument Utilisation');
 
     // Sheet 3: Facility staff time

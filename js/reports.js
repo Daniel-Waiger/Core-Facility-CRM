@@ -239,7 +239,7 @@
   }
 
   /* ================================================================================
-     Card 1 — Instrument utilisation
+     Card 1 — Instrument utilization
      ================================================================================ */
   function computeInstrumentRows(from, to) {
     if (from === undefined) { from = state.from; to = state.to; }
@@ -488,7 +488,7 @@
   function computeStewardshipRows(from, to) {
     if (from === undefined) { from = state.from; to = state.to; }
 
-    const instr = computeInstrumentRows(from, to);                 // reuse — no duplicated utilisation math
+    const instr = computeInstrumentRows(from, to);                 // reuse — no duplicated utilization math
     const consult = computeConsultRows(from, to);                  // reuse — no duplicated consult-tag math
     const consultByInstrument = new Map(consult.instrumentRows.map((r) => [r.id, r.count]));
 
@@ -922,11 +922,13 @@
 
   /* ---------------- Small render helpers ---------------- */
   function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
-  // Same configured symbol the booking modal and Project Costs use (Settings -> Billing Rates);
-  // hardcoding '$' here would have shown the wrong currency on every non-$ facility's reports.
+  // The single copy of this now lives in ui.js (UI.fmtMoney) so every screen that prints money —
+  // the booking modal, Project Costs, and this report — reads the same configured currency symbol
+  // (Settings -> Billing Rates) and rounds the same way. Per CLAUDE.md: "a report that disagrees
+  // with the booking modal about money is worse than no report." Kept as a local alias so the
+  // ~8 call sites below don't all need renaming.
   function fmtMoney(n) {
-    const cur = DB.getConfig('currency', '$');
-    return cur + (Math.round((n || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return UI.fmtMoney(n);
   }
   function nameCell(name, retired) { return esc(UI.retiredName(name, retired)); }
   function bar(pct) {
@@ -958,7 +960,7 @@
   }
   const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)'];
 
-  // Chart 1 of 3 — horizontal bars: instrument utilisation by booked hours (from
+  // Chart 1 of 3 — horizontal bars: instrument utilization by booked hours (from
   // computeInstrumentRows, already sorted by hours descending). Capped to the top 8 rows so the
   // chart stays legible; the full set is always in the table underneath, and the cap is disclosed
   // rather than silently dropping rows from view.
@@ -984,7 +986,7 @@
     }).join('');
     const note = rows.length > shown.length
       ? `<div class="faint small mt-8">Chart shows the top ${shown.length} of ${rows.length} instruments by booked hours; the table below lists all of them.</div>` : '';
-    return `<div class="tbl-wrap"><svg role="img" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="max-width:640px" aria-label="Instrument utilisation by booked hours"><title>Instrument utilisation by booked hours</title>${bars}</svg></div>${note}`;
+    return `<div class="tbl-wrap"><svg role="img" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="max-width:640px" aria-label="Instrument utilization by booked hours"><title>Instrument utilization by booked hours</title>${bars}</svg></div>${note}`;
   }
 
   // Chart 2 of 3 — funnel: stage bars + adjacent conversion-percentage labels, from
@@ -1405,7 +1407,7 @@
     </div>
 
     <div class="card mb-16">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Instrument Utilisation</span></div></div>
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Instrument Utilization</span></div></div>
       ${!instr.rows.length ? global.Views.emptyState('cpu', 'No bookings in this range', 'Widen the date range or add instrument bookings.') : `
       <div class="mb-16">${chartUtilization(instr.rows)}</div>
       <div class="tbl-wrap">
@@ -1511,7 +1513,7 @@
           </div>`}
         </div>
       </div>
-      <div class="faint small mt-8">Bookings/hours exclude cancelled bookings; Total Cost follows the same retained-charge rule as the cards above. A meeting with no project is grouped as "Facility-wide"; a meeting with no lab/group on file is omitted from the By Lab/Group table.</div>
+      <div class="faint small mt-8">Bookings/hours exclude cancelled bookings; Total Cost follows the same retained-charge rule as the cards above. A booking with no project is grouped as "Facility-wide"; a booking with no lab/group on file is omitted from the By Lab/Group table.</div>
     </div>
 
     <div class="card mb-16">
