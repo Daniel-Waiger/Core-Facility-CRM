@@ -6,6 +6,12 @@ This project uses [Semantic Versioning](https://semver.org/).
 ## [1.10.2] — 2026-09-10
 
 ### Fixed
+- **The welcome screen stayed open behind the demo sandbox.** Opening the sandbox from the
+  welcome screen launches a new tab, which means the original tab is never navigated away — so
+  the welcome screen sat there in front of the app, waiting to be dismissed by hand, and the
+  first-run explanation of where your data lives never appeared on that path even though every
+  other way out of that screen shows it. Picking the sandbox now clears the welcome screen and
+  shows that notice, the same as choosing Start Fresh does.
 - **Money and hours no longer change shape depending on who is looking.** Both were formatted
   without pinning a locale, so the figures followed each viewer's browser rather than the
   facility's settings — and the difference is not cosmetic: the same total reads `$1,234,567.50`

@@ -486,11 +486,22 @@
         }
       };
 
-      // The demo card is now a genuine navigating <a>, not a dispatched action — but the
-      // "never show again" checkbox still needs its state saved before the browser follows
-      // the href away from this modal, since there's no later step to hang savePref() off of.
+      /* The demo card is a genuine <a> opening a new tab, not a dispatched action, so this
+         listener has to do everything the old handleDemo() did apart from the seeding — which
+         now happens in the sandbox tab itself.
+         Note the href carries target="_blank": the browser does NOT navigate this tab away, so
+         without closing the dialog here the user comes back from the sandbox to find the welcome
+         screen still sitting in front of the app. runAfterChoice() matters for the same reason —
+         it shows the first-run per-device notice, and every other path out of this dialog
+         (Start Fresh, and dismissing it by clicking outside) already triggers it. Nothing calls
+         preventDefault, so the new tab still opens. */
       const demoAnchor = modalDim.querySelector('#startup-demo-anchor');
-      if (demoAnchor) demoAnchor.addEventListener('click', () => savePref());
+      if (demoAnchor) demoAnchor.addEventListener('click', () => {
+        savePref();
+        UI.closeDim(modalDim);
+        route('dashboard');
+        runAfterChoice();
+      });
       modalDim.querySelectorAll('[data-act="startup-fresh"]').forEach(el => {
         el.onclick = (e) => { e.stopPropagation(); handleFresh(); };
       });
