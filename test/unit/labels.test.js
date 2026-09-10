@@ -150,3 +150,56 @@ describe('labels: UI.isSafeUrl (security boundary for clickable project file lin
     assert.equal(UI.isSafeUrl(null), false);
   });
 });
+
+/* ---------------------------------------------------------------------------
+   Locale independence.
+
+   Money and hours are formatted with toLocaleString, which follows the VIEWER's locale unless a
+   locale is pinned. Left unpinned it does not merely restyle the number — it swaps the separators:
+   the same figure reads $1,234,567.50 in en-US, $1.234.567,50 in de-DE, $1 234 567,50 in fr-FR,
+   and $12,34,567.50 under Indian lakh grouping. Two people reading one invoice figure would see
+   two different numbers, with a configured "$" beside it either way.
+
+   A locale is fixed when the process starts and cannot be changed from inside it, so unlike the
+   timezone assertions these have to spawn child processes with LC_ALL set. Caught in review on
+   PR #42; pinned here so it cannot return.
+   --------------------------------------------------------------------------- */
+describe('labels: formatting does not follow the viewer locale', () => {
+  const { execFileSync } = require('node:child_process');
+  const path = require('node:path');
+  const HELPER = path.join(__dirname, 'helpers', 'sqlite.js');
+
+  // Locales chosen for the three distinct ways they differ from en-US: separator swap (de-DE),
+  // space grouping with a comma decimal (fr-FR), and a different grouping SIZE (hi-IN).
+  const LOCALES = ['en-US', 'de-DE', 'fr-FR', 'hi-IN', 'he-IL'];
+
+  function formatInLocale(locale, expr) {
+    const script = `
+      (async () => {
+        const { freshDb } = require(${JSON.stringify(HELPER)});
+        const { UI } = await freshDb();
+        process.stdout.write(String(${expr}));
+      })();
+    `;
+    return execFileSync(process.execPath, ['-e', script], {
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: locale, LANG: locale },
+    });
+  }
+
+  for (const locale of LOCALES) {
+    test(`UI.fmtMoney is identical under ${locale}`, () => {
+      assert.equal(formatInLocale(locale, 'UI.fmtMoney(1234567.5)'), '$1,234,567.50');
+      assert.equal(formatInLocale(locale, 'UI.fmtMoney(1250)'), '$1,250.00');
+    });
+  }
+
+  test('UI.fmtMoney never uses a period as the thousands separator', () => {
+    // The specific failure that would be most misleading beside a "$": de-DE renders
+    // 1.234.567,50, which an English reader parses as one-point-two-million-something.
+    for (const locale of LOCALES) {
+      const out = formatInLocale(locale, 'UI.fmtMoney(1234567.5)');
+      assert.match(out, /^\$[\d,]+\.\d{2}$/, `${locale} produced ${out}`);
+    }
+  });
+});

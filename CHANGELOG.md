@@ -3,6 +3,21 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.10.2] — 2026-09-10
+
+### Fixed
+- **Money and hours no longer change shape depending on who is looking.** Both were formatted
+  without pinning a locale, so the figures followed each viewer's browser rather than the
+  facility's settings — and the difference is not cosmetic: the same total reads `$1,234,567.50`
+  for one person and `$1.234.567,50` for another, `$1 234 567,50` for a third, or
+  `$12,34,567.50` where digits group in lakhs. A period standing in for the thousands separator
+  beside a configured `$` is actively misleading, and two people reading one invoice figure should
+  not see two different numbers. Both now format identically everywhere, which also keeps an
+  export or a printed report the same whoever generated it. Raised in review on
+  [#42](https://github.com/Daniel-Waiger/Core-Facility-CRM/pull/42), and now covered by tests that
+  re-run the formatter under five locales — the only way to catch it, since a locale is fixed when
+  a process starts.
+
 ## [1.10.1] — 2026-09-10
 
 ### Added

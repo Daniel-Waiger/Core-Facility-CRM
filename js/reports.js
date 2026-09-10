@@ -921,7 +921,10 @@
   }
 
   /* ---------------- Small render helpers ---------------- */
-  function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
+  // Locale pinned for the same reason UI.fmtMoney pins it: a viewer's browser locale would
+  // otherwise decide whether 2.5 hours reads as "2.5" or "2,5", and a report should not change
+  // shape depending on who opened it.
+  function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }); }
   // The single copy of this now lives in ui.js (UI.fmtMoney) so every screen that prints money —
   // the booking modal, Project Costs, and this report — reads the same configured currency symbol
   // (Settings -> Billing Rates) and rounds the same way. Per CLAUDE.md: "a report that disagrees

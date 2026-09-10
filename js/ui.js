@@ -627,11 +627,20 @@
      report". ui.js is the only file loaded before all four consumers (views, reports, exports,
      app), which is why the shared hour maths already lives here too. */
 
-  // Currency symbol from Settings + two decimals, with locale thousands separators, e.g. $1,250.00.
+  /* Currency symbol from Settings + two decimals and thousands separators, e.g. $1,250.00.
+
+     The locale is pinned deliberately. toLocaleString(undefined, …) follows whatever locale the
+     VIEWER's browser is set to, which swaps the separators outright — the same booking renders
+     $1,234,567.50 for one person and $1.234.567,50 for another (de-DE), $1 234 567,50 (fr-FR), or
+     $12,34,567.50 with Indian lakh grouping. A facility configures a currency SYMBOL here, not a
+     locale, so a period acting as the thousands separator next to a "$" is actively misleading —
+     and two people reading the same invoice figure should not see two different numbers.
+     Pinning also keeps the exports and the printed reports identical whoever generated them. */
+  const MONEY_LOCALE = 'en-US';
   function fmtMoney(n) {
     const cur = (global.DB && global.DB.getConfig) ? global.DB.getConfig('currency', '$') : '$';
     return cur + (Math.round((Number(n) || 0) * 100) / 100)
-      .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      .toLocaleString(MONEY_LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   /* An instrument's cost_unit says HOW it is priced: 'time' bills the booking's duration, any
