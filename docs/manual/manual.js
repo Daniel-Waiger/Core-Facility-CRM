@@ -12,7 +12,7 @@
 
   var CHAPTERS = [
     { num: 1, file: 'getting-started.html', title: 'Getting Started',
-      blurb: 'Open the app for the first time, take the guided tour, and load practice data so nothing you try is real.' },
+      blurb: 'Open the app for the first time, take the guided tour, and try the demo sandbox so nothing you do there is real.' },
     { num: 2, file: 'big-ideas.html', title: 'The Big Ideas',
       blurb: 'The handful of concepts — where your data lives, retire vs. delete, local dates — that make the rest of the app make sense.' },
     { num: 3, file: 'dashboard.html', title: "Dashboard & Today's Agenda",

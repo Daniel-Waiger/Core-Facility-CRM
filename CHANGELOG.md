@@ -3,6 +3,67 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-09-10
+
+### Changed
+- **Sample data can no longer touch your real records — it opens in its own sandbox.** Loading
+  the demo dataset used to erase everything first: every project, person, instrument, milestone
+  and booking, with no confirmation, from a Settings button captioned "Load Sample Data" — while
+  the manual promised in bold that it "does not erase your own projects". The demo now runs as a
+  **demo sandbox** in its own browser tab, against storage of its own, and the real records are
+  never opened by that tab at all. Practice edits are kept, so you can come back to them; a
+  Reset control restores the sandbox to its original state. The sandbox never writes automatic
+  backups either, since both modes name their backup files identically and a demo write could
+  otherwise overwrite the day's real backup. The old destructive path is now unreachable rather
+  than merely unused: seeding refuses outright unless it is running in the sandbox, checked as
+  the first thing it does.
+- **One money formatter for the whole app.** The booking modal and the Reports screen each had
+  their own, and they disagreed at exact half-cent values — 2.675 printed as 2.67 in the modal
+  and 2.68 in Reports. Both now read the single copy in `js/ui.js`, resolving it in favour of
+  Reports; money also gains thousands separators in the booking modal (`$1,250.00`). Stored
+  values are untouched — this is display only.
+- **"Booking" everywhere for the scheduled record**, instead of alternating between "booking" and
+  "meeting" — the project page called it a meeting while its own dialog called it a booking, and
+  one Reports footnote managed both in a single sentence. "Meeting notes" survives where it
+  genuinely means the notes. Database tables and export sheet names keep their existing spelling,
+  being data rather than display. Display text likewise settles on "Utilization".
+- **Plainer wording in three places aimed at the wrong audience:** the one permanently visible
+  tooltip said "Real-time SQLite autosave status"; a Settings row was headed "Startup Welcome
+  Modal"; and the storage-failure screen sent readers to a README they cannot reach from the app,
+  now pointing at the user manual instead.
+- **Danger dialogs name their verb.** Four of them rendered a generic "Confirm" against the
+  project's own rule, including Clear All Data and Start Fresh, which now read "Delete
+  Everything".
+
+### Fixed
+- **The People and Instruments project counts said "active" while counting archived projects.**
+  Both counts now exclude archived projects, so the number matches the label — which matters
+  precisely for the records the archive feature exists to preserve.
+- **Instrument cost, billing unit and staff hourly rate showed no currency.** A rate read as a
+  bare `450` next to a raw lowercase `time`, with no way to tell it meant 450 per hour in the
+  configured currency. Spreadsheet exports keep the figure a sortable number and put the currency
+  symbol in the column heading instead.
+- **Settings referred to an overhead percentage it never showed you.** Four strings explained
+  that a lab with no pricing tier is charged "the legacy Internal + External overhead sum", but
+  those two rates are not editable or displayed anywhere, so the number behind them was
+  invisible — while still being added to every such booking. The resolved percentage is now
+  stated, read-only, in Billing Rates. Pricing behaviour is unchanged.
+- **Empty lists blamed a filter that was not set.** A brand-new tracker opened Projects and was
+  told "No matching projects", implying something to clear. The three registry screens now
+  distinguish an empty tracker from a filtered one — including the case where rows are hidden
+  behind the archived or retired toggle, where no filter is set at all.
+- **The guided tour described a sidebar that did not exist**, listing Settings (which is in the
+  footer) while omitting Dashboard and Reports. Its 19 step titles also carried hand-written
+  numbers duplicating the counter the tour already draws, and it still described clicking a
+  milestone badge to "cycle" its status, replaced by a status picker several releases ago.
+- **The first-run notice named a button that does not exist**, telling users to use "Import
+  Backup" on the other device. The button is "Restore from Backup".
+- **The manual documented the old, destructive sample-data behaviour** — in a warning callout, a
+  self-test answer, a glossary entry, the chapter blurb and twenty-odd "Try it" exercises — and
+  in one place advised a reader who already held real data to press Start Fresh, which deletes
+  everything. Rewritten around the sandbox. A cross-reference pointing chapter 12 at the Reports
+  chapter (it is chapter 13) is corrected.
+
 ## [1.9.1] — 2026-09-09
 
 ### Changed

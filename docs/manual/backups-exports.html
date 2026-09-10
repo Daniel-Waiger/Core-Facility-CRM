@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Backups, Restore &amp; Exports — Core Facility Tracker Manual</title>
-<link rel="stylesheet" href="manual.css?v=2">
+<link rel="stylesheet" href="manual.css?v=3">
 <script id="theme-fouc-guard">
   (function () {
     try {
@@ -72,7 +72,7 @@
 
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A restore has to fully swap the database out from under the app, so there's no safe way to keep "a bit of both." Treating restore as all-or-nothing is simpler and far less error-prone than trying to merge two sets of projects and bookings automatically and guessing which one you meant. The automatic pre-restore download exists for exactly the moment someone clicks Restore without having exported first — it means even that mistake still leaves a recovery file sitting in Downloads.</p></div>
 
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, export a backup. Then go add a throwaway project — call it "Test Delete Me" — and restore the backup you just made. Confirm the throwaway project is gone, and check your Downloads folder for the automatic pre-restore safety copy the app made along the way. This is exactly the safety net you'd rely on for real data.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> With the demo sandbox open, export a backup. Then go add a throwaway project — call it "Test Delete Me" — and restore the backup you just made. Confirm the throwaway project is gone, and check your Downloads folder for the automatic pre-restore safety copy the app made along the way. This is exactly the safety net you'd rely on for real data.</p></div>
     </section>
 
     <section>
@@ -103,7 +103,7 @@
       <ol class="steps">
         <li>On the <strong>old</strong> computer, open <strong>Settings</strong> and click <strong>Export Backup</strong>. This downloads a single file — note where it lands.</li>
         <li>Copy that file to the new computer — by USB drive, cloud storage folder, email attachment to yourself, or however you'd normally move a file.</li>
-        <li>On the <strong>new</strong> computer, open the tracker in a browser for the first time. If the welcome screen appears, choose <strong>Start Fresh</strong> (you're about to restore instead) or simply proceed — restoring in the next step will replace whatever is there either way.</li>
+        <li>On the <strong>new</strong> computer, open the tracker in a browser for the first time. If the welcome screen appears, there's no need to choose either option on it — just proceed to the next step, since restoring will replace whatever is there either way.</li>
         <li>Open <strong>Settings</strong> on the new computer, click <strong>Restore from Backup</strong>, and choose the file you copied over.</li>
         <li>Confirm the restore. Your projects, people, instruments, milestones, bookings — and any uploaded files — now all exist on the new computer, exactly as they were when you exported.</li>
         <li>Double-check a project or two to confirm everything came across, then you're free to keep working from the new computer.</li>
@@ -151,6 +151,6 @@
     <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
   </main>
 </div>
-<script src="manual.js?v=2"></script>
+<script src="manual.js?v=3"></script>
 </body>
 </html>

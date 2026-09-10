@@ -1283,7 +1283,7 @@
         <div class="row mb-8">
           <div class="grow">
             <div style="font-weight:600">Startup Welcome Screen</div>
-            <div class="faint small">Show the welcome screen, offering "Seeded Example &amp; Walkthrough" or "Start Fresh (Empty Workspace)", upon opening the app.</div>
+            <div class="faint small">Show the welcome screen, offering "Demo Sandbox &amp; Walkthrough" or "Start Fresh (Empty Workspace)", when the app opens.</div>
           </div>
           <label class="row" style="cursor:pointer;gap:8px">
             <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />

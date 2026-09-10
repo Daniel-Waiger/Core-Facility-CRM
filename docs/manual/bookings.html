@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Booking a Session — Core Facility Tracker Manual</title>
-<link rel="stylesheet" href="manual.css?v=2">
+<link rel="stylesheet" href="manual.css?v=3">
 <script id="theme-fouc-guard">
   (function () {
     try {
@@ -192,7 +192,7 @@
         <p><strong>🔍 Why it works this way — and why billing doesn't change.</strong> The Group/Lab field still decides which lab's <a href="settings-admin.html#group-discounts">standing discount</a> applies to this booking's cost — adding a cross-lab attendee through "Show all labs" never changes that. Billing is about which lab the <em>session</em> belongs to, not about every individual attendee's own lab, so a visiting collaborator can be listed on the booking without quietly shifting whose discount rate gets used.</p>
       </div>
       <div class="callout try">
-        <p><strong>🧪 Try it.</strong> Load the sample data, open a new booking, and pick a Group/Lab. Try opening Assign People — you'll only see that lab's people. Now tick <strong>Show all labs</strong> and open it again — everyone in the directory appears, but the Group/Lab field (and the discount it drives) hasn't changed.</p>
+        <p><strong>🧪 Try it.</strong> Open the demo sandbox, open a new booking, and pick a Group/Lab. Try opening Assign People — you'll only see that lab's people. Now tick <strong>Show all labs</strong> and open it again — everyone in the directory appears, but the Group/Lab field (and the discount it drives) hasn't changed.</p>
       </div>
     </section>
 
@@ -385,7 +385,7 @@
       </div>
       <p>Everything else about editing works the same as creating: the Group/Lab gate, the three pickers, Category, the live cost panel, and the conflict check at Save all apply exactly as described above — with one small mercy for old records: a legacy booking that was already saved under a category requiring staff, with none assigned, can still be edited (a note fixed, an amount corrected) without the app retroactively demanding a staff member — as long as you don't change its category or touch its staff assignment. Change either one and the requirement applies normally.</p>
       <div class="callout try">
-        <p><strong>🧪 Try it.</strong> Load the sample data, retire a person who attended one of the demo bookings, then open that booking to edit it. Confirm their badge is still there, now labelled "(Retired)," and that they no longer appear in the Assign People dropdown for adding someone new.</p>
+        <p><strong>🧪 Try it.</strong> Open the demo sandbox, retire a person who attended one of the demo bookings, then open that booking to edit it. Confirm their badge is still there, now labelled "(Retired)," and that they no longer appear in the Assign People dropdown for adding someone new.</p>
       </div>
     </section>
 
@@ -404,6 +404,6 @@
     <nav class="pager" id="pager"></nav>
   </main>
 </div>
-<script src="manual.js?v=2"></script>
+<script src="manual.js?v=3"></script>
 </body>
 </html>

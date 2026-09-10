@@ -16,7 +16,7 @@ Track research projects from initiation to completion with full lifecycle tracki
 - **Installable:** Served over `https`, it can be added to your home screen and opens like any other app — including offline, with no connection. (This is what a "progressive web app", or PWA, means.)
 - **A Real Database, Inside the Browser:** Your data lives in a genuine SQLite database that runs in the browser itself (`sql.js`) and is saved into the browser's own storage as you work — no server holds it, and nothing is uploaded anywhere.
 - **Welcome & Onboarding Experience:**
-  - **Seeded Example & Walkthrough:** Load a realistic bioimaging facility dataset (Multiphoton, STED, Lightsheet, etc.) with an interactive step-by-step tour.
+  - **Demo Sandbox & Walkthrough:** Opens a realistic bioimaging facility dataset (Multiphoton, STED, Lightsheet, etc.), with an interactive step-by-step tour, in its own separate browser tab — kept in its own storage, so it can never touch your real records.
   - **Start Fresh (Empty Workspace):** One click sets up a clean, empty database, ready for your own records.
 - **Everything You Track (add it, find it, change it):**
   - **Projects:** Title, unique project code generation (`PRJ-YYMM-###`), status lifecycle (`Initiated` → `Active` → `On-hold` → `Completed` → `Archived`), priority, funding sources, modality/techniques, sample types, risk flags, timelines, tags, and notes. Includes inline researcher/PI registration.
@@ -63,7 +63,7 @@ A selection follows.
 
 <img src="docs/screenshots/01-onboarding.png" width="720" alt="Welcome onboarding modal">
 
-*Figure 1 — The startup modal offers a seeded demo dataset with a guided walkthrough, or a clean empty workspace.*
+*Figure 1 — The startup dialog offers a demo sandbox with a guided walkthrough, or a clean empty workspace.*
 
 **Dashboard, theming & layout**
 
@@ -125,7 +125,7 @@ A selection follows.
 
 <img src="docs/screenshots/14-settings.png" width="720" alt="Settings and backup preferences">
 
-*Figure 14 — Settings: single-file JSON backup/restore, sample data reload, and startup preferences — all data stays local to the browser's IndexedDB.*
+*Figure 14 — Settings: single-file JSON backup/restore, a link to the demo sandbox, and startup preferences — all data stays local to the browser's own storage.*
 
 **Billing & cost tracking**
 
@@ -215,12 +215,12 @@ Core-Facility-CRM/
 ├── js/
 │   ├── consts.js         # Shared vocabularies (modalities, statuses, priorities)
 │   ├── db.js             # sql.js engine, schema, IndexedDB persistence, sample dataset & clear
-│   ├── ui.js             # Toasts, modals, theme switcher, icons, interactive tour engine
+│   ├── ui.js             # Toasts, dialogs, theme switcher, icons, interactive tour engine
 │   ├── views.js          # Screen renderers (Dashboard, Projects, Detail, People, Instruments, Calendar, Settings)
 │   ├── reports.js        # Reports & Utilization (utilization, staff time, project/lab spend, consults,
 │   │                     #   service entries, stewardship, breadth, activity mix, funnel, charts, custom reports)
 │   ├── exports.js        # Multi-page PDF, DOCX, and XLSX export engines
-│   └── app.js            # Routing, startup welcome modal, action dispatcher, CRUD modal logic
+│   └── app.js            # Routing, startup welcome dialog, action dispatcher, create/edit/delete modal logic
 ├── libs/
 │   ├── sql-asm.js        # SQLite engine compiled to JS (asm.js, file:// compatible)
 │   ├── xlsx.full.min.js  # SheetJS spreadsheet export engine
@@ -245,7 +245,7 @@ Core-Facility-CRM/
 
 1. Download or clone this repository.
 2. Double-click `index.html` to open it in your browser.
-3. Choose **Load Demo & Start Tour** to explore with sample data or **Start Fresh** to begin with an empty database.
+3. Choose **Open Demo Sandbox** to explore a separate practice copy of the app with sample data and a guided tour, or **Start Fresh** to begin with an empty database.
 4. Click **"New Project"** in the sidebar to start tracking projects!
 
 > If your browser blocks storage for local files, the app will tell you so on a **"Storage unavailable"** screen instead of showing a blank page — follow the on-screen steps, or run the local server below.

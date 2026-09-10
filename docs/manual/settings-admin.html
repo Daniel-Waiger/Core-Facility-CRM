@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Settings, Admin Mode &amp; Discounts — Core Facility Tracker Manual</title>
-<link rel="stylesheet" href="manual.css?v=2">
+<link rel="stylesheet" href="manual.css?v=3">
 <script id="theme-fouc-guard">
   (function () {
     try {
@@ -51,7 +51,7 @@
         <li>Find the option to show the welcome screen at startup, and turn it on or off.</li>
         <li>Find <strong>Ask about single-instrument bookings</strong> and turn it on or off.</li>
       </ol>
-      <div class="callout tip"><p><strong>💡 Tip.</strong> Turning the welcome screen off doesn't remove your access to sample data or the guided tour — both are still one click away in Settings, under "Sample Data &amp; Walkthrough." See <a href="getting-started.html#sample-data">Loading sample data</a> and <a href="getting-started.html#guided-tour">The guided tour</a>.</p></div>
+      <div class="callout tip"><p><strong>💡 Tip.</strong> Turning the welcome screen off doesn't remove your access to the demo sandbox or the guided tour — both are still one click away in Settings, under "Sample Data &amp; Walkthrough." See <a href="getting-started.html#sample-data">The demo sandbox</a> and <a href="getting-started.html#guided-tour">The guided tour</a>.</p></div>
 
       <p><strong>Ask about single-instrument bookings</strong> controls whether the <a href="bookings.html#single-instrument-prompt">"Single Instrument Booking?"</a> prompt appears the first time you add an instrument to a new booking. It's on by default. If you (or someone else on this browser) previously ticked <strong>"Don't ask me again"</strong> on that prompt, this toggle is how you turn it back on — switch it on here, and the prompt starts appearing again on your next new booking.</p>
 
@@ -83,7 +83,7 @@
 
       <div class="callout warn"><p><strong>⚠️ Careful.</strong> Changing tax or currency here only affects <em>new</em> bookings from that moment on. Every booking that's already been saved keeps the total it was calculated with when it was saved — unless you open it and save it again, which reprices it at today's rates — changing today's tax rate will never quietly rewrite last month's invoices. See <a href="big-ideas.html#cost-snapshots">Cost snapshots</a> for why, and <a href="costs-math.html#worked-example">the worked example</a> for how the numbers actually combine.</p></div>
 
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded, note what one existing booking contributes to its project's <strong>Project Costs</strong> card. Change the Tax % in Settings, then look at that card again — the saved total hasn't moved.</p><p>Opening that booking's own edit form is a different thing, and worth knowing about: the live <em>Cost &amp; Time Breakdown</em> panel inside the form always prices at today's rates, so it will show the new tax. Nothing has changed until you press Save — but if you do press Save, that new total is what gets stored.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> In the demo sandbox, note what one existing booking contributes to its project's <strong>Project Costs</strong> card. Change the Tax % in Settings, then look at that card again — the saved total hasn't moved.</p><p>Opening that booking's own edit form is a different thing, and worth knowing about: the live <em>Cost &amp; Time Breakdown</em> panel inside the form always prices at today's rates, so it will show the new tax. Nothing has changed until you press Save — but if you do press Save, that new total is what gets stored.</p></div>
     </section>
 
     <section>
@@ -262,7 +262,7 @@
       </ul>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> A lab name is written in three different places at once — on each person, on the discount editor, and stamped onto every past booking — precisely because it's meant to read the same everywhere. A rename that only fixed the people list would leave old bookings and the discount editor still showing the stale spelling, right back where the duplicate-lab problem started.</p></div>
       <div class="callout warn"><p><strong>⚠️ Careful.</strong> Renaming a lab only changes its <em>label</em> — it never recalculates anything. A past booking's total cost stays exactly the frozen number it was saved with (see <a href="big-ideas.html#cost-snapshots">Cost snapshots</a>), even if that booking's Lab/Group label now reads differently and even if you merged it into a lab with a different discount percentage.</p></div>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> With sample data loaded and Admin Mode on, open Rename / Merge Lab, pick any existing lab, and rename it to a brand-new spelling. Check the People directory, Group Discounts, and one of that lab's past bookings — all three now show the new name, and the booking's total is unchanged.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> In the demo sandbox, with Admin Mode on, open Rename / Merge Lab, pick any existing lab, and rename it to a brand-new spelling. Check the People directory, Group Discounts, and one of that lab's past bookings — all three now show the new name, and the booking's total is unchanged.</p></div>
     </section>
 
     <section>
@@ -285,6 +285,6 @@
     <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
   </main>
 </div>
-<script src="manual.js?v=2"></script>
+<script src="manual.js?v=3"></script>
 </body>
 </html>
