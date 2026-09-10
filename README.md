@@ -20,7 +20,7 @@ back by the dashboard, the calendar, the reports and the exports.
 ```mermaid
 flowchart TB
 
-  subgraph REG["Set up once — your facility's building blocks"]
+  subgraph REG["Set up occasionally — your facility's building blocks"]
     direction LR
     PEOPLE["People &amp; Labs<br/>researchers, PIs, and<br/>facility staff with their rates"]
     INSTR["Instruments<br/>rates and booking rules"]
