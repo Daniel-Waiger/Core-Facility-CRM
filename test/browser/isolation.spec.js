@@ -158,6 +158,35 @@ describe('demo sandbox isolation', { skip }, () => {
     await ctx.close();
   });
 
+  test('a sandbox opened from inside the app gets no handle back to the real tab', async () => {
+    /* ?demo=1 is SAME-ORIGIN, so a sandbox tab opened with a live `window.opener` could reach
+       straight into `opener.DB` and write to the real database — defeating the separate-database
+       isolation entirely, from a direction the byte-comparison test above would never see.
+       Every in-app path that opens the sandbox therefore carries rel="noopener": the welcome
+       card's anchor, and Settings' hand-off (which synthesises one via openInNewTab rather than
+       using window.open, precisely so noopener survives). Asserted here because "we passed the
+       right flag" is a claim about code, while `window.opener === null` is the property itself. */
+    const ctx = await freshContext();
+    const real = await openApp(ctx);
+    await real.evaluate(() => App.route('settings'));
+    await real.waitForTimeout(400);
+
+    const [sandbox] = await Promise.all([
+      ctx.waitForEvent('page'),
+      real.click('[data-act="load-sample-data"]'),
+    ]);
+    await sandbox.waitForFunction(() => window.DB);
+
+    assert.ok(sandbox.url().includes('demo=1'), `expected the sandbox, got ${sandbox.url()}`);
+    assert.equal(await sandbox.evaluate(() => DB.isDemo), true);
+    assert.equal(
+      await sandbox.evaluate(() => window.opener),
+      null,
+      'the sandbox tab holds a handle to the opener, so it can reach the real database',
+    );
+    await ctx.close();
+  });
+
   test('the demo tab never writes backups or touches the real backup clock', async () => {
     const ctx = await freshContext();
     const demo = await openApp(ctx, '?demo=1');

@@ -1314,7 +1314,7 @@
         </div>
         <div class="row mt-8" style="gap:10px;flex-wrap:wrap">
           <button class="btn btn-secondary btn-sm" data-act="open-startup-modal">${ic('compass')} Open Welcome Screen</button>
-          <button class="btn btn-secondary btn-sm" data-act="load-sample-data">${ic('sparkles')} Load Sample Data</button>
+          <button class="btn btn-secondary btn-sm" data-act="load-sample-data">${ic('sparkles')} Open Demo Sandbox</button>
           <button class="btn btn-tour btn-sm" data-act="tour">${ic('play')} Launch Guided Tour</button>
           <button class="btn btn-ghost btn-sm text-danger" style="color:var(--danger)" data-act="clear-data">${ic('trash')} Clear All Data</button>
         </div>

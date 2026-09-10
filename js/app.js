@@ -421,9 +421,10 @@
                blocker never eats it. It opens in its own tab against its own separate storage,
                so nothing it does can touch this browser's real facility records; see
                finishBoot()'s demo-mode branch and showDemoBanner() for the rest of the sandbox
-               story. The "never show again" checkbox has no submit step to hang a save off of
-               for a plain navigating link, so its state is saved on click, before the browser
-               follows the href. -->
+               story. The "never show again" checkbox has no submit step to hang a save off of,
+               so its state is saved by the click listener below — which also has to close this
+               dialog by hand, since target="_blank" means the browser never navigates this tab
+               away from it. -->
           <div class="startup-card startup-card-featured">
             <div class="startup-card-badge"><span class="badge primary">${ic('sparkles')} Explore Sample Data</span></div>
             <div class="startup-card-icon">${ic('compass')}</div>
@@ -436,8 +437,11 @@
             </a>
           </div>
 
-          <!-- Option 2: Start Fresh -->
-          <div class="startup-card" data-act="startup-fresh">
+          <!-- Option 2: Start Fresh. The data-act lives on the BUTTON below, not on this card:
+               the demo card opposite activates only from its own anchor, and a whole-card hit
+               target on the destructive option while the safe one needs a precise click is the
+               wrong way round for a stray click to land. -->
+          <div class="startup-card">
             <div class="startup-card-badge"><span class="badge neutral">${ic('rocket')} Clean Slate</span></div>
             <div class="startup-card-icon">${ic('file-plus')}</div>
             <div class="startup-card-title">Start Fresh (Empty Workspace)</div>
@@ -767,6 +771,28 @@
     bar.querySelector('.temp-session-banner-close').onclick = () => bar.remove();
   }
 
+  /* Open a URL in a new tab by synthesising a click on a real <a>, rather than window.open.
+     Two reasons, both about the demo sandbox:
+       - A genuine anchor activation is treated as a user navigation, so a popup blocker does not
+         eat it the way it can eat window.open. Same reason the welcome screen's demo card is a
+         real <a> rather than a dispatched action.
+       - rel="noopener" is kept, and it matters here beyond the usual advice: ?demo=1 is
+         SAME-ORIGIN, so without it the sandbox tab would receive a live `window.opener` handle
+         to a real-data tab and could reach straight into `opener.DB`. The sandbox's whole promise
+         is that it cannot touch real records, so that handle must not exist. This is also why
+         detecting a blocked popup via window.open's return value is not an option — with
+         noopener it returns null unconditionally, so the check cannot tell blocked from fine.
+     Mirrors the existing anchor-click idiom in exports.js's blobDownload. */
+  function openInNewTab(url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   // Persistent (no dismiss) banner shown for the life of a demo (?demo=1) tab. Reuses the
   // temp-session-banner styling (css/app.css) rather than adding new CSS — `demo-session-banner`
   // is a sibling class purely so this banner can be told apart from a temporary-session one if
@@ -780,8 +806,7 @@
       <span class="temp-session-banner-ic">${ic('sparkles')}</span>
       <span>Demo sandbox — practice data in its own separate storage. Nothing you do here touches your real facility records.</span>
       <button class="btn btn-secondary btn-sm" type="button" id="demo-banner-why">Why a separate tab?</button>
-      <button class="btn btn-secondary btn-sm" type="button" data-act="reset-demo-sandbox">Reset Sandbox</button>
-      <a class="btn btn-secondary btn-sm" href="index.html">Back to Real App</a>`;
+      <button class="btn btn-secondary btn-sm" type="button" data-act="reset-demo-sandbox">Reset Sandbox</button>`;
     document.body.prepend(bar);
 
     // "Reset Sandbox" is wired through the normal data-act dispatcher (see handleAct's
@@ -793,7 +818,7 @@
         <div class="body"><div class="stack">
           <p>The app keeps each facility's records in one place inside this browser, and a browser tab can only hold one at a time.</p>
           <p>So the only way to let you try things out — add a project, cancel a booking, delete a person — without any risk to your real records is to give the practice data its own place to live, in its own tab.</p>
-          <p>Closing this tab leaves the real app exactly as it was. Anything you change here is kept, so you can come back to your practice data later — use <strong>Reset Sandbox</strong> below if you'd rather start the walkthrough over from scratch.</p>
+          <p><strong>Close this tab when you're done</strong> — your real records are still open in the tab you came from, exactly as you left them. Anything you change in here is kept, so you can come back to your practice data later; use <strong>Reset Sandbox</strong> if you'd rather start the walkthrough over from scratch.</p>
         </div></div>
         <div class="foot"><button class="btn btn-primary" data-act="close">Got It</button></div>`);
     };
@@ -1007,10 +1032,11 @@
       case 'load-sample-data': {
         // DB.seedSampleData() now refuses outside demo mode (see db.js), so this Settings
         // action no longer seeds the CURRENT (real) database in place — it hands the user off
-        // to the demo sandbox instead, in its own tab against its own separate storage. This is
-        // a direct response to a user click, so window.open here (rather than a plain <a>,
-        // which we can't add — the button markup lives in views.js) isn't popup-blocked.
-        window.open('?demo=1', '_blank', 'noopener');
+        // to the demo sandbox instead, in its own tab against its own separate storage. The
+        // button's markup lives in views.js so it cannot be a plain <a>; openInNewTab
+        // synthesises one, which keeps both the popup-blocker immunity and the noopener
+        // isolation a bare window.open would trade away. See its comment for why that matters.
+        openInNewTab('?demo=1');
         return;
       }
       case 'reset-demo-sandbox': {

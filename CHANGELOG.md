@@ -6,6 +6,19 @@ This project uses [Semantic Versioning](https://semver.org/).
 ## [1.10.2] — 2026-09-10
 
 ### Fixed
+- **The Settings button offering sample data said the wrong thing.** It still read "Load Sample
+  Data" after that action changed to open the practice sandbox in a new tab, so the button named
+  something it no longer did — the same kind of mismatch this release set out to remove. It now
+  reads "Open Demo Sandbox", matching the welcome screen.
+- **On the welcome screen, a stray click could start a delete.** "Start Fresh" was clickable
+  across its whole card while the sandbox option needed a precise click on its button, so the
+  larger, easier-to-hit target was the one that erases everything. Both options now activate only
+  from their own button.
+- **Removed "Back to Real App" from the sandbox banner.** It opened your real records in the demo
+  tab while the tab you came from was almost certainly still showing them — and two copies of the
+  app open at once can overwrite one another's edits, since whichever saves last wins. Closing the
+  sandbox tab returns you to your records untouched, which is what the explanation now says.
+
 - **A browser test believed it was covering the admin-only Settings screens and was not.** The
   suites set the app's preferences under plain keys, but a sandbox tab reads them under its own
   prefixed names, so the flags were ignored there — including the one that turns Admin Mode on.
