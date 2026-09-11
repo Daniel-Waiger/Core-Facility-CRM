@@ -10,6 +10,101 @@ Track research projects from initiation to completion with full lifecycle tracki
 
 ---
 
+## How It Fits Together
+
+Before the feature list, here is the shape of the whole app in one picture. A few things you set
+up once — people, instruments, grants — feed the **projects** you track. Work is then recorded
+against those projects as milestones, bookings and service entries. Everything you record is read
+back by the dashboard, the calendar, the reports and the exports.
+
+```mermaid
+flowchart TB
+
+  subgraph REG["Set up occasionally — your facility's building blocks"]
+    direction LR
+    PEOPLE["People &amp; Labs<br/>researchers, PIs, and<br/>facility staff with their rates"]
+    INSTR["Instruments<br/>rates and booking rules"]
+    GRANTS["Grants<br/>funding sources"]
+  end
+
+  PROJ["Projects<br/>what you are actually tracking:<br/>status, PI, grant, timeline"]
+
+  subgraph WORK["Recorded as the work happens"]
+    direction LR
+    MS["Milestones<br/>deliverables and progress"]
+    BOOK["Bookings &amp; Sessions<br/>who attended, which instruments,<br/>which staff, what it cost"]
+    SERV["Service Entries<br/>billable work with no<br/>instrument slot"]
+    OUT["Research Outputs<br/>publications, datasets"]
+  end
+
+  subgraph PRICING["Billing settings — these decide what a booking costs"]
+    direction LR
+    TIER["Pricing tiers<br/>an overhead % per lab"]
+    RATES["Per-tier instrument rates"]
+    DISC["Standing lab discounts"]
+    CAT["Category rules<br/>what % of staff time bills"]
+    VAT["VAT"]
+  end
+
+  DASH["Dashboard<br/>what needs attention now"]
+  CAL["Calendar<br/>month, week, per-instrument timeline"]
+  REP["Reports &amp; Utilization<br/>hours, revenue, consults, funnel"]
+  EXP["Exports<br/>XLSX, DOCX, PDF"]
+
+  PEOPLE -->|"PI and project team"| PROJ
+  GRANTS -->|"funds"| PROJ
+  INSTR -->|"expected to be used"| PROJ
+
+  PROJ --> MS
+  PROJ --> OUT
+  PROJ -.->|"optional — a booking can be<br/>facility-wide instead"| BOOK
+  PROJ -.->|"optional"| SERV
+
+  PEOPLE -->|"attendees, plus the staff whose time is billed"| BOOK
+  INSTR -->|"the instruments booked"| BOOK
+  GRANTS -->|"charged to"| BOOK
+  GRANTS --> SERV
+  PEOPLE --> MS
+  INSTR --> MS
+
+  PRICING ==>|"worked out when you save,<br/>then frozen onto the booking"| BOOK
+
+  MS --> CAL
+  BOOK --> CAL
+  PROJ --> DASH
+  MS --> DASH
+  BOOK --> DASH
+  PROJ --> REP
+  MS --> REP
+  BOOK --> REP
+  SERV --> REP
+  OUT --> REP
+  REP --> EXP
+  PROJ -->|"per-project report"| EXP
+```
+
+**Reading the picture**
+
+- **A booking does not have to belong to a project.** Open days, method development, a walk-in
+  user — a session can be facility-wide, and the reports label it that way rather than dropping it.
+  The same is true of a service entry.
+- **The price is worked out once and then frozen.** The billing settings on the right decide what a
+  booking costs *at the moment you save it*, and the resulting figures are stored on the booking
+  itself. Changing a tier or a rate next month never silently reprices work you already did.
+- **Service entries are billed exactly as you type them** — quantity × rate. Tiers, lab discounts,
+  overhead and VAT do not apply to them; bookings are the only thing the billing settings reprice.
+- **The reports and the exports do not do their own arithmetic.** Both read the same figures from
+  the same place, so a number you exported and a number you read off the screen cannot disagree.
+- **None of this is on a server.** Every box above is stored in one real database that lives inside
+  your browser, on that device. There are no accounts and nothing is uploaded. Moving to another
+  device is a deliberate backup file you export and restore — see
+  [Data Safety & Privacy](#data-safety--privacy).
+- **Nothing is deleted while it still carries history.** People and instruments retire, projects
+  archive, bookings cancel. They stay on every record they already belong to and simply stop
+  appearing when you assign new work.
+
+---
+
 ## Key Features
 
 - **Zero-Install & Zero-Server:** Runs on PC, Mac, Linux, Android, and iPad in modern web browsers (Chrome, Edge, Firefox, Safari). No Node.js, Python, or account required. On desktop you can open `index.html` directly; **on tablets you need to open it from a web address for saving to work** — see [Running on Tablets](#running-on-tablets-android--ipad).
