@@ -14,3 +14,6 @@ outreach/
 
 .claude/worktrees/
 
+
+# Node modules (only ever present if a contributor installs Playwright for test/browser/)
+node_modules/

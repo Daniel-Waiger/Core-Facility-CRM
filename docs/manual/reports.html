@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reports &amp; Utilization — Core Facility Tracker Manual</title>
-<link rel="stylesheet" href="manual.css?v=2">
+<link rel="stylesheet" href="manual.css?v=3">
 <script id="theme-fouc-guard">
   (function () {
     try {
@@ -87,7 +87,7 @@
       <div class="callout warn">
         <p><strong>⚠️ Careful — parallel occupancy.</strong> If a single 2-hour booking uses two instruments together, each instrument gets credited with the <strong>full 2 hours</strong>, not 1 hour each. That's not double-counting — both instruments really were occupied for the whole 2 hours, at the same time, by the same booking.</p>
       </div>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> Load the sample data and open Reports with the default (This Year) range. Find a booking that uses two instruments at once in the Calendar, then check that both instruments show that booking's full duration in their Booked hours — not half each.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> Open the demo sandbox and open Reports with the default (This Year) range. Find a booking that uses two instruments at once in the Calendar, then check that both instruments show that booking's full duration in their Booked hours — not half each.</p></div>
     </section>
 
     <section>
@@ -101,7 +101,7 @@
       </ul>
       <div class="callout tip"><p><strong>💡 Tip.</strong> If a staff member's line for a booking has no personal start/end time set, their raw hours count as the <em>whole booking window</em>, exactly the same rule the live cost breakdown uses (see <a href="costs-math.html#staff-hours">How Costs Are Calculated</a>).</p></div>
       <div class="callout try">
-        <p><strong>🧪 Try it.</strong> The sample data's three facility staff bill at 95, 110, and 80 per hour. Pick one, find their row on the Staff card, and check that Billed hours is never less than Raw hours — if any booking involved a partial hour, Billed hours should be visibly rounded up from it.</p>
+        <p><strong>🧪 Try it.</strong> Open the demo sandbox — its three facility staff bill at 95, 110, and 80 per hour. Pick one, find their row on the Staff card, and check that Billed hours is never less than Raw hours — if any booking involved a partial hour, Billed hours should be visibly rounded up from it.</p>
       </div>
     </section>
 
@@ -114,7 +114,7 @@
         <li><strong>Hours ARE split</strong> across the booking's instruments, so that each staff member's row still adds up to their real total hours rather than over-counting them. If someone spent 2 hours on a booking that used 2 instruments, each instrument's cell gets 1 of those 2 hours — the two combined give back their true 2 hours.</li>
       </ul>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This is the opposite of Card 1's rule, and deliberately so: the Instrument card is answering "how occupied was this instrument?" (both instruments really were tied up for the whole time, so each gets full hours). The matrix is answering "how did this person's time break down by instrument?" — and a person only has so many hours in a day, so splitting keeps their row honest rather than making it look like they worked twice as many hours as they did.</p></div>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> Find a staff member and instrument pair in the sample data's matrix, then cross-check the hours against that person's Raw hours total on Card 2 — the matrix row should sum to the same total.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> In the demo sandbox, find a staff member and instrument pair in its matrix, then cross-check the hours against that person's Raw hours total on Card 2 — the matrix row should sum to the same total.</p></div>
     </section>
 
     <section>
@@ -309,6 +309,6 @@
     <nav class="pager" id="pager"></nav>
   </main>
 </div>
-<script src="manual.js?v=2"></script>
+<script src="manual.js?v=3"></script>
 </body>
 </html>

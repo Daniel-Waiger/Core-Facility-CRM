@@ -1,5 +1,18 @@
-/* consts.js — shared vocabularies (keep in sync with UI) */
-window.APP_VERSION = '1.9.1';
+/* consts.js — shared vocabularies (keep in sync with UI) + the demo-sandbox flag */
+window.APP_VERSION = '1.10.2';
+
+/* ---------------- Demo sandbox flag ----------------
+   The demo dataset must never be able to touch a real facility's records, so it does not share
+   a database with them: opening the app as `index.html?demo=1` makes db.js open a SEPARATE
+   IndexedDB database ('core-facility-demo'), and ui.js namespace its localStorage keys. Nothing
+   in the demo tab can read or write the real database, because that database is never opened.
+
+   Resolved here, in the first script the page loads, for two reasons: db.js memoises its
+   IndexedDB connection the moment DB.boot() probes storage (so the decision has to be made
+   before any module runs), and one definition beats the same regex copied into three IIFEs. */
+window.IS_DEMO = (function () {
+  try { return /[?&]demo=1(?:&|$)/.test(String(location.search || '')); } catch (_) { return false; }
+})();
 window.CONST = {
   // A lab→facility review/billing workflow by default; facilities can add their own via the
   // "+ Add New" vocab flow (DB.vocabList/addVocab), same as every other list here.

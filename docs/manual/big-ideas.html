@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Big Ideas — Core Facility Tracker Manual</title>
-<link rel="stylesheet" href="manual.css?v=2">
+<link rel="stylesheet" href="manual.css?v=3">
 <script id="theme-fouc-guard">
   (function () {
     try {
@@ -46,7 +46,7 @@
       <p>There is no company server behind this app, no account to log into, and nothing being sent over the internet while you use it. Everything you type — every project, person, booking — is saved directly inside the browser you're using, on the computer or tablet you're using it on.</p>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> That design is what lets the app run entirely offline, install like a normal program, and work even with no internet connection at all. The trade-off is that "your data" really means "the data in this one browser" — nothing more, nothing less.</p></div>
       <p>The practical result: if you open the tracker in a <em>different</em> browser, or on a <em>different</em> computer or tablet, you'll find it empty — even though it's "the same app." Two browsers on the very same computer (say, Chrome and Firefox) also keep two completely separate sets of data.</p>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> If you have two browsers installed, open the tracker in one, load the sample data, then open the tracker's address in the other browser. You'll see it start empty — proof that each browser keeps its own private copy.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> If you have two browsers installed, open the tracker in one, open the demo sandbox, then open the tracker's address in the other browser. You'll see it start empty — proof that each browser keeps its own private copy.</p></div>
     </section>
 
     <section>
@@ -61,7 +61,7 @@
       <p>Say a facility staff member who ran forty past bookings leaves the lab. If you deleted their record, every one of those forty bookings would lose the answer to "who ran this session?" — a real gap in your history. So instead, the app lets you <strong>retire</strong> them: their name gets a "(Retired)" label everywhere it appears, they disappear from pickers for <em>new</em> work, but every past record that already names them is untouched.</p>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> Deleting is meant only for a genuine mistake — a duplicate entry, a typo — that has nothing riding on it yet. The moment a record has real history attached, deleting it would falsify that history, so the app protects it by retiring instead.</p></div>
       <p>Because of this, the app only ever offers a true, permanent delete when a person or instrument has <strong>zero</strong> references anywhere — no projects, no bookings, no milestones. The moment there's any history at all, the same button retires instead of deleting; you can't force a delete on a record with history (if you have true duplicates, retire the extra one). See <a href="people-labs.html#retire-restore">People &amp; Labs</a> and <a href="instruments.html#retire-restore">Instruments</a>.</p>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> In the sample data, open <strong>People &amp; Labs</strong> and try retiring one of the facility staff members who has bookings. Notice the dialog tells you exactly where they appear before you confirm — and that a "Show retired" toggle is the only way to see them again afterward.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> In the demo sandbox, open <strong>People &amp; Labs</strong> and try retiring one of the facility staff members who has bookings. Notice the dialog tells you exactly where they appear before you confirm — and that a "Show retired" toggle is the only way to see them again afterward.</p></div>
     </section>
 
     <section>
@@ -129,6 +129,6 @@
     <nav class="pager" id="pager"><!-- rendered by manual.js --></nav>
   </main>
 </div>
-<script src="manual.js?v=2"></script>
+<script src="manual.js?v=3"></script>
 </body>
 </html>

@@ -34,11 +34,33 @@ A lesson that just restates an architecture rule should be deleted — point at
 
 ## Verification
 
-- **"The code looks correct" is not verification in this repo.** There is no
-  test suite and no build. `node --check js/<file>.js` proves the file parses
-  and nothing more. A verifier must actually load the app in a browser and
-  exercise the changed path, or state plainly that it did not. A pass issued
-  from a read of the diff alone is a false pass. _(2026-09-08)_
+- **"The code looks correct" is not verification in this repo.** `node --check
+  js/<file>.js` proves the file parses and nothing more. A verifier must run the
+  test suite AND, for anything touching the UI, actually load the app in a
+  browser and exercise the changed path — or state plainly that it did not. A
+  pass issued from a read of the diff alone is a false pass. _(2026-09-08,
+  updated 2026-09-10)_
+
+- **There is a test suite now — run it, and add to it.** `node --test
+  'test/unit/*.test.js'` needs nothing installed; the browser group
+  (`test/browser/*.spec.js`) needs Playwright and skips without it. Pass the
+  glob, not the directory: `node --test test/unit/` makes Node 22 try to
+  *execute* the directory. Run under `TZ='Asia/Jerusalem'` — this project's date
+  bugs are invisible at UTC. See `test/README.md`. Two facts about it that
+  matter to a planner: the unit tests reach real code (the app's IIFEs are
+  evaluated against a small DOM stub, and a genuine in-memory database is booted
+  through the app's own never-persisting mode, so the shipped schema and
+  migrations are what run) — and they still cannot tell you a screen renders.
+  _(2026-09-10)_
+
+- **A guard that finds a pre-existing bug on its first run is doing its job —
+  do not weaken it.** The date-rule lint failed the moment it was written, on two
+  real faults: `performBackupDownload` and `exportAllXlsx` both built a filename
+  date with `toISOString().slice(0, 10)`. The first mattered — the silent
+  automatic backup identifies the day's file by that name, so east of Greenwich a
+  backup written just after midnight overwrote the previous day's. Fix it, or
+  allow-list it with a stated reason; never soften the check, and never report a
+  suite as passing with a real violation quietly allow-listed. _(2026-09-10)_
 
 - **Serve the app rather than opening `file://` when the change touches
   storage.** IndexedDB and the service worker behave differently under

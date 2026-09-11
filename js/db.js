@@ -247,6 +247,16 @@
   let db = null;
   const DB_KEY = 'core.db';
   const UPLOAD_KEY = 'uploads';
+  // Demo mode gets its own IndexedDB *database* (not just a differently-prefixed key) so that a
+  // demo tab (`?demo=1`, see js/consts.js's IS_DEMO) is physically isolated from a real facility's
+  // data. This single database also holds `uploads:*` (file attachments, see saveUpload/getUpload
+  // below) and `auto-backup-dir-handle` (the user's real backup folder handle, see
+  // saveAutoBackupDirHandle/getAutoBackupDirHandle below) — switching the database name isolates
+  // all three at once, so a demo tab cannot resolve the user's backup folder or see their uploads,
+  // not just its own sample rows in the 'kv' object store. Keying only the value inside the same
+  // database would leave those other two reachable from a demo session, which is exactly the kind
+  // of leak this is meant to close.
+  const IDB_NAME = global.IS_DEMO ? 'core-facility-demo' : 'core-facility';
 
   async function initSqljs() {
     if (!global.initSqlJs) throw new Error('sql.js not loaded — check libs/');
@@ -696,7 +706,7 @@
   function idbOpen() {
     if (idbHandle) return Promise.resolve(idbHandle);
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('core-facility', 1);
+      const req = indexedDB.open(IDB_NAME, 1);
       req.onupgradeneeded = () => {
         const s = req.result;
         if (!s.objectStoreNames.contains('kv')) s.createObjectStore('kv', { keyPath: 'k' });
@@ -1454,7 +1464,26 @@
     return mid;
   }
 
-  function seedSampleData() {
+  function seedSampleData({ force = false } = {}) {
+    // Hard refusal, deliberately placed as the first statement of the destructive function itself
+    // rather than left to whatever calls it. A check at the call site only makes the call
+    // *currently unused* outside the sandbox; a guard here makes the destructive path itself
+    // *unreachable* outside the sandbox, so a future stray call — a new button, a mis-merge, a
+    // console invocation, a copy-pasted onClick — cannot wipe a real facility's data no matter
+    // where it comes from. The user's requirement is emphatic: demo data never deletes user input
+    // data, ever. Note this only protects the *seed*; the surrounding IDB_NAME split above is what
+    // keeps the demo database itself distinct from a real one in the first place.
+    if (!global.IS_DEMO) {
+      console.error('seedSampleData() refused: not running in demo mode (window.IS_DEMO is false). Sample data can only be seeded into the isolated demo database (?demo=1).');
+      return false;
+    }
+
+    // Re-seeding an already-populated sandbox would throw (projects.code is UNIQUE, and
+    // milestones.id values are inserted explicitly below) unless the caller explicitly asks for a
+    // reset. clearAllData() is safe to call here because IS_DEMO already guarantees this is the
+    // demo database, never a real facility's.
+    if (!force && hasAnyDataLocal()) return true;
+
     clearAllData();
 
     // Demo dates are relative to the day the sample data is loaded, so the dataset never reads as
@@ -1686,7 +1715,7 @@
     // 8. Meetings (start_time/end_time drive calendar display + instrument/staff conflict checks;
     // every booking below goes through seedBooking(), which calls the exact same
     // UI.computeBookingBOM() the booking modal uses — see the helper above seedSampleData for how
-    // subtotal/total_before_tax/total_cost are derived). Ten bookings, chosen to exercise every
+    // subtotal/total_before_tax/total_cost are derived). 13 bookings, chosen to exercise every
     // corner of the Reports & Utilization screen (see task notes): all five instruments, all
     // three Facility Staff, a multi-instrument session, a per-unit (non-time) instrument charge,
     // a facility-wide (no project) booking, both cancellation rules, project 3, both no-discount
@@ -1938,6 +1967,16 @@
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (1, 'dataset', 'Intravital CAR-T 4D time-lapse volumes (raw + segmented)', 'NAS-Bioimaging-Vol4 dataset DOI pending', ?)`, [day(-1)]);
 
     markDirty();
+    return true;
+  }
+
+  // Same emptiness check as js/app.js's hasAnyData(), duplicated locally rather than reaching
+  // across module boundaries: db.js is loaded before app.js (see CLAUDE.md's module load order),
+  // so app.js's helper isn't available here to call. Used only to decide whether an unforced
+  // seedSampleData() call should skip re-seeding a sandbox that already has rows.
+  function hasAnyDataLocal() {
+    const r = row('SELECT (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) as c');
+    return !!(r && r.c);
   }
 
   // The "effective date" of a research output: its own `date` when set, else the
@@ -1963,6 +2002,7 @@
   global.DB = {
     boot,
     get memoryMode() { return memoryMode; },
+    get isDemo() { return !!global.IS_DEMO; },
     currentBytes,
     markDirty,
     buildBackup,

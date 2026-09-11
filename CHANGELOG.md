@@ -3,6 +3,135 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.10.2] — 2026-09-10
+
+### Fixed
+- **The Settings button offering sample data said the wrong thing.** It still read "Load Sample
+  Data" after that action changed to open the practice sandbox in a new tab, so the button named
+  something it no longer did — the same kind of mismatch this release set out to remove. It now
+  reads "Open Demo Sandbox", matching the welcome screen.
+- **On the welcome screen, a stray click could start a delete.** "Start Fresh" was clickable
+  across its whole card while the sandbox option needed a precise click on its button, so the
+  larger, easier-to-hit target was the one that erases everything. Both options now activate only
+  from their own button.
+- **Removed "Back to Real App" from the sandbox banner.** It opened your real records in the demo
+  tab while the tab you came from was almost certainly still showing them — and two copies of the
+  app open at once can overwrite one another's edits, since whichever saves last wins. Closing the
+  sandbox tab returns you to your records untouched, which is what the explanation now says.
+
+- **A browser test believed it was covering the admin-only Settings screens and was not.** The
+  suites set the app's preferences under plain keys, but a sandbox tab reads them under its own
+  prefixed names, so the flags were ignored there — including the one that turns Admin Mode on.
+  The group-discount and rename-lab editors were therefore never displayed during the run, and
+  nothing failed, because nothing checked. The flags are now written under both names, and the
+  test asserts those editors really are on screen, so the coverage is a claim rather than an
+  assumption. No effect on the app itself.
+- **The welcome screen stayed open behind the demo sandbox.** Opening the sandbox from the
+  welcome screen launches a new tab, which means the original tab is never navigated away — so
+  the welcome screen sat there in front of the app, waiting to be dismissed by hand, and the
+  first-run explanation of where your data lives never appeared on that path even though every
+  other way out of that screen shows it. Picking the sandbox now clears the welcome screen and
+  shows that notice, the same as choosing Start Fresh does.
+- **Money and hours no longer change shape depending on who is looking.** Both were formatted
+  without pinning a locale, so the figures followed each viewer's browser rather than the
+  facility's settings — and the difference is not cosmetic: the same total reads `$1,234,567.50`
+  for one person and `$1.234.567,50` for another, `$1 234 567,50` for a third, or
+  `$12,34,567.50` where digits group in lakhs. A period standing in for the thousands separator
+  beside a configured `$` is actively misleading, and two people reading one invoice figure should
+  not see two different numbers. Both now format identically everywhere, which also keeps an
+  export or a printed report the same whoever generated it. Raised in review on
+  [#42](https://github.com/Daniel-Waiger/Core-Facility-CRM/pull/42), and now covered by tests that
+  re-run the formatter under five locales — the only way to catch it, since a locale is fixed when
+  a process starts.
+
+## [1.10.1] — 2026-09-10
+
+### Added
+- **A test suite, runnable on a bare copy of the repo.** Node's built-in runner needs no
+  `package.json` and no install, so the zero-install design is intact: `node --test
+  'test/unit/*.test.js'` covers the billing calculator (the 1-hour staff floor, the discount
+  applying only to time-billed instrument cost, the subtotal → discount → overhead → tax order,
+  and the 490 / 546.25 / 589.95 figures a seeded booking has to reproduce), the local-calendar-day
+  date rules that caused issue #14, the database invariants this project had verified once by hand
+  (the `foreign_keys` pragma that `db.export()` silently clears, every cascade, the `projects.pi_id`
+  gap cascade cannot cover, retire/archive, cancellation billing, and the denormalized attendee
+  string staying in step with its join table), and the Reports aggregations agreeing with the
+  booking modal. A second group guards the wiring this app is built on: every `data-act` has a
+  handler and every handler an emitter, every icon name resolves, no file reintroduces the
+  UTC date bug, and the version strings stay in step. Browser checks — the demo sandbox
+  isolation guarantee, all seven screens rendering, and the note sanitizer — live apart and skip
+  cleanly when Playwright is absent. Everything runs on GitHub for pushes and pull requests.
+
+### Fixed
+- **Two backup and export filenames could be stamped with yesterday's date.** Both built their
+  date from `toISOString()`, which re-describes the moment in UTC — so anywhere east of Greenwich,
+  a file saved shortly after midnight was labelled with the previous day. For the silent automatic
+  backup this was not cosmetic: the filename is what identifies the day's backup, so the misdated
+  file **overwrote the previous day's backup** instead of joining it. The "Export All" spreadsheet
+  had the same flaw in its filename. Both now use the same local-calendar-day helper as the rest
+  of the app. Found by the new date-rule check on its first run.
+
+## [1.10.0] — 2026-09-10
+
+### Changed
+- **Sample data can no longer touch your real records — it opens in its own sandbox.** Loading
+  the demo dataset used to erase everything first: every project, person, instrument, milestone
+  and booking, with no confirmation, from a Settings button captioned "Load Sample Data" — while
+  the manual promised in bold that it "does not erase your own projects". The demo now runs as a
+  **demo sandbox** in its own browser tab, against storage of its own, and the real records are
+  never opened by that tab at all. Practice edits are kept, so you can come back to them; a
+  Reset control restores the sandbox to its original state. The sandbox never writes automatic
+  backups either, since both modes name their backup files identically and a demo write could
+  otherwise overwrite the day's real backup. The old destructive path is now unreachable rather
+  than merely unused: seeding refuses outright unless it is running in the sandbox, checked as
+  the first thing it does.
+- **One money formatter for the whole app.** The booking modal and the Reports screen each had
+  their own, and they disagreed at exact half-cent values — 2.675 printed as 2.67 in the modal
+  and 2.68 in Reports. Both now read the single copy in `js/ui.js`, resolving it in favour of
+  Reports; money also gains thousands separators in the booking modal (`$1,250.00`). Stored
+  values are untouched — this is display only.
+- **"Booking" everywhere for the scheduled record**, instead of alternating between "booking" and
+  "meeting" — the project page called it a meeting while its own dialog called it a booking, and
+  one Reports footnote managed both in a single sentence. "Meeting notes" survives where it
+  genuinely means the notes. Database tables and export sheet names keep their existing spelling,
+  being data rather than display. Display text likewise settles on "Utilization".
+- **Plainer wording in three places aimed at the wrong audience:** the one permanently visible
+  tooltip said "Real-time SQLite autosave status"; a Settings row was headed "Startup Welcome
+  Modal"; and the storage-failure screen sent readers to a README they cannot reach from the app,
+  now pointing at the user manual instead.
+- **Danger dialogs name their verb.** Four of them rendered a generic "Confirm" against the
+  project's own rule, including Clear All Data and Start Fresh, which now read "Delete
+  Everything".
+
+### Fixed
+- **The People and Instruments project counts said "active" while counting archived projects.**
+  Both counts now exclude archived projects, so the number matches the label — which matters
+  precisely for the records the archive feature exists to preserve.
+- **Instrument cost, billing unit and staff hourly rate showed no currency.** A rate read as a
+  bare `450` next to a raw lowercase `time`, with no way to tell it meant 450 per hour in the
+  configured currency. Spreadsheet exports keep the figure a sortable number and put the currency
+  symbol in the column heading instead.
+- **Settings referred to an overhead percentage it never showed you.** Four strings explained
+  that a lab with no pricing tier is charged "the legacy Internal + External overhead sum", but
+  those two rates are not editable or displayed anywhere, so the number behind them was
+  invisible — while still being added to every such booking. The resolved percentage is now
+  stated, read-only, in Billing Rates. Pricing behaviour is unchanged.
+- **Empty lists blamed a filter that was not set.** A brand-new tracker opened Projects and was
+  told "No matching projects", implying something to clear. The three registry screens now
+  distinguish an empty tracker from a filtered one — including the case where rows are hidden
+  behind the archived or retired toggle, where no filter is set at all.
+- **The guided tour described a sidebar that did not exist**, listing Settings (which is in the
+  footer) while omitting Dashboard and Reports. Its 19 step titles also carried hand-written
+  numbers duplicating the counter the tour already draws, and it still described clicking a
+  milestone badge to "cycle" its status, replaced by a status picker several releases ago.
+- **The first-run notice named a button that does not exist**, telling users to use "Import
+  Backup" on the other device. The button is "Restore from Backup".
+- **The manual documented the old, destructive sample-data behaviour** — in a warning callout, a
+  self-test answer, a glossary entry, the chapter blurb and twenty-odd "Try it" exercises — and
+  in one place advised a reader who already held real data to press Start Fresh, which deletes
+  everything. Rewritten around the sandbox. A cross-reference pointing chapter 12 at the Reports
+  chapter (it is chapter 13) is corrected.
+
 ## [1.9.1] — 2026-09-09
 
 ### Changed
