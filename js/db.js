@@ -929,6 +929,19 @@
   // leave every OTHER tab stuck read-only forever.
   const BYE_GRACE_MS = 1500;
 
+  // C5-rejoin: how long a bfcache-restored tab (see rejoinAsNewTab below) waits, after
+  // announcing itself with a fresh `hello`, before it is allowed to run the election that could
+  // promote it to writer. rejoinAsNewTab() clears `peers` and resets this tab's own timestamp to
+  // now, so right after that reset `peers` legitimately reflects "nobody heard from yet", not
+  // "nobody else is here" — and the surviving leader's `hello-ack` proving otherwise can still be
+  // in flight. Without this wait, a fast IndexedDB reload (reloadFromDiskAndPromote) can finish
+  // and promote this tab to a real writer before that ack arrives, giving two tabs write access
+  // for one round-trip: an edit made in that window is accepted, the late ack then demotes this
+  // tab correctly, but the edit was never persisted (persist bails on isReadOnly) and simply
+  // vanishes. Bounded the same way BYE_GRACE_MS bounds the outgoing side, so a genuinely-alone
+  // tab (no ack ever coming) isn't stuck read-only forever.
+  const REJOIN_GRACE_MS = 300;
+
   let multiTabGuard = { isReadOnly: () => false };
   function startMultiTabGuard() {
     if (typeof BroadcastChannel === 'undefined') return { isReadOnly: () => false };
@@ -950,6 +963,23 @@
     // read-only toast every 3 seconds forever; toasting only on the first failure of a streak
     // keeps a genuinely stuck tab quiet after the first warning instead of spamming one every retry.
     let promoteFailStreak = 0;
+    // Non-null only while a bfcache-rejoined tab is waiting out REJOIN_GRACE_MS for the
+    // surviving leader's `hello-ack` — see REJOIN_GRACE_MS above and rejoinAsNewTab() below.
+    // recompute()'s promotion branch refuses to run while this is set; the timer itself (or an
+    // ack arriving first) clears it and re-runs recompute() for real.
+    let rejoinGraceTimer = null;
+    // C5-rejoin: true once this tab has actually completed a real promotion (reloadFromDiskAndPromote
+    // reaching its success path below) at least once. Distinguishes the two ways a tab can be
+    // demoted while `dirty`: a brand-new tab defaults to `readOnly = false` optimistically and can
+    // be demoted the first time it learns of an older tab — expected, and nothing was ever
+    // wrongly accepted, since this tab was never anything but a normal, always-was-going-to-be-a-
+    // reader tab finding out where it stands. Only a tab that has been through a genuine promotion
+    // can have taken writes DURING a window that a later message proves shouldn't have been
+    // possible (the grace-window race REJOIN_GRACE_MS guards, or a straggler ack arriving after the
+    // grace period itself already elapsed) — that is the only case recompute()'s demotion branch
+    // below should treat as data to warn about and discard, not silently keep as if nothing
+    // happened.
+    let hasBeenPromoted = false;
 
     // Promotion: reload the in-memory database from IndexedDB before this tab is allowed to write
     // or autosave again — see the big comment above. Never throws outward: a failed reload leaves
@@ -1010,6 +1040,7 @@
       }
       readOnly = false;
       promoteFailStreak = 0;
+      hasBeenPromoted = true;
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(false, { promoted: true });
     }
 
@@ -1028,6 +1059,11 @@
       const next = !isLeaderNow();
       if (next === readOnly) return; // no change
       if (readOnly && !next) {
+        // C5-rejoin: a rejoining tab must not promote off an empty `peers` that just hasn't
+        // heard back yet — see REJOIN_GRACE_MS. Stay read-only; the grace timer (or an ack
+        // arriving early, in onBcMessage) re-runs recompute() once the round-trip has had its
+        // chance.
+        if (rejoinGraceTimer) return;
         // Promotion. Block writes for the duration (isReadOnly() below checks `promoting` too) and
         // do the disk reload before anything is allowed to touch `db` again.
         if (promoting) return; // already in flight
@@ -1035,11 +1071,47 @@
         reloadFromDiskAndPromote();
         return;
       }
-      // Demotion (another, older tab showed up) needs no reload — this tab simply stops writing;
-      // its own in-memory copy stays exactly what it was, which is fine since read-only tabs never
-      // diverge from what they last legitimately saw.
+      // Demotion (another, older tab showed up). Normally this needs no reload — a read-only tab
+      // never diverges from what it last legitimately saw, so its in-memory copy just stays what
+      // it was, which is exactly the case for a brand-new tab (never promoted) losing the very
+      // first election it hears about. But a tab that HAS been through a real promotion
+      // (`hasBeenPromoted`) can be demoted again while `dirty` — C5-rejoin's promotion race (see
+      // REJOIN_GRACE_MS) or a straggler ack arriving after the grace period already elapsed — in
+      // which case it was briefly and wrongly a writer, accepted an edit that never persisted
+      // (persist bails on isReadOnly), and is only now finding out an older tab survived. That edit
+      // cannot be kept — this tab has no way to merge it into the real leader's now-diverged copy —
+      // so discard it loudly instead of letting the next promotion's disk reload discard it silently.
       readOnly = next;
+      if (hasBeenPromoted && dirty) {
+        discardDirtyAndReload();
+        return;
+      }
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
+    }
+
+    // C5-rejoin: this tab believed (wrongly, per the promotion race above) that it was the
+    // writer and has an edit sitting only in memory, never persisted. It cannot be reconciled
+    // with the real leader's copy, so drop it, reload the leader's actual saved bytes, tell the
+    // user plainly, and re-render so the screen matches what's now in memory.
+    async function discardDirtyAndReload() {
+      dirty = false;
+      pendingDuringSave = false;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      try {
+        const SQL = await initSqljs();
+        const blob = await idbGet(DB_KEY);
+        if (blob) {
+          db = new SQL.Database(blob);
+          db.exec('PRAGMA foreign_keys = ON;');
+        }
+      } catch (e) {
+        console.error('multi-tab demotion: could not reload the other tab\'s saved copy after discarding this tab\'s unsaved edits', e);
+      }
+      if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true);
+      if (global.UI && global.UI.toast) {
+        global.UI.toast('Unsaved changes in this tab were discarded because another tab is saving.', 'error');
+      }
+      if (global.App && global.App.refresh) global.App.refresh();
     }
 
     // Cancels a held departure timer (a later message from the same tab proves it's still here,
@@ -1063,6 +1135,9 @@
         try { bc.postMessage({ type: 'hello-ack', id: selfId, ts: selfTs }); } catch (_) {}
       } else if (msg.type === 'hello-ack') {
         peers.set(msg.id, msg.ts);
+        // C5-rejoin: an ack proves the round-trip REJOIN_GRACE_MS exists to wait out has actually
+        // happened — no reason to keep waiting once we have one.
+        if (rejoinGraceTimer) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
         recompute();
       } else if (msg.type === 'bye') {
         // Item 2 (second review): a `bye` sent right as its tab is torn down used to delete the
@@ -1141,18 +1216,28 @@
       peers.clear();
       for (const timer of pendingDepartures.values()) clearTimeout(timer);
       pendingDepartures.clear();
+      if (rejoinGraceTimer) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
       try { bc.close(); } catch (_) {}
       try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return; }
       bc.onmessage = onBcMessage;
       selfTs = Date.now();
       // Route the "am I actually alone, or is an older tab out there" decision through the SAME
       // recompute()/reloadFromDiskAndPromote() machinery every other state change already uses,
-      // rather than duplicating its onMultiTabState call here: with `peers` empty and `readOnly`
-      // forced true above, recompute() immediately takes the promotion branch — reloading `db`
-      // fresh from IndexedDB before this tab is trusted to write again, exactly as safe as any
-      // other promotion — and demotes back to read-only on its own if an older tab's `hello-ack`
-      // arrives afterward.
-      recompute();
+      // rather than duplicating its onMultiTabState call here — but not yet: `peers` was just
+      // cleared, so recompute() right now can only see "nobody heard from", which is not the same
+      // fact as "nobody else is here" — the surviving leader's `hello-ack` may simply not have
+      // arrived yet (C5-rejoin; see REJOIN_GRACE_MS). Hold the election open for one round-trip
+      // instead of deciding on an empty `peers`: start the grace timer first, THEN announce
+      // `hello`, so recompute() (via the `rejoinGraceTimer` check in its promotion branch) refuses
+      // to promote until either an ack actually arrives (onBcMessage's `hello-ack` handler clears
+      // the timer and calls recompute() again) or the grace period elapses on its own — at which
+      // point recompute() below runs for real, taking the promotion branch if this tab really is
+      // alone, or demoting straight back to read-only if an older tab's `hello`/`hello-ack` did
+      // arrive during the wait.
+      rejoinGraceTimer = setTimeout(() => {
+        rejoinGraceTimer = null;
+        recompute();
+      }, REJOIN_GRACE_MS);
       try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
       // teardown() is already registered as a 'pagehide' listener (below) — since it's the same
       // function reference, addEventListener would just be a no-op duplicate if called again here,

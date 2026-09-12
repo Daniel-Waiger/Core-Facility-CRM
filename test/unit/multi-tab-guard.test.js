@@ -95,6 +95,28 @@ function makeBroadcastChannelClass() {
   };
 }
 
+// Same fixture as makeBroadcastChannelClass(), but with a configurable delivery delay instead of a
+// hardcoded `setTimeout(fn, 0)` — needed to reproduce C5-rejoin's INVERSE race below, where the
+// promotion's IndexedDB reload finishes fast and it's the BroadcastChannel round-trip that's slow.
+function makeDelayedBroadcastChannelClass(delayMs) {
+  const registry = new Map();
+  return class DelayedBroadcastChannel {
+    constructor(name) {
+      this.name = name; this.onmessage = null; this.closed = false;
+      if (!registry.has(name)) registry.set(name, new Set());
+      registry.get(name).add(this);
+    }
+    postMessage(data) {
+      for (const c of registry.get(this.name)) {
+        if (c === this || c.closed) continue;
+        const target = c;
+        setTimeout(() => { if (!target.closed && target.onmessage) target.onmessage({ data }); }, delayMs);
+      }
+    }
+    close() { this.closed = true; const set = registry.get(this.name); if (set) set.delete(this); }
+  };
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const realInitSqljs = require(path.join(REPO, 'libs', 'sql-asm.js'));
 
@@ -107,6 +129,7 @@ async function bootTab() {
   const realAdd = globalThis.addEventListener;
   globalThis.addEventListener = (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); };
   const app = loadApp(['consts', 'db', 'ui']);
+  app.UI.toast = () => {}; // toast() touches a #toasts host the DOM stub doesn't render
   globalThis.initSqlJs = realInitSqljs;
   globalThis.App = { onSaving() {}, onSaved() {}, onSaveFailed() {}, onMultiTabState() {} };
   await app.DB.boot();
@@ -153,6 +176,83 @@ describe('multi-tab guard: a slow post-bfcache reload must re-check the election
       // fresh, newer timestamp per rejoinAsNewTab) must not usurp it once the race is resolved.
       assert.equal(B.DB.isReadOnly, false, 'B remains the writer');
       assert.equal(A.DB.isReadOnly, true, 'A must stay (or return to) read-only once its reload actually finishes and re-checks the election');
+    } finally {
+      globalThis.BroadcastChannel = savedBC;
+      globalThis.indexedDB = savedIDB;
+      globalThis.initSqlJs = savedInit;
+      globalThis.App = savedApp;
+    }
+  });
+});
+
+describe('multi-tab guard: a fast post-bfcache reload must not promote before the round-trip that could disprove it', () => {
+  // C5-rejoin. The INVERSE of the race above: here the promotion's IndexedDB reload finishes
+  // BEFORE the surviving leader's `hello-ack` gets a chance to arrive (a slow BroadcastChannel,
+  // not a slow reload) — reproduced from the red team's verify8/attack3.js harness. Pre-fix,
+  // rejoinAsNewTab() routed straight into recompute() with `peers` freshly cleared, so recompute()
+  // saw "nobody's heard from" and concluded "nobody else is here", promoting A on the spot. A
+  // write landing in that window was accepted (dirty, never persisted); the late ack then demoted
+  // A correctly, but the row was gone — persist bails out on isReadOnly, and the next promotion's
+  // disk reload silently discards whatever was sitting only in memory.
+  test('a write attempted in the round-trip window is refused, not accepted-then-dropped', async () => {
+    const savedBC = globalThis.BroadcastChannel;
+    const savedIDB = globalThis.indexedDB;
+    const savedInit = globalThis.initSqlJs;
+    const savedApp = globalThis.App;
+    try {
+      // Reload stays fast (the default, un-slowed initSqlJs); only the BroadcastChannel is slow —
+      // 150ms is comfortably longer than REJOIN_GRACE_MS's own poll granularity but still well
+      // inside the 300ms grace itself, so a `hello-ack` sent right at rejoin should still land
+      // before the grace timer fires on its own.
+      globalThis.BroadcastChannel = makeDelayedBroadcastChannelClass(150);
+      const fake = makeFakeIndexedDB();
+      globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+      globalThis.App = { onSaving() {}, onSaved() {}, onSaveFailed() {}, onMultiTabState() {} };
+
+      // Every message now takes 150ms one-way, and B's own read-only state only settles once
+      // A's `hello-ack` (itself a reply to B's `hello`) makes it back to B — two hops, ~300ms —
+      // so give the initial handshake room to actually finish before asserting on it.
+      const A = await bootTab();
+      await sleep(30);
+      const B = await bootTab();
+      await sleep(500);
+      assert.equal(A.DB.isReadOnly, false, 'sanity: A is the first (and so far only) tab — writable');
+      assert.equal(B.DB.isReadOnly, true, 'sanity: B arrived second — read-only under A');
+
+      // A leaves — B legitimately promotes.
+      await A.fire('pagehide', {});
+      await sleep(700);
+      assert.equal(B.DB.isReadOnly, false, 'sanity: B has promoted after A left');
+
+      // A comes back from the bfcache. Its own reload from IndexedDB is fast; B's hello-ack, sent
+      // in reply to A's `hello`, takes 150ms to arrive over the (slowed) BroadcastChannel.
+      await A.fire('pageshow', { persisted: true });
+      await sleep(40); // well before B's hello-ack (150ms) and before REJOIN_GRACE_MS (300ms)
+
+      // Without the fix, A would already believe itself the writer here. Attempt a write in
+      // exactly that window.
+      let wrote = false;
+      let threw = null;
+      try {
+        A.DB.run('INSERT INTO people (name, type, email) VALUES (?,?,?)', ['RaceGhost', 'User', 'rg@x.com']);
+        wrote = true;
+      } catch (e) {
+        threw = e;
+      }
+      assert.equal(wrote, false, 'a write attempted during the grace window must be refused, not accepted and later dropped');
+      assert.ok(threw && threw.dbReadOnly, 'expected the same read-only error assertWritable() throws for any other read-only tab');
+
+      // Let the ack arrive, the grace timer resolve either way, and any autosave settle.
+      await sleep(1000);
+      const bothWritable = !A.DB.isReadOnly && !B.DB.isReadOnly;
+      assert.equal(bothWritable, false, 'exactly one writer once the dust settles');
+      assert.equal(B.DB.isReadOnly, false, 'B remains the writer — it was already the legitimately-elected leader when A rejoined');
+      assert.equal(A.DB.isReadOnly, true, 'A stays read-only — it never had a legitimate writer window to lose');
+
+      // RaceGhost must never have reached A's own in-memory copy (the write was refused outright,
+      // not accepted and later reloaded away).
+      const inMemory = A.DB.rows("SELECT name FROM people WHERE name = 'RaceGhost'");
+      assert.equal(inMemory.length, 0, 'the refused write must not be sitting in A\'s memory either');
     } finally {
       globalThis.BroadcastChannel = savedBC;
       globalThis.indexedDB = savedIDB;
