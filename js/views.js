@@ -6,6 +6,7 @@
   const ic = global.UI.icon;
   const fmt = global.UI.fmtDate;
   const today = global.UI.today;
+  const DATE_LOCALE = global.UI.DATE_LOCALE;
 
   /* ---------------- Dashboard ---------------- */
   function dashboard() {
@@ -21,8 +22,8 @@
     const upcoming = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
-      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date <= ? AND m.status != 'done'
-      ORDER BY m.due_date ASC LIMIT 10`, [winStr]);
+      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date >= ? AND m.due_date <= ? AND m.status != 'done'
+      ORDER BY m.due_date ASC LIMIT 10`, [now, winStr]);
 
     const overdue = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
@@ -658,8 +659,8 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:15%"><col style="width:10%"><col style="width:15%"><col style="width:12%">
-            <col style="width:14%"><col style="width:10%"><col style="width:56px"><col style="width:120px">
+            <col style="width:20%"><col style="width:10%"><col style="width:14%"><col style="width:11%">
+            <col style="width:10%"><col style="width:9%"><col style="width:56px"><col style="width:120px">
             <col style="width:78px"><col style="width:78px">
           </colgroup>
           <thead>
@@ -679,11 +680,11 @@
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
-                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
+                <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
                 <td><span class="badge neutral">${esc(r.type)}</span></td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td>${r.department ? `<span class="chip-sm" style="font-weight:600">${esc(r.department)}</span>` : '<span class="faint small">—</span>'}</td>
-                <td class="muted small">${esc(r.email || '—')}</td>
+                <td class="muted small tbl-email" title="${esc(r.email || '')}">${esc(r.email || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td><span class="badge primary" title="${r.proj_count} active project${r.proj_count === 1 ? '' : 's'}">${r.proj_count}</span></td>
                 <td>${r.is_staff ? `<span class="badge success" data-tooltip="Facility Staff — billable by the hour on bookings">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
@@ -763,14 +764,14 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:14%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
-            <col style="width:13%"><col style="width:13%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
+            <col style="width:18%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
+            <col style="width:11%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
           </colgroup>
           <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
-                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new bookings">Retired</span>' : ''}</td>
+                <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new bookings">Retired</span>' : ''}</td>
                 <td class="muted small">${esc(r.kind || '—')}</td>
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
                 <td class="faint small">${esc(r.location || '—')}</td>
@@ -778,7 +779,7 @@
                 <td class="faint small">${esc(r.supervisors || '—')}</td>
                 <td class="mono small">${esc(global.UI.fmtMoney(r.cost || 0))}</td>
                 <td class="muted small">${esc(global.UI.unitLabel(r.cost_unit || 'time'))}</td>
-                <td><span class="badge neutral">${r.proj_count} projects</span></td>
+                <td><span class="badge neutral">${r.proj_count} project${r.proj_count === 1 ? '' : 's'}</span></td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
                   ${r.is_retired
@@ -819,7 +820,7 @@
           <button class="btn ${calMode === 'week' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="week">Week</button>
           <button class="btn ${calMode === 'timeline' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="timeline">Timeline</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous ${unitLabel}">${ic('chevron-left')} Prev</button>
-          <button class="btn btn-primary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next ${unitLabel}">Next ${ic('chevron-right')}</button>
           <button class="btn btn-secondary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">${ic('clock')} Agenda</button>
         </div>
@@ -1004,7 +1005,7 @@
     const base = new Date();
     const shifted = new Date(base.getFullYear(), base.getMonth() + calOffset, 1);
     const sy = shifted.getFullYear(), sm = shifted.getMonth();
-    const monthLabel = shifted.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const monthLabel = shifted.toLocaleDateString(DATE_LOCALE, { month: 'long', year: 'numeric' });
 
     const firstDayOfMonth = new Date(sy, sm, 1);
     const lastDayOfMonth = new Date(sy, sm + 1, 0);
@@ -1074,8 +1075,8 @@
     const byDay = calFetchByDay(startStr, endStr);
     const todayStr = today();
 
-    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
-      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const weekLabel = `${days[0].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
     const dayInfos = days.map((d, i) => {
       const ds = global.UI.ymd(d); // local calendar day, not toISOString() — see calFetchByDay/ymd comments
@@ -1147,8 +1148,8 @@
     const endStr = global.UI.ymd(days[6]);
     const todayStr = today();
 
-    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
-      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const weekLabel = `${days[0].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
     // Lanes: every active instrument, plus any retired instrument booked somewhere in this
     // range — history renders (labelled via UI.retiredName), it just doesn't clutter every other
@@ -1286,8 +1287,8 @@
             <div class="faint small">Show the welcome screen, offering "Demo Sandbox &amp; Walkthrough" or "Start Fresh (Empty Workspace)", when the app opens.</div>
           </div>
           <label class="row" style="cursor:pointer;gap:8px">
-            <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
-            <span class="small font-medium">Show on startup</span>
+            <input type="checkbox" id="pref-hide-startup" ${hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '1' : '0'); UI.toast('Startup preference updated');" />
+            <span class="small font-medium">Don't show on startup</span>
           </label>
         </div>
         <div class="row mb-8">

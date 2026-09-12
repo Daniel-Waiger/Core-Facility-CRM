@@ -7,7 +7,7 @@
   --border-strong: #bfcccc;
   --text: #17272b;
   --text-muted: #58696e;
-  --text-faint: #87979b;
+  --text-faint: #667275; /* >=4.5:1 on --bg (4.61:1) and --surface (4.97:1); see CLAUDE.md/changelog for the audit */
   --primary: #5b48c7;
   --primary-hover: #4938ad;
   --primary-soft: #eeeafb;
@@ -42,7 +42,7 @@
   --border-strong: #3b525a;
   --text: #e8eeef;
   --text-muted: #96a8ad;
-  --text-faint: #6d8085;
+  --text-faint: #778c92; /* >=4.5:1 on --bg (5.01:1) and --surface (4.61:1) */
   --primary: #a094f2;
   --primary-hover: #b3a9f5;
   --primary-soft: #262052;
@@ -144,6 +144,12 @@ body {
 .tbl th, .tbl td { overflow-wrap: break-word; }
 .tbl td:last-child, .tbl th:last-child { white-space: nowrap; }
 .tbl td .badge, .tbl td .chip-sm { white-space: normal; }
+/* A name is the thing a reader scans the row by — give it room before anything else gives up
+   its own width, so it wraps to at most two lines instead of one-word-per-line. */
+.tbl td.tbl-name { font-weight: 600; min-width: 140px; }
+/* An email is comfortably narrower than most names; let it truncate with an ellipsis rather
+   than reserve column width it never uses — the full address is still one hover away. */
+.tbl td.tbl-email { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1px; }
 
 /* ---------- Sidebar Items ---------- */
 .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
@@ -431,6 +437,9 @@ body {
 }
 .input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
 textarea.input { resize: vertical; min-height: 74px; }
+/* Marks the specific field a validation toast referred to, so the error isn't only a toast
+   the reader has already looked away from. Cleared the moment the field is edited (app.js). */
+.input.is-invalid { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
 
 /* ---------- Tables ---------- */
 .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -593,7 +602,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 }
 .modal .head { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .modal .body { padding: 20px; overflow-y: auto; overflow-x: hidden; flex: 1; }
-.modal .foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; background: var(--surface-2); }
+.modal .foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; background: var(--surface-2); }
 
 /* ---------- Universal Tooltips ---------- */
 [data-tooltip] { position: relative; }
@@ -641,6 +650,11 @@ textarea.input { resize: vertical; min-height: 74px; }
 .meta-val { color: var(--text); }
 .instrument-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 .meeting-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+/* A long, unbroken name (no spaces to wrap on) next to a fixed-width badge/button in a flex row
+   clips instead of wrapping unless the text sibling can shrink below its own content width. */
+.instrument-box .row > .grow, .meeting-box .row > .grow, .person-card > .grow {
+  min-width: 0; overflow-wrap: break-word;
+}
 .action-items { background: var(--warning-soft); padding: 6px 10px; border-radius: 6px; font-size: 12.5px; }
 .modal-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .modal-title svg { width: 18px; height: 18px; color: var(--primary); }
@@ -727,6 +741,10 @@ textarea.input { resize: vertical; min-height: 74px; }
 .cal-hour-row { border-top: 1px solid var(--border); position: relative; }
 .cal-hour-row:first-child { border-top: none; }
 .cal-hour-label { position: absolute; top: -6px; right: 4px; font-size: 9px; color: var(--text-faint); background: var(--surface); padding: 0 2px; }
+/* The 00:00 row's label sits at the very top of the scrollable body, so the shared -6px offset
+   (centering every other label on its row's border line) pushes it above the scroll container's
+   own top edge, where overflow-y clips it. Only the first row needs a non-negative offset. */
+.cal-hour-row:first-child .cal-hour-label { top: 1px; }
 .cal-week-daycol { position: relative; min-width: 0; border-left: 1px solid var(--border); }
 .cal-hour-slot { border-top: 1px solid var(--border); cursor: pointer; }
 .cal-hour-slot:first-child { border-top: none; }
@@ -768,7 +786,10 @@ textarea.input { resize: vertical; min-height: 74px; }
 .cal-tl-hour-slot { height: 100%; flex: 0 0 auto; }
 .cal-tl-hour-slot:hover { background: var(--surface-2); }
 .cal-tl-daycell .ev {
-  position: absolute; min-width: 0; font-size: 9.5px; line-height: 1.2;
+  /* A short booking's proportional width (e.g. 2h of 24 = ~8%) can render under 15px on a
+     typical lane column — too narrow to read even the time. A 34px floor keeps a couple of
+     characters visible; it's still an approximation the chip's title tooltip resolves exactly. */
+  position: absolute; min-width: 34px; font-size: 9.5px; line-height: 1.2;
   padding: 1px 4px; border-radius: 4px; background: var(--primary-soft); color: var(--primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; z-index: 1;
   box-shadow: 0 0 0 1px var(--surface);
@@ -1030,7 +1051,7 @@ textarea.input { resize: vertical; min-height: 74px; }
 /* ---------- Temporary-session banner ---------- */
 .temp-session-banner {
   position: sticky; top: 0; z-index: 1100; display: flex; align-items: center; gap: 10px;
-  padding: 9px 16px; background: var(--warning-soft); color: var(--text);
+  flex-wrap: wrap; padding: 9px 16px; background: var(--warning-soft); color: var(--text);
   border-bottom: 1px solid var(--warning); font-size: 12.5px;
 }
 .temp-session-banner-ic { display: flex; color: var(--warning); flex-shrink: 0; }
@@ -1068,7 +1089,17 @@ textarea.input { resize: vertical; min-height: 74px; }
 /* Extra-small icon-only button (e.g. copy-code next to a project code) */
 .btn.btn-xs { padding: 2px 5px; font-size: 11px; line-height: 1; vertical-align: middle; }
 .btn.btn-xs svg { width: 13px; height: 13px; }
-.temp-session-banner span:not(.temp-session-banner-ic) { flex: 1; }
+/* Desktop rows stay tight (the padding above), but a touch pointer gets a real hit area —
+   inflating via padding rather than font-size keeps the glyph itself the same visual size. */
+@media (pointer: coarse) {
+  .btn.btn-xs { padding: 9px 10px; min-height: 32px; min-width: 32px; }
+}
+/* flex-basis 0 here (plain `flex: 1`) is what caused U3: with the icon and any action buttons
+   sized by content, their hypothetical widths alone fit the 400px banner, so the row never
+   wrapped — instead this text span (the only flexible item) got squeezed to almost nothing and
+   wrapped one word per line, tripling the banner's height. A realistic basis makes the row's
+   true width exceed a narrow viewport, so flex-wrap actually breaks the row instead. */
+.temp-session-banner span:not(.temp-session-banner-ic) { flex: 1 1 200px; min-width: 160px; }
 .temp-session-banner-close {
   border: none; background: transparent; cursor: pointer; color: var(--text-muted);
   padding: 4px; display: flex; border-radius: 6px; flex-shrink: 0;

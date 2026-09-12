@@ -64,8 +64,8 @@
     return `
     <div class="field">
       <div class="field-vocab-head">
-        <label>${esc(label)}${required ? ' *' : ''}</label>
-        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add New</button>
+        <label title="${esc(label)}">${esc(label)}${required ? ' *' : ''}</label>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add</button>
       </div>
       <select class="input vocab-select" id="${id}" data-cat="${category}" data-label="${esc(label)}" data-prev="${esc(selected)}">
         <option value="">${placeholder}</option>
@@ -89,7 +89,7 @@
     <div class="field">
       <div class="field-vocab-head">
         <label>${esc(label)}</label>
-        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add New</button>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add</button>
       </div>
       <select class="input" id="${id}">
         <option value="">— None —</option>
@@ -212,7 +212,7 @@
             <div class="nav-item" data-nav="projects" title="Project Registry">${ic('folder')}<span class="lbl">Projects</span></div>
             <div class="nav-item" data-nav="people" title="Researchers &amp; Labs">${ic('users')}<span class="lbl">People &amp; Labs</span></div>
             <div class="nav-item" data-nav="instruments" title="Facility Equipment">${ic('cpu')}<span class="lbl">Instruments</span></div>
-            <div class="nav-item" data-nav="calendar" title="Monthly Schedule">${ic('calendar')}<span class="lbl">Calendar</span></div>
+            <div class="nav-item" data-nav="calendar" title="Bookings &amp; Milestones">${ic('calendar')}<span class="lbl">Calendar</span></div>
             <div class="nav-item" data-nav="reports" title="Usage &amp; Billing Reports">${ic('clock')}<span class="lbl">Reports</span></div>
           </nav>
           <div class="nav-spacer"></div>
@@ -372,6 +372,25 @@
       if (kindFilter) kindFilter.onchange = (e) => Views.setInstrumentFilter({ kind: e.target.value });
       const instRetiredToggle = document.getElementById('inst-retired-filter');
       if (instRetiredToggle) instRetiredToggle.onchange = (e) => Views.setInstrumentFilter({ showRetired: e.target.checked });
+    }
+
+    // Week view's hour grid otherwise opens scrolled to 00:00 — sensible for no one, since the
+    // working day starts hours later. Scroll to 07:00, or earlier still if the week's first
+    // booking starts before that, reading the block positions the view already rendered rather
+    // than re-querying the database for the same thing.
+    if (name === 'calendar') {
+      const scrollEl = document.querySelector('.cal-week-scroll');
+      if (scrollEl) {
+        const hourPx = Views.calLayout.HOUR_PX;
+        let earliestTop = Infinity;
+        scrollEl.querySelectorAll('.ev[style*="top:"]').forEach((ev) => {
+          const m = /top:\s*(-?[\d.]+)px/.exec(ev.getAttribute('style') || '');
+          if (m) earliestTop = Math.min(earliestTop, parseFloat(m[1]));
+        });
+        const defaultTop = 7 * hourPx;
+        const target = Math.max(0, Math.min(defaultTop, isFinite(earliestTop) ? earliestTop : defaultTop));
+        scrollEl.scrollTop = target;
+      }
     }
 
     if (name === 'reports') {
@@ -1006,6 +1025,12 @@
       if (act) handleAct(act.dataset.act, act);
     });
 
+    // Clears the "this field is the one the toast meant" marker as soon as the visitor starts
+    // fixing it, rather than leaving a red border on a field they've already corrected.
+    document.addEventListener('input', (e) => {
+      if (e.target.classList && e.target.classList.contains('is-invalid')) e.target.classList.remove('is-invalid');
+    });
+
     // Editable vocabulary dropdowns: picking "Other" is a trigger, not a real value — open
     // the same "+ Add New" modal the button does, and snap the select back to whatever it
     // held before ("data-prev") so "Other" never sits there mid-flow (e.g. while the nested
@@ -1306,7 +1331,7 @@
   function npSave() {
     const m = document.querySelector('.modal');
     const title = m.querySelector('#np-title').value.trim();
-    if (!title) { UI.toast('Project title is required', 'error'); return; }
+    if (!title) { UI.toast('Project title is required', 'error'); m.querySelector('#np-title').classList.add('is-invalid'); return; }
 
     // Check if new person is specified inline
     let piId = m.querySelector('#np-pi').value ? Number(m.querySelector('#np-pi').value) : null;
@@ -1429,7 +1454,7 @@
   function epSave(id) {
     const m = document.querySelector('.modal');
     const title = m.querySelector('#ep-title').value.trim();
-    if (!title) { UI.toast('Title is required', 'error'); return; }
+    if (!title) { UI.toast('Title is required', 'error'); m.querySelector('#ep-title').classList.add('is-invalid'); return; }
 
     const code = m.querySelector('#ep-code').value.trim() || generateProjectCode();
     const status = m.querySelector('#ep-status').value;
@@ -1605,7 +1630,7 @@
         <div class="field"><label>Milestone Title *</label><input class="input" id="ms-name" placeholder="e.g. Sample preparation &amp; fluorophore labeling" /></div>
         <div class="grid cols-2">
           <div class="field"><label>Due Date</label><input type="date" class="input" id="ms-due" value="${UI.today()}" /></div>
-          <div class="field"><label>Status</label><select class="input" id="ms-status">${C.MS_STATUS.map((s) => `<option value="${s}">${s}</option>`).join('')}</select></div>
+          <div class="field"><label>Status</label><select class="input" id="ms-status">${C.MS_STATUS.map((s) => `<option value="${s}">${esc(UI.msStatusLabel(s))}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label>Notes / Deliverables</label><input class="input" id="ms-note" placeholder="Specific criteria for completion..." /></div>
         <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip" data-owner="${r.id}">${esc(r.name)} (${r.type}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
@@ -1623,7 +1648,7 @@
   function msSave() {
     const m = document.querySelector('.modal');
     const name = m.querySelector('#ms-name').value.trim();
-    if (!name) { UI.toast('Milestone title required', 'error'); return; }
+    if (!name) { UI.toast('Milestone title required', 'error'); m.querySelector('#ms-name').classList.add('is-invalid'); return; }
 
     const pid = ctx.project;
     const due = m.querySelector('#ms-due').value || null;
@@ -1664,7 +1689,7 @@
         <div class="field"><label>Milestone Title *</label><input class="input" id="mse-name" value="${esc(m.name)}" /></div>
         <div class="grid cols-2">
           <div class="field"><label>Due Date</label><input type="date" class="input" id="mse-due" value="${m.due_date || ''}" /></div>
-          <div class="field"><label>Status</label><select class="input" id="mse-status">${C.MS_STATUS.map((s) => `<option value="${s}" ${s === m.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+          <div class="field"><label>Status</label><select class="input" id="mse-status">${C.MS_STATUS.map((s) => `<option value="${s}" ${s === m.status ? 'selected' : ''}>${esc(UI.msStatusLabel(s))}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label>Notes / Deliverables</label><input class="input" id="mse-note" value="${esc(m.note || '')}" /></div>
         <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip ${currentOwners.includes(r.id) ? 'on' : ''}" data-owner="${r.id}">${esc(UI.retiredName(r.name, r.is_retired))} (${r.type}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
@@ -1682,7 +1707,7 @@
   function msEditSave(id) {
     const m = document.querySelector('.modal');
     const name = m.querySelector('#mse-name').value.trim();
-    if (!name) { UI.toast('Milestone title required', 'error'); return; }
+    if (!name) { UI.toast('Milestone title required', 'error'); m.querySelector('#mse-name').classList.add('is-invalid'); return; }
 
     const due = m.querySelector('#mse-due').value || null;
     const status = m.querySelector('#mse-status').value;
@@ -1717,7 +1742,7 @@
         <div class="stack" style="gap:6px">
           ${C.MS_STATUS.map((s) => `
             <button type="button" class="btn ${s === m.status ? 'btn-primary' : 'btn-secondary'} ms-status-choice" data-status="${esc(s)}" style="justify-content:flex-start;gap:8px">
-              ${s === m.status ? ic('check') : ''}<span>${esc(s)}</span>
+              ${s === m.status ? ic('check') : ''}<span>${esc(UI.msStatusLabel(s))}</span>
             </button>`).join('')}
         </div>
       </div></div>
@@ -1785,7 +1810,7 @@
     const dims = document.querySelectorAll('.modal-dim');
     const m = dims[dims.length - 1].querySelector('.modal');
     const name = m.querySelector('#p-name').value.trim();
-    if (!name) { UI.toast('Name required', 'error'); return; }
+    if (!name) { UI.toast('Name required', 'error'); m.querySelector('#p-name').classList.add('is-invalid'); return; }
     const type = m.querySelector('#p-type').value;
     const org = m.querySelector('#p-org').value.trim();
     const dept = m.querySelector('#p-dept').value.trim();
@@ -1842,7 +1867,7 @@
   function pEditSave(id) {
     const m = document.querySelector('.modal');
     const name = m.querySelector('#pe-name').value.trim();
-    if (!name) { UI.toast('Name required', 'error'); return; }
+    if (!name) { UI.toast('Name required', 'error'); m.querySelector('#pe-name').classList.add('is-invalid'); return; }
     const type = m.querySelector('#pe-type').value;
     const org = m.querySelector('#pe-org').value.trim();
     const dept = m.querySelector('#pe-dept').value.trim();
@@ -1960,7 +1985,7 @@
   function iSave() {
     const m = document.querySelector('.modal');
     const name = m.querySelector('#i-name').value.trim();
-    if (!name) { UI.toast('Instrument name required', 'error'); return; }
+    if (!name) { UI.toast('Instrument name required', 'error'); m.querySelector('#i-name').classList.add('is-invalid'); return; }
     DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
        Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time',
@@ -2042,7 +2067,7 @@
   function iEditSave(id) {
     const m = document.querySelector('.modal');
     const name = m.querySelector('#ie-name').value.trim();
-    if (!name) { UI.toast('Instrument name required', 'error'); return; }
+    if (!name) { UI.toast('Instrument name required', 'error'); m.querySelector('#ie-name').classList.add('is-invalid'); return; }
     DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
       [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
        Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time',
@@ -3163,7 +3188,7 @@
   function bookingSave() {
     const m = document.querySelector('.modal');
     const title = m.querySelector('#bk-title').value.trim();
-    if (!title) { UI.toast('Booking title required', 'error'); return; }
+    if (!title) { UI.toast('Booking title required', 'error'); m.querySelector('#bk-title').classList.add('is-invalid'); return; }
 
     const date = m.querySelector('#bk-date').value || UI.today();
     const start = m.querySelector('#bk-start').value || '';
@@ -3308,7 +3333,7 @@
           ? `<button class="btn btn-secondary" data-act="booking-reinstate" data-id="${mt.id}" style="margin-right:auto">${ic('rocket')} Reinstate</button>`
           : `<button class="btn btn-secondary" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('archive')} Cancel Booking</button>`}
         <button class="btn btn-secondary" data-act="email-attendees" data-id="${mt.id}">${ic('mail')} Email Attendees</button>
-        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-secondary" data-act="close">Close</button>
         <button class="btn btn-primary" data-act="booking-edit-save" data-id="${mt.id}">Save Changes</button>
       </div>`, (m) => mountBookingModal(m, {
         noteId: 'bke-note', owners: currentOwners,
@@ -3323,7 +3348,7 @@
   function bookingEditSave(id) {
     const m = document.querySelector('.modal');
     const title = m.querySelector('#bke-title').value.trim();
-    if (!title) { UI.toast('Title required', 'error'); return; }
+    if (!title) { UI.toast('Title required', 'error'); m.querySelector('#bke-title').classList.add('is-invalid'); return; }
 
     const date = m.querySelector('#bke-date').value || null;
     const start = m.querySelector('#bke-start').value || '';
@@ -3561,12 +3586,12 @@
     })(mt.note) : '';
 
     const bodyLines = [];
-    if (mt.date) bodyLines.push('Date: ' + mt.date);
+    if (mt.date) bodyLines.push('Date: ' + UI.fmtDate(mt.date));
     if (noteText) bodyLines.push('', 'Notes:', noteText);
     if (mt.actions) bodyLines.push('', 'Next Steps / Action Items:', mt.actions);
 
     const attendeesText = withEmail.map((p) => p.email.trim()).join(', ');
-    const subjectText = (mt.date ? '[' + mt.date + '] ' : '') + mt.title;
+    const subjectText = (mt.date ? '[' + UI.fmtDate(mt.date) + '] ' : '') + mt.title;
     const bodyText = bodyLines.join('\n');
 
     UI.openModal(`
@@ -4736,7 +4761,7 @@
   function openTodayModal() {
     const todayStr = UI.today();
     const dateObj = new Date();
-    const dateFormatted = dateObj.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const dateFormatted = dateObj.toLocaleDateString(UI.DATE_LOCALE, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
     // Milestones due today
     const msToday = DB.rows(`
