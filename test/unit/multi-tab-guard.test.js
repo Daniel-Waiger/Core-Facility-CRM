@@ -261,3 +261,324 @@ describe('multi-tab guard: a fast post-bfcache reload must not promote before th
     }
   });
 });
+
+/* ---------------------------------------------------------------------------------------------
+ * C6-guard — three follow-up defects in the C5-rejoin machinery above, all in the same
+ * multi-tab guard section of js/db.js:
+ *
+ *   1. Demoting a tab that HAS been through a real promotion only reloaded the leader's bytes
+ *      and warned the user when this tab's own `dirty` flag was still set. But the 400ms
+ *      autosave debounce can flush a phantom edit to disk before the real leader's late
+ *      `hello-ack` arrives — `dirty` is already false by then, so the old code left this tab's
+ *      stale in-memory copy standing (showing a row that isn't on disk once the real leader's
+ *      own next save overwrites it) with no toast and no reload.
+ *   2. teardown() (the `pagehide` handler) never cleared a pending `rejoinGraceTimer` — a
+ *      pagehide landing inside REJOIN_GRACE_MS left the timer armed against a channel about to
+ *      be closed, and it could still fire afterward and promote a tab that will never announce
+ *      itself to anyone again.
+ *   3. The `hello-ack` handler cleared `rejoinGraceTimer` unconditionally, on an ack from ANY
+ *      peer — including one strictly newer than the rejoining tab itself, which proves nothing
+ *      about whether the real (older) leader is still out there and can let the rejoiner
+ *      promote off an incomplete peer set before the leader's own (slower) ack arrives.
+ *
+ * These tests use a tagged, per-sender-delay BroadcastChannel fake (mirroring the review's own
+ * verifier harness) so a "leader" tab's messages can be made slow without slowing every tab, and
+ * a raw same-name BroadcastChannel instance to inject a synthetic `hello-ack` with a controlled
+ * timestamp — the only reliable way to prove the ts-comparison branch in isolation, since a real
+ * third tab booted after the rejoin never actually receives the rejoining tab's original `hello`
+ * in this fake (it isn't registered yet when that message goes out), and so could never produce
+ * the ack this bug is actually about.
+ * ------------------------------------------------------------------------------------------- */
+
+// A BroadcastChannel fake where every channel is tagged at construction time (from a shared,
+// mutable ref the test flips before booting each tab) and postMessage's delivery delay is looked
+// up per SENDER tag — so, e.g., the real leader's acknowledgements can be made slow while every
+// other tab's messages stay instant, reproducing the "late ack" window the review's own harness
+// used without slowing down the whole test.
+function makeTaggedBroadcastChannelClass(currentTagRef, delayForTag) {
+  const registry = new Map();
+  return class TaggedBroadcastChannel {
+    constructor(name) {
+      this.name = name; this.tag = currentTagRef.tag; this.onmessage = null; this.closed = false;
+      if (!registry.has(name)) registry.set(name, new Set());
+      registry.get(name).add(this);
+    }
+    postMessage(data) {
+      const ms = delayForTag(this.tag);
+      for (const c of registry.get(this.name)) {
+        if (c === this || c.closed) continue;
+        const target = c;
+        setTimeout(() => { if (!target.closed && target.onmessage) target.onmessage({ data }); }, ms);
+      }
+    }
+    close() { this.closed = true; const set = registry.get(this.name); if (set) set.delete(this); }
+  };
+}
+
+// Same shape as the file's own bootTab(), but tags the tab (for the delay map above) and records
+// toasts/refreshes/onMultiTabState calls instead of discarding them — the C6-guard tests assert on
+// exactly those (a discard toast fired once, App.refresh() called, the promoted/demoted sequence).
+function bootTaggedTab(currentTagRef, tag) {
+  currentTagRef.tag = tag;
+  const listeners = {};
+  const realAdd = globalThis.addEventListener;
+  globalThis.addEventListener = (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); };
+  const app = loadApp(['consts', 'db', 'ui']);
+  const events = { toasts: [], states: [], refreshes: 0 };
+  app.UI.toast = (msg, kind) => { events.toasts.push([msg, kind]); };
+  globalThis.initSqlJs = realInitSqljs;
+  globalThis.App = {
+    onSaving() {}, onSaved() {}, onSaveFailed() {},
+    onMultiTabState(ro, o) { events.states.push([ro, o || null]); },
+    refresh() { events.refreshes++; },
+  };
+  return app.DB.boot().then(() => {
+    globalThis.addEventListener = realAdd;
+    return { tag, DB: app.DB, events, fire: (type, ev) => Promise.all((listeners[type] || []).map((fn) => fn(ev))) };
+  });
+}
+
+describe('C6-guard item 1: demotion after a phantom autosave must still reload and warn', () => {
+  test('memory converges on disk and the discard toast fires exactly once even though `dirty` was already false', async () => {
+    const savedBC = globalThis.BroadcastChannel;
+    const savedIDB = globalThis.indexedDB;
+    const savedInit = globalThis.initSqlJs;
+    const savedApp = globalThis.App;
+    const tagRef = { tag: '?' };
+    const slowLeader = { on: false };
+    try {
+      // The initial election (O boots, then R boots and learns of O) must settle at normal speed —
+      // only once R is about to rejoin does O's ack need to be slow. Gating the delay on
+      // `slowLeader.on` (flipped right before R's rejoin) keeps the two phases independent, unlike
+      // tagging the delay by sender alone, which would leave R optimistically writable for the
+      // whole 900ms after its very first boot too.
+      globalThis.BroadcastChannel = makeTaggedBroadcastChannelClass(tagRef, (tag) => (tag === 'O' && slowLeader.on ? 900 : 0));
+      const fake = makeFakeIndexedDB();
+      globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+
+      const O = await bootTaggedTab(tagRef, 'O');
+      await sleep(60);
+      const R = await bootTaggedTab(tagRef, 'R');
+      await sleep(600);
+      assert.equal(O.DB.isReadOnly, false, 'sanity: O is the real leader');
+      assert.equal(R.DB.isReadOnly, true, 'sanity: R is the reader');
+
+      // Give O a baseline row and let it actually persist before the race starts.
+      O.DB.run('INSERT INTO people (name, type, email) VALUES (?,?,?)', ['Leader', 'User', 'o@x.com']);
+      await sleep(700);
+
+      R.events.states.length = 0; R.events.toasts.length = 0; R.events.refreshes = 0;
+      slowLeader.on = true; // from here on, O's messages (its late ack) take 900ms
+      await R.fire('pageshow', { persisted: true }); // R rejoins; O's ack is 900ms away
+      await sleep(320); // grace (300ms) elapses with no ack yet — R wrongly promotes
+      assert.equal(R.DB.isReadOnly, false, 'sanity: R wrongly promoted before O\'s slow ack landed');
+
+      // R's phantom edit — accepted because R (wrongly) believes itself the writer.
+      R.DB.run('INSERT INTO people (name, type, email) VALUES (?,?,?)', ['Phantom', 'User', 'p@x.com']);
+      // The real leader keeps working too, a beat later — its own IndexedDB write is a plain
+      // local autosave, never delayed by the (broadcast-only) slow tag, so its 400ms debounce
+      // fires strictly after R's own, deterministically landing last on disk, and still well
+      // before O's 900ms-delayed ack ever reaches R.
+      await sleep(50);
+      O.DB.run('INSERT INTO people (name, type, email) VALUES (?,?,?)', ['LaterLeader', 'User', 'o2@x.com']);
+      await sleep(500); // both tabs' own 400ms autosave debounces land; O's overwrites last
+
+      await sleep(900); // O's slow (900ms) ack finally reaches R, demoting it for real
+
+      assert.equal(R.DB.isReadOnly, true, 'R is correctly demoted once O\'s real ack arrives');
+      const diskRows = await readDiskRows(fake, "SELECT name FROM people WHERE name IN ('Leader','Phantom','LaterLeader') ORDER BY name");
+      const rMemRows = R.DB.rows("SELECT name FROM people WHERE name IN ('Leader','Phantom','LaterLeader') ORDER BY name");
+      assert.deepEqual(rMemRows, diskRows, 'R\'s in-memory copy must converge on disk, not keep showing the never-persisted-for-real Phantom row');
+      assert.equal(rMemRows.some((r) => r.name === 'Phantom'), false, 'the phantom row must not survive in R\'s memory once demoted');
+      assert.equal(rMemRows.some((r) => r.name === 'LaterLeader'), true, 'R\'s memory must reflect the real leader\'s later work');
+
+      const discardToasts = R.events.toasts.filter((t) => t[0] === 'Unsaved changes in this tab were discarded because another tab is saving.' && t[1] === 'error');
+      assert.equal(discardToasts.length, 1, 'the discard warning must fire exactly once, even though `dirty` was already false when the demotion happened');
+      assert.ok(R.events.refreshes > 0, 'the screen must be re-rendered from the reloaded (correct) bytes');
+    } finally {
+      globalThis.BroadcastChannel = savedBC;
+      globalThis.indexedDB = savedIDB;
+      globalThis.initSqlJs = savedInit;
+      globalThis.App = savedApp;
+    }
+  });
+});
+
+describe('C6-guard item 2: teardown must clear a pending rejoin grace timer and lock the tab read-only', () => {
+  test('a pagehide mid-grace never lets a torn-down tab promote or write afterward', async () => {
+    const savedBC = globalThis.BroadcastChannel;
+    const savedIDB = globalThis.indexedDB;
+    const savedInit = globalThis.initSqlJs;
+    const savedApp = globalThis.App;
+    const tagRef = { tag: '?' };
+    try {
+      // O's ack is slow (900ms) — comfortably outside both the 300ms grace and the window this
+      // test waits out, so the only thing that could ever promote B is the leftover grace timer.
+      globalThis.BroadcastChannel = makeTaggedBroadcastChannelClass(tagRef, (tag) => (tag === 'O' ? 900 : 0));
+      const fake = makeFakeIndexedDB();
+      globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+
+      const O = await bootTaggedTab(tagRef, 'O');
+      await sleep(30);
+      const B = await bootTaggedTab(tagRef, 'B');
+      await sleep(60);
+      O.DB.run('INSERT INTO people (name, type, email) VALUES (?,?,?)', ['Baseline', 'User', 'b@x.com']);
+      await sleep(700);
+
+      B.events.states.length = 0;
+      await B.fire('pageshow', { persisted: true }); // starts B's rejoin grace timer
+      await sleep(30);
+      await B.fire('pagehide', {}); // torn down mid-grace, well before the 300ms timer would fire
+      assert.equal(B.DB.isReadOnly, true, 'B is still read-only right after teardown');
+
+      await sleep(900); // past both the 300ms grace and (for good measure) O's 900ms ack window
+
+      const promotedAfterTeardown = B.events.states.some((s) => s[0] === false && s[1] && s[1].promoted);
+      assert.equal(promotedAfterTeardown, false, 'the leftover grace timer must never promote a torn-down tab');
+      assert.equal(B.DB.isReadOnly, true, 'B must remain read-only permanently once torn down');
+
+      let wrote = false;
+      try { B.DB.run("INSERT INTO people (name, type, email) VALUES (?,?,?)", ['Zombie', 'User', 'z@x.com']); wrote = true; } catch (_) {}
+      assert.equal(wrote, false, 'a torn-down tab must never be able to write, even long after teardown');
+
+      const diskRows = await readDiskRows(fake, "SELECT name FROM people WHERE name IN ('Baseline','Zombie')");
+      assert.deepEqual(diskRows.map((r) => r.name), ['Baseline'], 'no zombie write may ever reach disk');
+    } finally {
+      globalThis.BroadcastChannel = savedBC;
+      globalThis.indexedDB = savedIDB;
+      globalThis.initSqlJs = savedInit;
+      globalThis.App = savedApp;
+    }
+  });
+});
+
+describe('C6-guard item 3: only an ack from an older peer may end the rejoin grace early', () => {
+  test('a hello-ack from a peer with a NEWER timestamp must not cause an early promotion', async () => {
+    const savedBC = globalThis.BroadcastChannel;
+    const savedIDB = globalThis.indexedDB;
+    const savedInit = globalThis.initSqlJs;
+    const savedApp = globalThis.App;
+    const tagRef = { tag: '?' };
+    try {
+      globalThis.BroadcastChannel = makeTaggedBroadcastChannelClass(tagRef, () => 0);
+      const fake = makeFakeIndexedDB();
+      globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+
+      const A = await bootTaggedTab(tagRef, 'A');
+      await sleep(30);
+      assert.equal(A.DB.isReadOnly, false, 'sanity: A is alone, so it is the writer');
+
+      A.events.states.length = 0;
+      await A.fire('pageshow', { persisted: true }); // A rejoins: read-only, fresh ts, grace starts
+      assert.equal(A.DB.isReadOnly, true, 'A is read-only the instant it rejoins');
+
+      // Inject a synthetic hello-ack from a peer with a timestamp strictly NEWER than A's own
+      // freshly-reset one. A real third tab booted at this point could never actually produce
+      // this ack in this fake (it isn't registered when A's own `hello` goes out), which is
+      // exactly why this is injected directly on the same-named channel instead.
+      const spy = new globalThis.BroadcastChannel('cf-tab-guard:core-facility');
+      spy.postMessage({ type: 'hello-ack', id: 'newer-peer', ts: Date.now() + 60000 });
+
+      await sleep(100); // comfortably before the 300ms grace elapses on its own
+      assert.equal(A.DB.isReadOnly, true, 'a newer peer\'s ack must not end the grace early or promote A');
+
+      await sleep(250); // past the natural 300ms grace — nobody OLDER ever answered, so A promotes for real
+      assert.equal(A.DB.isReadOnly, false, 'A still promotes once the grace genuinely elapses with no older peer proven');
+      const promotedStates = A.events.states.filter((s) => s[0] === false && s[1] && s[1].promoted);
+      assert.equal(promotedStates.length, 1, 'exactly one (correctly-timed) promotion, not an early one triggered by the newer ack');
+    } finally {
+      globalThis.BroadcastChannel = savedBC;
+      globalThis.indexedDB = savedIDB;
+      globalThis.initSqlJs = savedInit;
+      globalThis.App = savedApp;
+    }
+  });
+
+  test('a hello-ack from a peer with an OLDER timestamp keeps the rejoiner read-only past the grace window', async () => {
+    const savedBC = globalThis.BroadcastChannel;
+    const savedIDB = globalThis.indexedDB;
+    const savedInit = globalThis.initSqlJs;
+    const savedApp = globalThis.App;
+    const tagRef = { tag: '?' };
+    try {
+      globalThis.BroadcastChannel = makeTaggedBroadcastChannelClass(tagRef, () => 0);
+      const fake = makeFakeIndexedDB();
+      globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+
+      const B = await bootTaggedTab(tagRef, 'B');
+      await sleep(30);
+
+      B.events.states.length = 0;
+      await B.fire('pageshow', { persisted: true });
+
+      const spy = new globalThis.BroadcastChannel('cf-tab-guard:core-facility');
+      spy.postMessage({ type: 'hello-ack', id: 'older-peer', ts: Date.now() - 60000 });
+
+      await sleep(350); // well past the 300ms grace window
+      assert.equal(B.DB.isReadOnly, true, 'an ack proving an older peer exists must keep this tab read-only past the whole grace window');
+      const promotedStates = B.events.states.filter((s) => s[0] === false && s[1] && s[1].promoted);
+      assert.equal(promotedStates.length, 0, 'no promotion should ever have been attempted once an older peer was proven to exist');
+    } finally {
+      globalThis.BroadcastChannel = savedBC;
+      globalThis.indexedDB = savedIDB;
+      globalThis.initSqlJs = savedInit;
+      globalThis.App = savedApp;
+    }
+  });
+});
+
+describe('C6-guard coverage: a lone tab still becomes writer once the grace genuinely elapses', () => {
+  test('~300ms after a lone rejoin, with nobody else ever announcing, the tab promotes and can write', async () => {
+    const savedBC = globalThis.BroadcastChannel;
+    const savedIDB = globalThis.indexedDB;
+    const savedInit = globalThis.initSqlJs;
+    const savedApp = globalThis.App;
+    const tagRef = { tag: '?' };
+    try {
+      globalThis.BroadcastChannel = makeTaggedBroadcastChannelClass(tagRef, () => 0);
+      const fake = makeFakeIndexedDB();
+      globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+
+      const A = await bootTaggedTab(tagRef, 'A');
+      await sleep(30);
+      await A.fire('pageshow', { persisted: true });
+      assert.equal(A.DB.isReadOnly, true, 'read-only for the duration of the grace window');
+      await sleep(150);
+      assert.equal(A.DB.isReadOnly, true, 'still read-only mid-grace');
+      await sleep(200); // total > REJOIN_GRACE_MS (300ms)
+      assert.equal(A.DB.isReadOnly, false, 'promoted once the grace elapses with nobody else ever heard from');
+      assert.doesNotThrow(() => A.DB.run("INSERT INTO people (name, type, email) VALUES (?,?,?)", ['Lone', 'User', 'l@x.com']));
+    } finally {
+      globalThis.BroadcastChannel = savedBC;
+      globalThis.indexedDB = savedIDB;
+      globalThis.initSqlJs = savedInit;
+      globalThis.App = savedApp;
+    }
+  });
+});
+
+// Reads rows straight off the fake IndexedDB's persisted bytes (never through a live `db` handle)
+// so a test can assert what's actually on disk independent of any tab's in-memory state.
+async function readDiskRows(fake, sql) {
+  const raw = await new Promise((resolve, reject) => {
+    const req = fake.open('core-facility', 1);
+    req.onsuccess = () => {
+      const handle = req.result;
+      const tx = handle.transaction('kv', 'readonly');
+      const get = tx.objectStore('kv').get('core.db');
+      get.onsuccess = () => resolve(get.result);
+      get.onerror = () => reject(get.error);
+    };
+  });
+  const bytes = raw && raw.v !== undefined ? raw.v : raw;
+  if (!bytes) return [];
+  const SQL = await realInitSqljs();
+  const d = new SQL.Database(bytes);
+  const res = d.exec(sql);
+  if (!res.length) return [];
+  return res[0].values.map((row) => {
+    const obj = {};
+    res[0].columns.forEach((col, i) => { obj[col] = row[i]; });
+    return obj;
+  });
+}
