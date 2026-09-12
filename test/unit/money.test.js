@@ -186,6 +186,48 @@ describe('money: staffPctFactor', () => {
   });
 });
 
+describe('money: item 8 (second review) — overheadPct and staffPctFactor are capped, not just floored', () => {
+  test('a corrupted overheadPct above 100 is capped at 100, not applied as-is', () => {
+    const bom = UI.computeBookingBOM({
+      start: '09:00', end: '11:00', // 2h
+      instruments: [{ cost: 150, cost_unit: 'time' }], // instrTime = 300
+      staff: [],
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 250, taxPct: 0 }, // corrupted/mistyped: 250% overhead
+    });
+    assert.equal(bom.overheadPct, 100, 'overheadPct must be capped at 100, the same ceiling taxPct already has via clampPct');
+    assert.equal(bom.overheadAmt, 300, 'overhead must be computed on the CAPPED percentage (100% of 300 = 300), not 250% of it (750)');
+    assert.equal(bom.beforeTax, 600);
+  });
+
+  test('a corrupted staffPctFactor above 1 (e.g. a 150% category billing policy) is capped at 1, not applied as a >1x multiplier', () => {
+    const bom = UI.computeBookingBOM({
+      start: '09:00', end: '11:00', // 2h
+      instruments: [],
+      staff: [{ rate: 95, start: '', end: '' }], // floored/billed at 2h -> 190 before factor
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 0, taxPct: 0 },
+      staffPctFactor: 1.5, // corrupted/mistyped: a 150% staff billing policy
+    });
+    assert.equal(bom.staffPctFactor, 1, 'staffPctFactor must be capped at 1 (100%), never a >1x multiplier');
+    assert.equal(bom.staffLines[0].line, 95 * 2, 'the staff line must bill at the FLOORED rate*hours, not 1.5x it');
+    assert.equal(bom.staffTotal, 190);
+  });
+
+  test('the 490 / 546.25 / 589.95 regression figures are unaffected by the new caps (both inputs are well under 100/1)', () => {
+    const bom = UI.computeBookingBOM({
+      start: '09:00', end: '11:00',
+      instruments: [{ cost: 150, cost_unit: 'time' }],
+      staff: [{ rate: 95, start: '', end: '' }],
+      groupPct: 5, manualPct: 0,
+      rates: { overheadPct: 15, taxPct: 8 },
+    });
+    assert.equal(bom.subtotal, 490);
+    assert.equal(bom.beforeTax, 546.25);
+    assert.equal(bom.total, 589.95);
+  });
+});
+
 describe('money: UI.round2 is the one shared 2dp rounding helper', () => {
   // js/app.js's service-entry savers (seSave/seEditSave) round `qty * rate` through UI.round2
   // before storing it, rather than storing the raw float — the same rounding fmtMoney applies at
