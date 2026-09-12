@@ -33,7 +33,7 @@ and phone-width layout.
 - **The PDF project report renders Hebrew, Cyrillic and Greek.** A Hebrew PI or lab name used to
   print as garbage because the built-in PDF font only knows Western Latin. The report now embeds
   Open Sans (shipped with the app, so it works offline too) and draws right-to-left names in
-  reading order. Arabic script is not covered by that font.
+  reading order, parentheses included. Arabic script is not covered by that font.
 
 ### Changed
 - **Saves are all-or-nothing.** Every save that writes more than one thing at once — a booking and
