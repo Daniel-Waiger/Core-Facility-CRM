@@ -980,6 +980,16 @@
     // below should treat as data to warn about and discard, not silently keep as if nothing
     // happened.
     let hasBeenPromoted = false;
+    // C6-guard: true only while this tab is CURRENTLY the (possibly-wrongly) promoted writer and a
+    // flush of its own has actually landed in IndexedDB during that window — reset to false every
+    // time a fresh promotion completes (reloadFromDiskAndPromote's success path) so it only ever
+    // reflects the current promoted spell, never a previous one. Distinguishes, on a later
+    // demotion, "this tab never got as far as writing anything" from "this tab's phantom edit
+    // already autosaved before the real leader's late ack arrived" (see recompute()'s demotion
+    // branch below) — the latter needs the same discard warning even though `dirty` is already
+    // false by the time the ack lands, since the row that autosaved is no longer what's on disk
+    // once the real leader's own next save overwrites it with a copy that never had it.
+    let persistedWhilePromoted = false;
 
     // Promotion: reload the in-memory database from IndexedDB before this tab is allowed to write
     // or autosave again — see the big comment above. Never throws outward: a failed reload leaves
@@ -1041,6 +1051,7 @@
       readOnly = false;
       promoteFailStreak = 0;
       hasBeenPromoted = true;
+      persistedWhilePromoted = false; // fresh promotion spell — nothing written under it yet
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(false, { promoted: true });
     }
 
@@ -1081,21 +1092,38 @@
       // (persist bails on isReadOnly), and is only now finding out an older tab survived. That edit
       // cannot be kept — this tab has no way to merge it into the real leader's now-diverged copy —
       // so discard it loudly instead of letting the next promotion's disk reload discard it silently.
+      // C6-guard (item 1): `dirty` alone is not a reliable signal here. The 400ms autosave debounce
+      // can flush a phantom edit to IndexedDB before the real leader's late `hello-ack` arrives —
+      // `dirty` is already false by then, but the row that landed on disk is not what's there once
+      // the real leader's own next save overwrites it with a copy that never had it, so this tab's
+      // in-memory `db` (still showing that row) is now stale relative to disk either way. So: on
+      // ANY demotion of a tab that has genuinely been promoted, always reload the leader's actual
+      // bytes and refresh the screen from them — never just leave the stale in-memory copy standing
+      // because `dirty` happened to already be false. Only the toast is conditional: warn when
+      // there was something to actually lose — either still-unsaved edits (`dirty`) or an edit that
+      // this tab itself persisted while it was (wrongly) the writer (`persistedWhilePromoted`) —
+      // not on every ordinary demotion, which would otherwise fire for a tab that took no edits at
+      // all during its promoted spell.
       readOnly = next;
-      if (hasBeenPromoted && dirty) {
-        discardDirtyAndReload();
+      if (hasBeenPromoted) {
+        discardDirtyAndReload(dirty || persistedWhilePromoted);
         return;
       }
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
     }
 
-    // C5-rejoin: this tab believed (wrongly, per the promotion race above) that it was the
-    // writer and has an edit sitting only in memory, never persisted. It cannot be reconciled
-    // with the real leader's copy, so drop it, reload the leader's actual saved bytes, tell the
-    // user plainly, and re-render so the screen matches what's now in memory.
-    async function discardDirtyAndReload() {
+    // C5-rejoin, extended by C6-guard (item 1): this tab believed (wrongly, per the promotion
+    // race above) that it was the writer, and either has an edit sitting only in memory (never
+    // persisted) or already autosaved one before finding out an older tab survived. Either way it
+    // cannot be reconciled with the real leader's copy, so always drop this tab's in-memory image
+    // and reload the leader's actual saved bytes — `warn` (dirty edits discarded, or something
+    // this tab itself persisted while wrongly promoted) decides only whether the user is told
+    // about it; the reload and refresh happen regardless, since the in-memory copy is stale either
+    // way and must never be left standing as if it still matched disk.
+    async function discardDirtyAndReload(warn) {
       dirty = false;
       pendingDuringSave = false;
+      persistedWhilePromoted = false;
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       try {
         const SQL = await initSqljs();
@@ -1108,7 +1136,7 @@
         console.error('multi-tab demotion: could not reload the other tab\'s saved copy after discarding this tab\'s unsaved edits', e);
       }
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true);
-      if (global.UI && global.UI.toast) {
+      if (warn && global.UI && global.UI.toast) {
         global.UI.toast('Unsaved changes in this tab were discarded because another tab is saving.', 'error');
       }
       if (global.App && global.App.refresh) global.App.refresh();
@@ -1137,7 +1165,19 @@
         peers.set(msg.id, msg.ts);
         // C5-rejoin: an ack proves the round-trip REJOIN_GRACE_MS exists to wait out has actually
         // happened — no reason to keep waiting once we have one.
-        if (rejoinGraceTimer) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
+        // C6-guard (item 3): but only when that ack is from a peer that can actually outrank this
+        // tab (`ts < selfTs`). rejoinAsNewTab() gives this tab a fresh, newer timestamp than
+        // anything already running, so a brand-new THIRD tab booting during the grace window has
+        // a newer timestamp still and its ack proves nothing about whether the real (older)
+        // leader is out there — ending the grace on it lets recompute() promote this tab off an
+        // incomplete `peers` set that simply hasn't heard from the actual leader yet. An ack from
+        // an older peer, by contrast, either IS the real leader (settling the election for real)
+        // or at least proves this tab cannot win regardless of who else answers, so it's always
+        // safe to stop waiting on that one early. A newer peer's ack still updates `peers` above
+        // and still re-runs recompute() below — recompute()'s own `if (rejoinGraceTimer) return;`
+        // check simply keeps this tab read-only until the grace period actually elapses or an
+        // older ack arrives.
+        if (rejoinGraceTimer && msg.ts < selfTs) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
         recompute();
       } else if (msg.type === 'bye') {
         // Item 2 (second review): a `bye` sent right as its tab is torn down used to delete the
@@ -1187,6 +1227,11 @@
       const pending = dirty || saving || pendingDuringSave;
       try { bc.postMessage({ type: 'bye', id: selfId, pending }); } catch (_) {}
       if (pending) {
+        // Flush FIRST, while this tab can still legitimately write — flush() itself refuses to
+        // persist once `readOnly` is true (see its own isReadOnly() check), so forcing read-only
+        // before this await would silently turn the leader's own last, still-in-flight edit into
+        // a no-op instead of letting it land. Only once this settles is it safe to lock the tab
+        // down for good below.
         try { await flushNow(); } catch (_) {}
         // Only claim `saved` if the flush actually left nothing dirty — a permanently failing
         // save (this tab closing right as autosave itself is broken) must not tell peers it's
@@ -1195,6 +1240,16 @@
           try { bc.postMessage({ type: 'saved', id: selfId }); } catch (_) {}
         }
       }
+      // C6-guard (item 2): a pagehide landing inside REJOIN_GRACE_MS (this tab having just
+      // rejoined from the bfcache) used to leave `rejoinGraceTimer` armed with nothing to stop
+      // it — the timer has no idea this tab is tearing down, so it fires on schedule, runs
+      // recompute() against a channel this tab is about to close, and can promote a tab that
+      // will never broadcast its presence to anyone again. Clear it here, and force `readOnly`
+      // true unconditionally so this tab can never resume autosave after teardown even if some
+      // other stray path still reaches recompute()/reloadFromDiskAndPromote() later — a torn-down
+      // tab must never become, or stay, a writer.
+      if (rejoinGraceTimer) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
+      readOnly = true;
       try { bc.close(); } catch (_) {}
     }
     if (typeof global.addEventListener === 'function') global.addEventListener('pagehide', teardown);
@@ -1248,7 +1303,14 @@
       global.addEventListener('pageshow', (ev) => { if (ev && ev.persisted) rejoinAsNewTab(); });
     }
 
-    return { isReadOnly: () => readOnly || promoting };
+    return {
+      isReadOnly: () => readOnly || promoting,
+      // C6-guard (item 1): called by flush() right after its own idbSet actually lands, so this
+      // guard can tell a later demotion whether a phantom edit made it to disk during THIS
+      // promoted spell — see `persistedWhilePromoted` above. Only meaningful while this tab is
+      // both promoted and currently the writer; a call from any other state is a no-op.
+      notifyPersisted: () => { if (hasBeenPromoted && !readOnly && !promoting) persistedWhilePromoted = true; },
+    };
   }
 
   // Every user-facing write funnels through here (run()'s single call site for every parameterized
@@ -1388,6 +1450,11 @@
       }
       const bytes = currentBytes(); // snapshot taken now; pendingDuringSave catches anything later
       await idbSet(DB_KEY, bytes);
+      // C6-guard: this write actually landed — if this tab is currently a promoted writer, record
+      // that a real disk write happened during this promoted spell (see `persistedWhilePromoted`),
+      // regardless of the stale-generation check just below (which only concerns a *different*,
+      // superseding restore, not the multi-tab guard's own later demotion path).
+      if (multiTabGuard.notifyPersisted) multiTabGuard.notifyPersisted();
       if (myGen !== dbGeneration) {
         // Same race, caught after the write went out: a restore happened while this idbSet was
         // in flight. The bytes we just wrote are stale (the old database); don't clear `dirty` or
