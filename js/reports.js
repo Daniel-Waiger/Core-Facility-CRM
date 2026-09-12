@@ -39,7 +39,8 @@
   const ic = UI.icon;
 
   /* ---------------- Range state ----------------
-     Either bound may be '' (unbounded). Defaults to the current calendar year, per spec. */
+     Either bound may be '' (unbounded). Defaults to the current calendar year, so the screen
+     shows something useful the moment it opens. */
   let state = { from: '', to: '' };
   (function initDefaultRange() {
     const y = new Date().getFullYear();
@@ -77,37 +78,73 @@
   function rangeParams(from, to) { return [from, from, to, to]; }
   const RANGE_SQL = `(? = '' OR mt.date >= ?) AND (? = '' OR mt.date <= ?)`;
 
+  /* ---------------- Facts bundle (perf) ----------------
+     One render() (or one exportReportsXlsx/buildAllXlsxBlob call) used to run every load* query
+     below ONCE PER compute* FUNCTION — nine cards, most of them re-reading the same
+     meetings/instrument-line/staff-line rows for the identical (from,to), plus
+     computeStewardshipRows re-running computeInstrumentRows' and computeConsultRows' own queries
+     (and their JS aggregation) a second time internally. At 5,000 bookings that repeated I/O is
+     the whole cost of the screen.
+
+     makeFacts(from,to) creates one small cache tied to a single (from,to) call; every load*
+     function below takes an optional trailing `facts` argument and, when given one, runs its
+     query at most once per facts object (memo()) — the SECOND caller in the same render gets the
+     already-fetched rows back for free. Every compute* function does the same one level up: its
+     own top-level result is memoized on the SAME facts object, so computeStewardshipRows calling
+     computeInstrumentRows(from,to,facts)/computeConsultRows(from,to,facts) after render() already
+     called them with that facts object reuses those rows outright rather than recomputing them.
+
+     Callers that omit `facts` (existing tests, or any direct compute*(from,to) call) are
+     unaffected: each such call builds its own throwaway facts object internally (see every
+     compute* function below), so behavior and return values are identical to before this file
+     had a facts bundle at all — this is purely reuse across calls that opt in by sharing one. */
+  function makeFacts(from, to) { return { from, to, _cache: {} }; }
+  // Every compute* entry point goes through this: a bundle is bound to one (from, to) range, and
+  // reusing it for another would silently return the other period's numbers — the one class of
+  // error a report must never make — so refuse rather than guess.
+  function useFacts(facts, from, to) {
+    if (!facts) return makeFacts(from, to);
+    if (facts.from !== from || facts.to !== to) throw new Error(`Reports facts bundle is for ${facts.from}..${facts.to}, not ${from}..${to}`);
+    return facts;
+  }
+  function memo(facts, key, fn) {
+    if (!facts) return fn();
+    const cache = facts._cache || (facts._cache = {});
+    if (!(key in cache)) cache[key] = fn();
+    return cache[key];
+  }
+
   /* ---------------- Raw data pull ----------------
      One pass over meetings-in-range plus their instrument/staff join rows, all the plain-JS
      aggregation below builds on this. Doing the hour maths in JS (via UI.hoursBetween /
      UI.billableStaffHours) rather than in SQL keeps this file using the exact same functions the
      booking modal uses for its own cost calculator, so the numbers can never drift apart. */
-  function loadMeetingsInRange(from, to) {
-    return DB.rows(`
+  function loadMeetingsInRange(from, to, facts) {
+    return memo(facts, 'meetings', () => DB.rows(`
       SELECT mt.id, mt.project_id, mt.title, mt.date, mt.start_time, mt.end_time, mt.group_org,
              mt.total_cost, mt.is_cancelled, mt.billing_retained, mt.category,
              p.code AS project_code, p.title AS project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       WHERE ${RANGE_SQL}
-      ORDER BY mt.date ASC, mt.id ASC`, rangeParams(from, to));
+      ORDER BY mt.date ASC, mt.id ASC`, rangeParams(from, to)));
   }
   // Bounded by the same date range as the meetings pull. Loading every join row and discarding
   // the out-of-range ones in JS worked, but made the cost of a one-month report grow with the
   // facility's whole history rather than with what the report actually shows.
-  function loadInstrumentLines(from, to) {
-    return DB.rows(`
+  function loadInstrumentLines(from, to, facts) {
+    return memo(facts, 'instrumentLines', () => DB.rows(`
       SELECT mi.meeting_id, mi.instrument_id, mi.line_cost,
              i.name AS instrument_name, i.is_retired AS instrument_retired
       FROM meeting_instruments mi
       JOIN instruments i ON i.id = mi.instrument_id
       JOIN meetings mt ON mt.id = mi.meeting_id
-      WHERE ${RANGE_SQL}`, rangeParams(from, to));
+      WHERE ${RANGE_SQL}`, rangeParams(from, to)));
   }
   // Standalone service entries (roadmap 2.3) in range, joined fresh (no denormalized name
   // columns) — same shape/precedent as loadMeetingsInRange above, just keyed off se.date instead
   // of mt.date since entries have no alias in RANGE_SQL.
-  function loadServiceEntriesInRange(from, to) {
-    return DB.rows(`
+  function loadServiceEntriesInRange(from, to, facts) {
+    return memo(facts, 'serviceEntries', () => DB.rows(`
       SELECT se.*, p.code AS project_code, p.title AS project_title,
              pe.name AS person_name, pe.is_retired AS person_retired,
              i.name AS instrument_name, i.is_retired AS instrument_retired,
@@ -118,38 +155,38 @@
       LEFT JOIN instruments i ON i.id = se.instrument_id
       LEFT JOIN grants g ON g.id = se.grant_id
       WHERE (? = '' OR se.date >= ?) AND (? = '' OR se.date <= ?)
-      ORDER BY se.date DESC, se.id DESC`, rangeParams(from, to));
+      ORDER BY se.date DESC, se.id DESC`, rangeParams(from, to)));
   }
   // Roadmap 3.2. Mirrors loadInstrumentLines's shape (bounded by the same range, joined fresh) but
   // walks meeting_people x meetings x meeting_instruments to answer "which people touched this
   // instrument", not "which instrument lines cost what". The is_cancelled filter is done here in
   // SQL (rather than via annotateMeetings) because all this needs is distinct occupancy-filtered
   // (instrument, person) pairs — rule 1, no money involved.
-  function loadAttendeeLines(from, to) {
-    return DB.rows(`
+  function loadAttendeeLines(from, to, facts) {
+    return memo(facts, 'attendeeLines', () => DB.rows(`
       SELECT DISTINCT mi.instrument_id, mp.person_id
       FROM meeting_instruments mi
       JOIN meeting_people mp ON mp.meeting_id = mi.meeting_id
       JOIN meetings mt ON mt.id = mi.meeting_id
-      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to)));
   }
   // Roadmap 3.2. Occupancy-filtered (instrument, project) pairs in range — feeds "projects served"
   // and the facility-wide (project_id IS NULL) session count. Bounded like every loader above.
-  function loadProjectInstrumentLines(from, to) {
-    return DB.rows(`
+  function loadProjectInstrumentLines(from, to, facts) {
+    return memo(facts, 'projectInstrumentLines', () => DB.rows(`
       SELECT mi.instrument_id, mt.project_id
       FROM meeting_instruments mi
       JOIN meetings mt ON mt.id = mi.meeting_id
-      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to)));
   }
   // Roadmap 3.2/3.6a. Current-state mapping (who supervises which instrument today) — not a
   // historical fact tied to a date range, so unlike every loader above this one is NOT bounded by
   // (from,to); it reads instrument_staff x people directly.
-  function loadInstrumentSupervisors() {
-    return DB.rows(`
+  function loadInstrumentSupervisors(facts) {
+    return memo(facts, 'instrumentSupervisors', () => DB.rows(`
       SELECT ist.instrument_id, pe.id AS person_id, pe.name AS person_name, pe.is_retired AS person_retired
       FROM instrument_staff ist
-      JOIN people pe ON pe.id = ist.person_id`);
+      JOIN people pe ON pe.id = ist.person_id`));
   }
   /* Roadmap 3.2. DELIBERATELY UNBOUNDED — the one loader in this file that does not take
      (from,to). To know whether a person's booking on this instrument in the selected range was
@@ -157,14 +194,14 @@
      entire booking history; restricting it to the range would misreport every returning user
      whose true first visit predates `from` as "new". Feeds countNewInRange below, which applies
      the (from,to) filter afterward, against this pre-computed unbounded MIN(date). */
-  function loadFirstInstrumentUserDates() {
-    return DB.rows(`
+  function loadFirstInstrumentUserDates(facts) {
+    return memo(facts, 'firstInstrumentUserDates', () => DB.rows(`
       SELECT mi.instrument_id, mp.person_id, MIN(mt.date) AS first_date
       FROM meeting_instruments mi
       JOIN meeting_people mp ON mp.meeting_id = mi.meeting_id
       JOIN meetings mt ON mt.id = mi.meeting_id
       WHERE mt.is_cancelled = 0
-      GROUP BY 1, 2`);
+      GROUP BY 1, 2`));
   }
   /* Reusable "first-ever appearance in range" helper (roadmap 3.2, reused by 3.4 keyed on
      group_org instead of instrument_id). Takes rows already MIN-aggregated per (groupId, entityId)
@@ -182,125 +219,142 @@
   // Roadmap 3.4. (instrument, lab) pairs in range, occupancy-filtered — one row per meeting the
   // instrument was on, carrying that meeting's group_org snapshot. Distinctness (a Set per
   // instrument) is left to the caller, same pattern as loadAttendeeLines.
-  function loadInstrumentLabLines(from, to) {
-    return DB.rows(`
+  function loadInstrumentLabLines(from, to, facts) {
+    return memo(facts, 'instrumentLabLines', () => DB.rows(`
       SELECT mi.instrument_id, mt.group_org
       FROM meeting_instruments mi
       JOIN meetings mt ON mt.id = mi.meeting_id
-      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to)));
   }
   // Roadmap 3.4. (date, person_id) pairs in range, occupancy-filtered, with NO instrument join —
   // feeds the per-period distinct-people count, which is facility-wide, not instrument-scoped.
-  function loadPeriodPeopleLines(from, to) {
-    return DB.rows(`
+  function loadPeriodPeopleLines(from, to, facts) {
+    return memo(facts, 'periodPeopleLines', () => DB.rows(`
       SELECT mt.date, mp.person_id
       FROM meetings mt
       JOIN meeting_people mp ON mp.meeting_id = mt.id
-      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to));
+      WHERE ${RANGE_SQL} AND mt.is_cancelled = 0`, rangeParams(from, to)));
   }
   /* Roadmap 3.4. DELIBERATELY UNBOUNDED — same reasoning as loadFirstInstrumentUserDates above,
      just keyed on group_org instead of instrument_id: to know whether a lab's booking in the
      selected range was its FIRST EVER, the query must see the facility's entire booking history.
      Feeds countNewInRange (the reusable helper already built for 3.2) below, bucketed by the
      PERIOD of each lab's first-ever date rather than a single in/out-of-range count. */
-  function loadFirstLabDates() {
-    return DB.rows(`
-      SELECT group_org, MIN(date) AS first_date
+  // TRIMMED, same as every distinct-lab count elsewhere in this file (labsByPeriod/labsByInstrument
+  // both key on `(m.group_org || '').trim()`) — grouping on the raw column here let 'Zeta Lab' and
+  // 'Zeta Lab ' (trailing space) count as two different labs with two different "first ever"
+  // dates, so a lab could appear as "new" a second time under its own untrimmed duplicate even
+  // though computeBreadthRows' distinct-lab counts already merge the two. Trimming both the GROUP
+  // BY key and the selected column keeps this loader's notion of "a lab" identical to every other
+  // lab-counting query in this file.
+  function loadFirstLabDates(facts) {
+    return memo(facts, 'firstLabDates', () => DB.rows(`
+      SELECT TRIM(group_org) AS group_org, MIN(date) AS first_date
       FROM meetings
       WHERE is_cancelled = 0 AND TRIM(COALESCE(group_org, '')) != ''
-      GROUP BY group_org`);
+      GROUP BY TRIM(group_org)`));
   }
-  function loadStaffLines(from, to) {
+  function loadStaffLines(from, to, facts) {
     // meeting_staff always names a facility-staff assignee, but a person's is_staff flag could in
     // theory have been unset after the fact (retiring doesn't do this, but be defensive) — join
     // on people without filtering is_staff so no historical row silently disappears.
-    return DB.rows(`
+    return memo(facts, 'staffLines', () => DB.rows(`
       SELECT ms.meeting_id, ms.person_id, ms.start_time, ms.end_time, ms.line_cost,
              pe.name AS person_name, pe.is_retired AS person_retired, pe.rate AS person_rate
       FROM meeting_staff ms
       JOIN people pe ON pe.id = ms.person_id
       JOIN meetings mt ON mt.id = ms.meeting_id
-      WHERE ${RANGE_SQL}`, rangeParams(from, to));
+      WHERE ${RANGE_SQL}`, rangeParams(from, to)));
   }
 
-  // Meeting-level derived facts shared by every aggregator below.
-  function annotateMeetings(meetings) {
-    const byId = new Map();
-    meetings.forEach((m) => {
-      const bookingHours = UI.hoursBetween(m.start_time, m.end_time);
-      byId.set(m.id, {
-        m,
-        bookingHours,
-        occupancyCounts: !m.is_cancelled,                       // rule 1
-        moneyCounts: !(m.is_cancelled && !m.billing_retained)    // rule 2
+  // Meeting-level derived facts shared by every aggregator below. Memoized on `facts` (when given)
+  // since computeInstrumentRows/computeStaffRows/computeStaffInstrumentMatrix/computeBookingRows
+  // all annotate the exact same meetings-in-range array for a shared (from,to).
+  function annotateMeetings(meetings, facts) {
+    return memo(facts, 'meetingsAnnotated', () => {
+      const byId = new Map();
+      meetings.forEach((m) => {
+        const bookingHours = UI.hoursBetween(m.start_time, m.end_time);
+        byId.set(m.id, {
+          m,
+          bookingHours,
+          occupancyCounts: !m.is_cancelled,                       // rule 1
+          moneyCounts: !(m.is_cancelled && !m.billing_retained)    // rule 2
+        });
       });
+      return byId;
     });
-    return byId;
   }
 
   /* ================================================================================
      Card 1 — Instrument utilization
      ================================================================================ */
-  function computeInstrumentRows(from, to) {
+  function computeInstrumentRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const meetings = annotateMeetings(loadMeetingsInRange(from, to));
-    const lines = loadInstrumentLines(from, to);
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'instrumentRows', () => {
+      const meetings = annotateMeetings(loadMeetingsInRange(from, to, facts), facts);
+      const lines = loadInstrumentLines(from, to, facts);
 
-    const byInstrument = new Map(); // id -> { name, retired, bookings, hours, revenue }
-    lines.forEach((ln) => {
-      const mm = meetings.get(ln.meeting_id);
-      if (!mm) return; // instrument line belongs to a meeting outside the selected range
-      let row = byInstrument.get(ln.instrument_id);
-      if (!row) {
-        row = { id: ln.instrument_id, name: ln.instrument_name, retired: !!ln.instrument_retired, bookings: 0, hours: 0, revenue: 0 };
-        byInstrument.set(ln.instrument_id, row);
-      }
-      if (mm.occupancyCounts) {
-        row.bookings += 1;
-        row.hours += mm.bookingHours; // parallel instruments on one booking each get the full hours — real occupancy, not double counting
-      }
-      if (mm.moneyCounts) row.revenue += (ln.line_cost || 0);
+      const byInstrument = new Map(); // id -> { name, retired, bookings, hours, revenue }
+      lines.forEach((ln) => {
+        const mm = meetings.get(ln.meeting_id);
+        if (!mm) return; // instrument line belongs to a meeting outside the selected range
+        let row = byInstrument.get(ln.instrument_id);
+        if (!row) {
+          row = { id: ln.instrument_id, name: ln.instrument_name, retired: !!ln.instrument_retired, bookings: 0, hours: 0, revenue: 0 };
+          byInstrument.set(ln.instrument_id, row);
+        }
+        if (mm.occupancyCounts) {
+          row.bookings += 1;
+          row.hours += mm.bookingHours; // parallel instruments on one booking each get the full hours — real occupancy, not double counting
+        }
+        if (mm.moneyCounts) row.revenue += (ln.line_cost || 0);
+      });
+
+      const rows = Array.from(byInstrument.values()).sort((a, b) => b.hours - a.hours);
+      const totalHours = rows.reduce((s, r) => s + r.hours, 0);
+      rows.forEach((r) => { r.sharePct = totalHours > 0 ? (r.hours / totalHours) * 100 : 0; });
+      return { rows, totalHours };
     });
-
-    const rows = Array.from(byInstrument.values()).sort((a, b) => b.hours - a.hours);
-    const totalHours = rows.reduce((s, r) => s + r.hours, 0);
-    rows.forEach((r) => { r.sharePct = totalHours > 0 ? (r.hours / totalHours) * 100 : 0; });
-    return { rows, totalHours };
   }
 
   /* ================================================================================
      Card 2 — Facility staff time
      ================================================================================ */
-  function computeStaffRows(from, to) {
+  function computeStaffRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const meetings = annotateMeetings(loadMeetingsInRange(from, to));
-    const lines = loadStaffLines(from, to);
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'staffRows', () => {
+      const meetings = annotateMeetings(loadMeetingsInRange(from, to, facts), facts);
+      const lines = loadStaffLines(from, to, facts);
 
-    const byPerson = new Map(); // id -> { name, retired, sessions, rawHours, billHours, revenue }
-    lines.forEach((ln) => {
-      const mm = meetings.get(ln.meeting_id);
-      if (!mm) return;
-      // meeting_staff.start_time/end_time blank means "the whole booking window" (see
-      // computeBookingBOM in app.js) — NOT zero. Fall back to the meeting's own hours exactly
-      // the same way the booking cost calculator does.
-      const rawHours = (ln.start_time && ln.end_time) ? UI.hoursBetween(ln.start_time, ln.end_time) : mm.bookingHours;
-      const billHours = UI.billableStaffHours(rawHours);
+      const byPerson = new Map(); // id -> { name, retired, sessions, rawHours, billHours, revenue }
+      lines.forEach((ln) => {
+        const mm = meetings.get(ln.meeting_id);
+        if (!mm) return;
+        // meeting_staff.start_time/end_time blank means "the whole booking window" (see
+        // computeBookingBOM in app.js) — NOT zero. Fall back to the meeting's own hours exactly
+        // the same way the booking cost calculator does.
+        const rawHours = (ln.start_time && ln.end_time) ? UI.hoursBetween(ln.start_time, ln.end_time) : mm.bookingHours;
+        const billHours = UI.billableStaffHours(rawHours);
 
-      let row = byPerson.get(ln.person_id);
-      if (!row) {
-        row = { id: ln.person_id, name: ln.person_name, retired: !!ln.person_retired, sessions: 0, rawHours: 0, billHours: 0, revenue: 0 };
-        byPerson.set(ln.person_id, row);
-      }
-      if (mm.occupancyCounts) {
-        row.sessions += 1;
-        row.rawHours += rawHours;
-        row.billHours += billHours;
-      }
-      if (mm.moneyCounts) row.revenue += (ln.line_cost || 0);
+        let row = byPerson.get(ln.person_id);
+        if (!row) {
+          row = { id: ln.person_id, name: ln.person_name, retired: !!ln.person_retired, sessions: 0, rawHours: 0, billHours: 0, revenue: 0 };
+          byPerson.set(ln.person_id, row);
+        }
+        if (mm.occupancyCounts) {
+          row.sessions += 1;
+          row.rawHours += rawHours;
+          row.billHours += billHours;
+        }
+        if (mm.moneyCounts) row.revenue += (ln.line_cost || 0);
+      });
+
+      const rows = Array.from(byPerson.values()).sort((a, b) => b.rawHours - a.rawHours);
+      return { rows };
     });
-
-    const rows = Array.from(byPerson.values()).sort((a, b) => b.rawHours - a.rawHours);
-    return { rows };
   }
 
   /* ================================================================================
@@ -310,62 +364,86 @@
      that booking's staff hours divided evenly across however many instruments were on it, so
      the column sums back to the person's true raw-hours total from Card 2.
      ================================================================================ */
-  function computeStaffInstrumentMatrix(from, to) {
+  // Sentinel instrument id for staff time on an instrument-less booking (a pure consult/sync with
+  // no instrument line) — a string so it can never collide with a real (numeric) instrument_id.
+  // Without this bucket, computeStaffInstrumentMatrix used to `return` early on such a booking
+  // (see the removed early-out below), which silently dropped that booking's staff hours from the
+  // matrix entirely — so a person's row here summed to LESS than their true rawHours total on
+  // Card 2, breaking the on-screen and Notes-sheet footnote's promise that the matrix always sums
+  // back to that total. Bucketing those hours under "No Instrument" instead keeps the promise true.
+  const NO_INSTRUMENT_KEY = '__no_instrument__';
+  function computeStaffInstrumentMatrix(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const meetings = annotateMeetings(loadMeetingsInRange(from, to));
-    const instrumentLines = loadInstrumentLines(from, to);
-    const staffLines = loadStaffLines(from, to);
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'staffInstrumentMatrix', () => {
+      const meetings = annotateMeetings(loadMeetingsInRange(from, to, facts), facts);
+      const instrumentLines = loadInstrumentLines(from, to, facts);
+      const staffLines = loadStaffLines(from, to, facts);
 
-    // Instrument count per meeting, restricted to meetings in range (needed for the even split).
-    const instrumentsByMeeting = new Map(); // meeting_id -> [{id,name,retired}]
-    instrumentLines.forEach((ln) => {
-      if (!meetings.has(ln.meeting_id)) return;
-      if (!instrumentsByMeeting.has(ln.meeting_id)) instrumentsByMeeting.set(ln.meeting_id, []);
-      instrumentsByMeeting.get(ln.meeting_id).push({ id: ln.instrument_id, name: ln.instrument_name, retired: !!ln.instrument_retired });
-    });
-
-    // key = `${personId}::${instrumentId}`
-    const cells = new Map();
-    const staffMeta = new Map();     // person_id -> {name, retired}
-    const instrumentMeta = new Map(); // instrument_id -> {name, retired}
-
-    staffLines.forEach((ln) => {
-      const mm = meetings.get(ln.meeting_id);
-      if (!mm || !mm.occupancyCounts) return; // matrix is a workload view — cancelled bookings didn't happen
-      const insts = instrumentsByMeeting.get(ln.meeting_id) || [];
-      if (!insts.length) return; // a booking with no instrument line has nothing to attribute here
-
-      const rawHours = (ln.start_time && ln.end_time) ? UI.hoursBetween(ln.start_time, ln.end_time) : mm.bookingHours;
-      // The even split: one staff member's real hours on THIS booking, shared equally across
-      // however many instruments that booking touched, so summing this column for a person
-      // reproduces their true raw-hours total from the Facility staff time card.
-      const perInstrumentHours = rawHours / insts.length;
-
-      staffMeta.set(ln.person_id, { name: ln.person_name, retired: !!ln.person_retired });
-      insts.forEach((inst) => {
-        instrumentMeta.set(inst.id, { name: inst.name, retired: inst.retired });
-        const key = ln.person_id + '::' + inst.id;
-        let cell = cells.get(key);
-        if (!cell) { cell = { personId: ln.person_id, instrumentId: inst.id, sessions: 0, attributedHours: 0 }; cells.set(key, cell); }
-        cell.sessions += 1;              // one whole booking, not split — see file header
-        cell.attributedHours += perInstrumentHours;
+      // Instrument count per meeting, restricted to meetings in range (needed for the even split).
+      const instrumentsByMeeting = new Map(); // meeting_id -> [{id,name,retired}]
+      instrumentLines.forEach((ln) => {
+        if (!meetings.has(ln.meeting_id)) return;
+        if (!instrumentsByMeeting.has(ln.meeting_id)) instrumentsByMeeting.set(ln.meeting_id, []);
+        instrumentsByMeeting.get(ln.meeting_id).push({ id: ln.instrument_id, name: ln.instrument_name, retired: !!ln.instrument_retired });
       });
-    });
 
-    const staffList = Array.from(staffMeta.entries()).map(([id, v]) => ({ id, name: v.name, retired: v.retired }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const instrumentList = Array.from(instrumentMeta.entries()).map(([id, v]) => ({ id, name: v.name, retired: v.retired }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    return { staffList, instrumentList, cells };
+      // key = `${personId}::${instrumentId}`
+      const cells = new Map();
+      const staffMeta = new Map();     // person_id -> {name, retired}
+      const instrumentMeta = new Map(); // instrument_id -> {name, retired}
+
+      staffLines.forEach((ln) => {
+        const mm = meetings.get(ln.meeting_id);
+        if (!mm || !mm.occupancyCounts) return; // matrix is a workload view — cancelled bookings didn't happen
+        // A booking with no instrument line (a pure consult/sync) still has real staff hours to
+        // attribute — bucket them under the single "No Instrument" column rather than dropping the
+        // booking from the matrix, so this person's row still sums to their Card 2 rawHours total.
+        const insts = instrumentsByMeeting.get(ln.meeting_id) || [];
+        const attributeTo = insts.length ? insts : [{ id: NO_INSTRUMENT_KEY, name: 'No Instrument', retired: false }];
+
+        const rawHours = (ln.start_time && ln.end_time) ? UI.hoursBetween(ln.start_time, ln.end_time) : mm.bookingHours;
+        // The even split: one staff member's real hours on THIS booking, shared equally across
+        // however many instruments that booking touched, so summing this column for a person
+        // reproduces their true raw-hours total from the Facility staff time card.
+        const perInstrumentHours = rawHours / attributeTo.length;
+
+        staffMeta.set(ln.person_id, { name: ln.person_name, retired: !!ln.person_retired });
+        attributeTo.forEach((inst) => {
+          instrumentMeta.set(inst.id, { name: inst.name, retired: inst.retired });
+          const key = ln.person_id + '::' + inst.id;
+          let cell = cells.get(key);
+          if (!cell) { cell = { personId: ln.person_id, instrumentId: inst.id, sessions: 0, attributedHours: 0 }; cells.set(key, cell); }
+          cell.sessions += 1;              // one whole booking, not split — see file header
+          cell.attributedHours += perInstrumentHours;
+        });
+      });
+
+      const staffList = Array.from(staffMeta.entries()).map(([id, v]) => ({ id, name: v.name, retired: v.retired }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      // "No Instrument" sorted last, same precedent as computeActivityMixRows' "(uncategorized)"
+      // bucket — real instrument names lead the matrix, the catch-all column reads as an appendix.
+      const instrumentList = Array.from(instrumentMeta.entries()).map(([id, v]) => ({ id, name: v.name, retired: v.retired }))
+        .sort((a, b) => {
+          if (a.id === NO_INSTRUMENT_KEY) return 1;
+          if (b.id === NO_INSTRUMENT_KEY) return -1;
+          return a.name.localeCompare(b.name);
+        });
+      return { staffList, instrumentList, cells };
+    });
   }
 
   /* ================================================================================
      Card 4 — Projects & groups
      ================================================================================ */
-  function computeProjectRows(from, to) {
+  function computeProjectRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const meetings = loadMeetingsInRange(from, to);
-    const entries = loadServiceEntriesInRange(from, to);
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'projectRows', () => computeProjectRowsImpl(from, to, facts));
+  }
+  function computeProjectRowsImpl(from, to, facts) {
+    const meetings = loadMeetingsInRange(from, to, facts);
+    const entries = loadServiceEntriesInRange(from, to, facts);
 
     const byProject = new Map(); // key (project_id or 'facility') -> row
     const byGroup = new Map();   // key (group_org or '(none)') -> row
@@ -419,14 +497,17 @@
      only the money rule, identical to a booking's: a row counts unless it was BOTH cancelled AND
      the charge was waived.
      ================================================================================ */
-  function computeServiceEntryRows(from, to) {
+  function computeServiceEntryRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const rows = loadServiceEntriesInRange(from, to).map((r) => {
-      const moneyCounts = !(r.is_cancelled && !r.billing_retained);
-      return Object.assign({}, r, { moneyCounts, countedCost: moneyCounts ? (r.total_cost || 0) : 0 });
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'serviceEntryRows', () => {
+      const rows = loadServiceEntriesInRange(from, to, facts).map((r) => {
+        const moneyCounts = !(r.is_cancelled && !r.billing_retained);
+        return Object.assign({}, r, { moneyCounts, countedCost: moneyCounts ? (r.total_cost || 0) : 0 });
+      });
+      const totalRevenue = rows.reduce((s, r) => s + r.countedCost, 0);
+      return { rows, totalRevenue };
     });
-    const totalRevenue = rows.reduce((s, r) => s + r.countedCost, 0);
-    return { rows, totalRevenue };
   }
 
   /* ================================================================================
@@ -437,36 +518,39 @@
      consult never happened, so it's excluded regardless of whether its charge was retained.
      A consult with no instrument line (a pure conversation) still counts toward the period
      total but contributes no instrument row — nothing to attribute it to there. */
-  function computeConsultRows(from, to) {
+  function computeConsultRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const allMeetings = loadMeetingsInRange(from, to);
-    const consults = allMeetings.filter((m) => m.category === 'consult' && !m.is_cancelled);
-    const consultIds = new Set(consults.map((m) => m.id));
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'consultRows', () => {
+      const allMeetings = loadMeetingsInRange(from, to, facts);
+      const consults = allMeetings.filter((m) => m.category === 'consult' && !m.is_cancelled);
+      const consultIds = new Set(consults.map((m) => m.id));
 
-    const byInstrument = new Map(); // instrument_id -> { id, name, retired, count }
-    if (consultIds.size) {
-      loadInstrumentLines(from, to).forEach((ln) => {
-        if (!consultIds.has(ln.meeting_id)) return;
-        let row = byInstrument.get(ln.instrument_id);
-        if (!row) {
-          row = { id: ln.instrument_id, name: ln.instrument_name, retired: !!ln.instrument_retired, count: 0 };
-          byInstrument.set(ln.instrument_id, row);
-        }
-        row.count += 1;
+      const byInstrument = new Map(); // instrument_id -> { id, name, retired, count }
+      if (consultIds.size) {
+        loadInstrumentLines(from, to, facts).forEach((ln) => {
+          if (!consultIds.has(ln.meeting_id)) return;
+          let row = byInstrument.get(ln.instrument_id);
+          if (!row) {
+            row = { id: ln.instrument_id, name: ln.instrument_name, retired: !!ln.instrument_retired, count: 0 };
+            byInstrument.set(ln.instrument_id, row);
+          }
+          row.count += 1;
+        });
+      }
+      const instrumentRows = Array.from(byInstrument.values()).sort((a, b) => b.count - a.count);
+
+      const byPeriod = new Map(); // 'YYYY-MM' -> count
+      consults.forEach((m) => {
+        const period = (m.date || '').slice(0, 7) || 'Unknown';
+        byPeriod.set(period, (byPeriod.get(period) || 0) + 1);
       });
-    }
-    const instrumentRows = Array.from(byInstrument.values()).sort((a, b) => b.count - a.count);
+      const periodRows = Array.from(byPeriod.entries())
+        .map(([period, count]) => ({ period, count }))
+        .sort((a, b) => a.period.localeCompare(b.period));
 
-    const byPeriod = new Map(); // 'YYYY-MM' -> count
-    consults.forEach((m) => {
-      const period = (m.date || '').slice(0, 7) || 'Unknown';
-      byPeriod.set(period, (byPeriod.get(period) || 0) + 1);
+      return { instrumentRows, periodRows, totalConsults: consults.length };
     });
-    const periodRows = Array.from(byPeriod.entries())
-      .map(([period, count]) => ({ period, count }))
-      .sort((a, b) => a.period.localeCompare(b.period));
-
-    return { instrumentRows, periodRows, totalConsults: consults.length };
   }
 
   /* ================================================================================
@@ -485,82 +569,88 @@
      trend and downtime share both need Tier 4 data (training records, downtime logs) this app
      doesn't have yet.
      ================================================================================ */
-  function computeStewardshipRows(from, to) {
+  function computeStewardshipRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'stewardshipRows', () => {
+      // Reuse — passing `facts` along means these hit the memoized result from an EARLIER call in
+      // the same render/export (render() and exportReportsXlsx both compute instrument/consult
+      // rows on their own before calling this) rather than re-running either's SQL or aggregation
+      // a second time. See the facts-bundle comment above loadMeetingsInRange.
+      const instr = computeInstrumentRows(from, to, facts);
+      const consult = computeConsultRows(from, to, facts);
+      const consultByInstrument = new Map(consult.instrumentRows.map((r) => [r.id, r.count]));
 
-    const instr = computeInstrumentRows(from, to);                 // reuse — no duplicated utilization math
-    const consult = computeConsultRows(from, to);                  // reuse — no duplicated consult-tag math
-    const consultByInstrument = new Map(consult.instrumentRows.map((r) => [r.id, r.count]));
-
-    const distinctUsersByInstrument = new Map(); // instrument_id -> Set(person_id)
-    loadAttendeeLines(from, to).forEach((ln) => {
-      if (!distinctUsersByInstrument.has(ln.instrument_id)) distinctUsersByInstrument.set(ln.instrument_id, new Set());
-      distinctUsersByInstrument.get(ln.instrument_id).add(ln.person_id);
-    });
-
-    const projectsByInstrument = new Map();      // instrument_id -> Set(project_id), non-null only
-    const facilityWideByInstrument = new Map();  // instrument_id -> count of sessions with project_id NULL
-    loadProjectInstrumentLines(from, to).forEach((ln) => {
-      if (ln.project_id == null) {
-        facilityWideByInstrument.set(ln.instrument_id, (facilityWideByInstrument.get(ln.instrument_id) || 0) + 1);
-      } else {
-        if (!projectsByInstrument.has(ln.instrument_id)) projectsByInstrument.set(ln.instrument_id, new Set());
-        projectsByInstrument.get(ln.instrument_id).add(ln.project_id);
-      }
-    });
-
-    // "New in range" via the reusable unbounded-first-appearance helper (see its own comment).
-    const firstRows = loadFirstInstrumentUserDates().map((r) => ({ groupId: r.instrument_id, entityId: r.person_id, firstDate: r.first_date }));
-    const newUsersByInstrument = countNewInRange(firstRows, from, to);
-
-    const supervisorsByInstrument = new Map(); // instrument_id -> [{id,name,retired}]
-    loadInstrumentSupervisors().forEach((ln) => {
-      if (!supervisorsByInstrument.has(ln.instrument_id)) supervisorsByInstrument.set(ln.instrument_id, []);
-      supervisorsByInstrument.get(ln.instrument_id).push({ id: ln.person_id, name: ln.person_name, retired: !!ln.person_retired });
-    });
-
-    // One scorecard row per instrument that had any booking activity in range (an instrument with
-    // nothing booked has nothing to justify here — it simply won't appear).
-    const rowsByInstrument = new Map();
-    instr.rows.forEach((r) => {
-      rowsByInstrument.set(r.id, {
-        id: r.id, name: r.name, retired: r.retired,
-        bookings: r.bookings, hours: r.hours, revenue: r.revenue,
-        distinctUsers: (distinctUsersByInstrument.get(r.id) || new Set()).size,
-        newUsers: newUsersByInstrument.get(r.id) || 0,
-        projectsServed: (projectsByInstrument.get(r.id) || new Set()).size,
-        facilityWideSessions: facilityWideByInstrument.get(r.id) || 0,
-        consultCount: consultByInstrument.get(r.id) || 0
+      const distinctUsersByInstrument = new Map(); // instrument_id -> Set(person_id)
+      loadAttendeeLines(from, to, facts).forEach((ln) => {
+        if (!distinctUsersByInstrument.has(ln.instrument_id)) distinctUsersByInstrument.set(ln.instrument_id, new Set());
+        distinctUsersByInstrument.get(ln.instrument_id).add(ln.person_id);
       });
-    });
 
-    // Group under each supervisor ("Unassigned" heading for instruments with none). See file
-    // comment above: this is a grouping, not a partition — a shared instrument lands in more than
-    // one group.
-    const bySupervisor = new Map(); // key: person_id or 'unassigned' -> { supervisor, rows }
-    rowsByInstrument.forEach((row, instId) => {
-      const sups = supervisorsByInstrument.get(instId) || [];
-      if (!sups.length) {
-        if (!bySupervisor.has('unassigned')) bySupervisor.set('unassigned', { supervisor: null, rows: [] });
-        bySupervisor.get('unassigned').rows.push(row);
-      } else {
-        sups.forEach((sup) => {
-          const key = String(sup.id);
-          if (!bySupervisor.has(key)) bySupervisor.set(key, { supervisor: sup, rows: [] });
-          bySupervisor.get(key).rows.push(row);
+      const projectsByInstrument = new Map();      // instrument_id -> Set(project_id), non-null only
+      const facilityWideByInstrument = new Map();  // instrument_id -> count of sessions with project_id NULL
+      loadProjectInstrumentLines(from, to, facts).forEach((ln) => {
+        if (ln.project_id == null) {
+          facilityWideByInstrument.set(ln.instrument_id, (facilityWideByInstrument.get(ln.instrument_id) || 0) + 1);
+        } else {
+          if (!projectsByInstrument.has(ln.instrument_id)) projectsByInstrument.set(ln.instrument_id, new Set());
+          projectsByInstrument.get(ln.instrument_id).add(ln.project_id);
+        }
+      });
+
+      // "New in range" via the reusable unbounded-first-appearance helper (see its own comment).
+      const firstRows = loadFirstInstrumentUserDates(facts).map((r) => ({ groupId: r.instrument_id, entityId: r.person_id, firstDate: r.first_date }));
+      const newUsersByInstrument = countNewInRange(firstRows, from, to);
+
+      const supervisorsByInstrument = new Map(); // instrument_id -> [{id,name,retired}]
+      loadInstrumentSupervisors(facts).forEach((ln) => {
+        if (!supervisorsByInstrument.has(ln.instrument_id)) supervisorsByInstrument.set(ln.instrument_id, []);
+        supervisorsByInstrument.get(ln.instrument_id).push({ id: ln.person_id, name: ln.person_name, retired: !!ln.person_retired });
+      });
+
+      // One scorecard row per instrument that had any booking activity in range (an instrument with
+      // nothing booked has nothing to justify here — it simply won't appear).
+      const rowsByInstrument = new Map();
+      instr.rows.forEach((r) => {
+        rowsByInstrument.set(r.id, {
+          id: r.id, name: r.name, retired: r.retired,
+          bookings: r.bookings, hours: r.hours, revenue: r.revenue,
+          distinctUsers: (distinctUsersByInstrument.get(r.id) || new Set()).size,
+          newUsers: newUsersByInstrument.get(r.id) || 0,
+          projectsServed: (projectsByInstrument.get(r.id) || new Set()).size,
+          facilityWideSessions: facilityWideByInstrument.get(r.id) || 0,
+          consultCount: consultByInstrument.get(r.id) || 0
         });
-      }
-    });
-
-    const groups = Array.from(bySupervisor.values())
-      .map((g) => ({ supervisor: g.supervisor, rows: g.rows.sort((a, b) => b.hours - a.hours) }))
-      .sort((a, b) => {
-        if (!a.supervisor) return 1;
-        if (!b.supervisor) return -1;
-        return a.supervisor.name.localeCompare(b.supervisor.name);
       });
 
-    return { groups };
+      // Group under each supervisor ("Unassigned" heading for instruments with none). See file
+      // comment above: this is a grouping, not a partition — a shared instrument lands in more than
+      // one group.
+      const bySupervisor = new Map(); // key: person_id or 'unassigned' -> { supervisor, rows }
+      rowsByInstrument.forEach((row, instId) => {
+        const sups = supervisorsByInstrument.get(instId) || [];
+        if (!sups.length) {
+          if (!bySupervisor.has('unassigned')) bySupervisor.set('unassigned', { supervisor: null, rows: [] });
+          bySupervisor.get('unassigned').rows.push(row);
+        } else {
+          sups.forEach((sup) => {
+            const key = String(sup.id);
+            if (!bySupervisor.has(key)) bySupervisor.set(key, { supervisor: sup, rows: [] });
+            bySupervisor.get(key).rows.push(row);
+          });
+        }
+      });
+
+      const groups = Array.from(bySupervisor.values())
+        .map((g) => ({ supervisor: g.supervisor, rows: g.rows.sort((a, b) => b.hours - a.hours) }))
+        .sort((a, b) => {
+          if (!a.supervisor) return 1;
+          if (!b.supervisor) return -1;
+          return a.supervisor.name.localeCompare(b.supervisor.name);
+        });
+
+      return { groups };
+    });
   }
 
   /* ================================================================================
@@ -578,13 +668,17 @@
      getLabConsultsEnabled/setLabConsultsEnabled below. computeBreadthRows always computes it (it's
      cheap, already has the filtered meetings in hand) so the toggle is a pure render/export
      decision, not a second aggregation path that could drift from this one. */
-  function computeBreadthRows(from, to) {
+  function computeBreadthRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const meetings = loadMeetingsInRange(from, to).filter((m) => !m.is_cancelled); // rule 1
-    const instrLines = loadInstrumentLines(from, to);
-    const instLabLines = loadInstrumentLabLines(from, to);
-    const attendeeLines = loadAttendeeLines(from, to); // already occupancy-filtered (instrument_id, person_id)
-    const periodPeopleLines = loadPeriodPeopleLines(from, to);
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'breadthRows', () => computeBreadthRowsImpl(from, to, facts));
+  }
+  function computeBreadthRowsImpl(from, to, facts) {
+    const meetings = loadMeetingsInRange(from, to, facts).filter((m) => !m.is_cancelled); // rule 1
+    const instrLines = loadInstrumentLines(from, to, facts);
+    const instLabLines = loadInstrumentLabLines(from, to, facts);
+    const attendeeLines = loadAttendeeLines(from, to, facts); // already occupancy-filtered (instrument_id, person_id)
+    const periodPeopleLines = loadPeriodPeopleLines(from, to, facts);
 
     // Per instrument.
     const instMeta = new Map(); // id -> {name, retired}
@@ -634,7 +728,7 @@
 
     // New labs per period: reuse countNewInRange verbatim, with groupId = the PERIOD of the lab's
     // own unbounded first-ever date (not the instrument), entityId = the lab name.
-    const firstLabRows = loadFirstLabDates().map((r) => ({ groupId: (r.first_date || '').slice(0, 7), entityId: r.group_org, firstDate: r.first_date }));
+    const firstLabRows = loadFirstLabDates(facts).map((r) => ({ groupId: (r.first_date || '').slice(0, 7), entityId: r.group_org, firstDate: r.first_date }));
     const newLabsByPeriod = countNewInRange(firstLabRows, from, to);
 
     const periodSet = new Set([...labsByPeriod.keys(), ...peopleByPeriod.keys(), ...newLabsByPeriod.keys()]);
@@ -673,9 +767,13 @@
 
      Standalone service entries (roadmap 2.3) are NOT part of this mix — they carry a qty/unit,
      not a start/end time, so there are no hours to attribute; see the returned footnote text. */
-  function computeActivityMixRows(from, to) {
+  function computeActivityMixRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const meetings = loadMeetingsInRange(from, to).filter((m) => !m.is_cancelled); // rule 1
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'activityMixRows', () => computeActivityMixRowsImpl(from, to, facts));
+  }
+  function computeActivityMixRowsImpl(from, to, facts) {
+    const meetings = loadMeetingsInRange(from, to, facts).filter((m) => !m.is_cancelled); // rule 1
 
     const byPeriod = new Map(); // 'YYYY-MM' -> Map(category -> hours)
     const categorySet = new Set();
@@ -775,35 +873,92 @@
      median is shown — the card footnote below and the exportReportsXlsx Notes sheet — as
      "N projects excluded: first booking predates the project record" (and the equivalent for the
      output transition). Never silently dropped, never clamped to zero. */
-  function loadProjectFunnelFacts() {
+  function loadProjectFunnelFacts(facts) {
     // Deliberately UNBOUNDED (no from/to) — same reasoning as loadFirstInstrumentUserDates: to
     // know a project's TRUE first booking/output, the whole history must be visible, not just
     // whatever falls inside the report's selected range.
-    return DB.rows(`
-      SELECT pr.id, pr.status, pr.is_archived, pr.created_at, pr.end_date, pr.archived_at,
-        (SELECT MIN(mt.date) FROM meetings mt WHERE mt.project_id = pr.id AND mt.is_cancelled = 0) AS first_booking_date,
-        (SELECT MIN(${DB.outputEffDate('po')})
-           FROM project_outputs po WHERE po.project_id = pr.id) AS first_output_date
-      FROM projects pr`);
+    return memo(facts, 'projectFunnelFacts', () => {
+      const projects = DB.rows(`
+        SELECT pr.id, pr.status, pr.is_archived, pr.created_at, pr.end_date, pr.archived_at,
+          (SELECT MIN(mt.date) FROM meetings mt WHERE mt.project_id = pr.id AND mt.is_cancelled = 0) AS first_booking_date
+        FROM projects pr`);
+      // first_output_date used to come from SQL's MIN(DB.outputEffDate('po')), whose blank-date
+      // fallback is `date(po.created_at)` — a UTC calendar day (see outputEffDate's own comment:
+      // "Ordering only", which this median comparison is not). At a UTC+ offset, an undated output
+      // logged in the last few hours of the local day fell one day EARLIER in UTC, so an undated
+      // output's effective date could read as before the very booking that produced it — the same
+      // class of bug issue #14 fixed for a plain date column, here hitting a timestamp fallback
+      // instead. Computed here in JS instead, through utcTimestampToLocalDay, so this median uses
+      // the same local calendar day every other funnel stage already does.
+      const outputRows = DB.rows('SELECT project_id, date, created_at FROM project_outputs');
+      const firstOutputByProject = new Map();
+      outputRows.forEach((o) => {
+        const eff = (o.date && String(o.date).trim() !== '') ? o.date : utcTimestampToLocalDay(o.created_at);
+        if (!eff) return;
+        const cur = firstOutputByProject.get(o.project_id);
+        if (!cur || eff < cur) firstOutputByProject.set(o.project_id, eff);
+      });
+      return projects.map((p) => ({ ...p, first_output_date: firstOutputByProject.get(p.id) || null }));
+    });
   }
-  function loadMilestoneUpdatesInRange(from, to) {
-    return DB.rows(`
-      SELECT id FROM milestones
-      WHERE (? = '' OR date(updated_at) >= ?) AND (? = '' OR date(updated_at) <= ?)`, rangeParams(from, to));
+  // updated_at is a UTC timestamp (`datetime('now')`, see db.js), while `from`/`to` are local
+  // calendar-day strings the user actually picked. SQL's `date(updated_at)` only truncates the
+  // string to its first 10 characters — it does NOT convert UTC to local time — so it silently
+  // compares a UTC calendar day against a local-day range. At a UTC+ offset (this app's own
+  // required test timezone, Asia/Jerusalem) that mis-files any edit made in the last few hours of
+  // the local day into "yesterday" as far as this filter is concerned — the same class of bug as
+  // issue #14, just against a timestamp column instead of a date column. Filtering in JS instead,
+  // via utcTimestampToLocalDay (below), fixes that: the comparison always happens against the
+  // local calendar day the edit actually landed on.
+  function loadMilestoneUpdatesInRange(from, to, facts) {
+    // Only the raw unbounded `SELECT id, updated_at FROM milestones` is memoized — the same rows
+    // are reusable regardless of (from,to); the in-JS date filter below stays per-call since it's
+    // cheap and range-specific.
+    return memo(facts, 'milestonesAll', () => DB.rows('SELECT id, updated_at FROM milestones'))
+      .filter((r) => dateInRange(utcTimestampToLocalDay(r.updated_at), from, to));
   }
-  function loadOutputsInRange(from, to) {
-    return DB.rows(`
-      SELECT po.*, p.code AS project_code, p.title AS project_title,
-             ${DB.outputEffDate('po')} AS eff_date
+  // Item 5 (second review): this used to filter and order on SQL's DB.outputEffDate('po')
+  // directly, whose blank-date fallback is `date(po.created_at)` — a UTC calendar day (see
+  // outputEffDate's own comment: "Ordering only", which this filter/order was not). At a UTC+
+  // offset, an undated output logged in the last few hours of the local day fell out of the
+  // selected range (or sorted a day early) exactly as loadProjectFunnelFacts's first_output_date
+  // did before ITS fix above — same bug, different call site. Load every output unbounded, compute
+  // each one's effective date in JS via the SAME utcTimestampToLocalDay used by the funnel (so a
+  // row can never disagree between the two), then filter and sort here instead of in SQL.
+  function loadOutputsInRange(from, to, facts) {
+    const all = memo(facts, 'outputsAllWithEffDate', () => DB.rows(`
+      SELECT po.*, p.code AS project_code, p.title AS project_title
       FROM project_outputs po
-      JOIN projects p ON p.id = po.project_id
-      WHERE (? = '' OR ${DB.outputEffDate('po')} >= ?)
-        AND (? = '' OR ${DB.outputEffDate('po')} <= ?)
-      ORDER BY eff_date DESC, po.id DESC`, rangeParams(from, to));
+      JOIN projects p ON p.id = po.project_id`).map((o) => ({
+      ...o,
+      eff_date: (o.date && String(o.date).trim() !== '') ? o.date : utcTimestampToLocalDay(o.created_at),
+    })));
+    return all
+      .filter((o) => dateInRange(o.eff_date, from, to))
+      .sort((a, b) => (b.eff_date < a.eff_date ? -1 : b.eff_date > a.eff_date ? 1 : b.id - a.id));
+  }
+  // created_at/updated_at/archived_at are all written via `datetime('now')` (see db.js), which is
+  // a UTC instant, formatted 'YYYY-MM-DD HH:MM:SS' with NO timezone marker — unlike every other
+  // date in this file, which is a plain LOCAL calendar day the user actually typed into a date
+  // picker. Just slicing the first 10 characters off one of these (as this file used to, and as
+  // SQL's own `date(...)` does) reads its UTC calendar day, not its local one — at a UTC+ offset
+  // (this app's own required test timezone) an event in the last few hours of the local day comes
+  // out dated "tomorrow" in UTC, so it silently sorts into the wrong local day/month/year. Fixed
+  // the same way CLAUDE.md's date rules fix the opposite direction (UI.fmtDate appends a bare
+  // local time to force local parsing): reparse the stored string as an explicit UTC instant by
+  // appending 'Z', then read that instant's LOCAL calendar fields via UI.ymd (never toISOString,
+  // which would just undo the fix by re-describing the instant in UTC again).
+  function utcTimestampToLocalDay(ts) {
+    if (!ts) return '';
+    const d = new Date(String(ts).replace(' ', 'T') + 'Z');
+    if (isNaN(d.getTime())) return String(ts).slice(0, 10); // not a parseable timestamp — fall back rather than throw
+    return UI.ymd(d);
   }
   // 'YYYY-MM-DD' (or a longer datetime string, sliced) in-range check — '' on either bound means
   // unbounded, mirroring RANGE_SQL's own '' = unbounded convention above, just in plain JS for
-  // per-project date facts that aren't worth a round-trip to SQL.
+  // per-project date facts that aren't worth a round-trip to SQL. Callers pass a UTC timestamp
+  // through utcTimestampToLocalDay first (created_at/archived_at); a plain local date column
+  // (first_booking_date, end_date, first_output_date, ...) is already safe to slice as-is.
   function dateInRange(dateStr, from, to) {
     if (!dateStr) return false;
     const d = String(dateStr).slice(0, 10);
@@ -826,31 +981,42 @@
     const mid = Math.floor(s.length / 2);
     return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
   }
-  function computeFunnelRows(from, to) {
+  function computeFunnelRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'funnelRows', () => computeFunnelRowsImpl(from, to, facts));
+  }
+  function computeFunnelRowsImpl(from, to, facts) {
     const unbounded = !from && !to;
 
     // Stage 1 — reuse computeConsultRows verbatim; see its own header for the cancellation rule.
-    const consultCount = computeConsultRows(from, to).totalConsults;
+    const consultCount = computeConsultRows(from, to, facts).totalConsults;
 
-    const facts = loadProjectFunnelFacts();
+    // created_at/archived_at are UTC timestamps; pre-convert both to the local calendar day they
+    // actually fall on (see utcTimestampToLocalDay) ONCE per project here, so every later use below
+    // (stage 2, stage 5's proxy date, and median 1) reads the same corrected value rather than
+    // re-deriving it — and never accidentally reads the raw UTC string by mistake.
+    const projectFacts = loadProjectFunnelFacts(facts).map((f) => Object.assign({}, f, {
+      created_local: utcTimestampToLocalDay(f.created_at),
+      archived_local: f.archived_at ? utcTimestampToLocalDay(f.archived_at) : ''
+    }));
 
-    // Stage 2 — project created, by created_at's date part.
-    const createdIn = facts.filter((f) => dateInRange(f.created_at, from, to));
+    // Stage 2 — project created, by created_at's LOCAL calendar day (see created_local above).
+    const createdIn = projectFacts.filter((f) => dateInRange(f.created_local, from, to));
 
     // Stage 3 — active (first booking), by the project's true (unbounded) first non-cancelled
     // booking date.
-    const activeIn = facts.filter((f) => dateInRange(f.first_booking_date, from, to));
+    const activeIn = projectFacts.filter((f) => dateInRange(f.first_booking_date, from, to));
 
     // Stage 4 — milestones progressing, count-only, no per-project dedup.
-    const milestonesCount = loadMilestoneUpdatesInRange(from, to).length;
+    const milestonesCount = loadMilestoneUpdatesInRange(from, to, facts).length;
 
     // Stage 5 — completed, count-only, end_date/archived_at as a labeled proxy where present.
     let completedCount = 0, completedNoDateCount = 0;
-    facts.forEach((f) => {
+    projectFacts.forEach((f) => {
       const isCompleted = f.status === 'Completed' || !!f.is_archived;
       if (!isCompleted) return;
-      const proxyDate = f.end_date || (f.is_archived ? f.archived_at : '') || '';
+      const proxyDate = f.end_date || (f.is_archived ? f.archived_local : '') || '';
       if (proxyDate) {
         if (dateInRange(proxyDate, from, to)) completedCount += 1;
       } else if (unbounded) {
@@ -861,7 +1027,7 @@
     });
 
     // Stage 6 — research output.
-    const outputRows = loadOutputsInRange(from, to);
+    const outputRows = loadOutputsInRange(from, to, facts);
     const outputCount = outputRows.length;
 
     // Median 1: created -> first booking, over the "created" population (createdIn), using each
@@ -871,7 +1037,7 @@
     const createdToActiveDeltas = [];
     createdIn.forEach((f) => {
       if (!f.first_booking_date) return; // no booking at all yet — nothing to measure
-      const delta = daysBetweenDates(f.created_at, f.first_booking_date);
+      const delta = daysBetweenDates(f.created_local, f.first_booking_date);
       if (delta == null) return;
       if (delta < 0) { createdToActiveNegative += 1; return; }
       createdToActiveDeltas.push(delta);
@@ -1059,27 +1225,26 @@
      columns: a cancelled booking's Hours/Staff Hours are zeroed (it never held its slot) and its
      Cost is zeroed unless the charge was retained — identical math to every other card, just
      applied per-row instead of summed into a total. */
-  function loadBookingInstrumentNames(from, to) {
-    return DB.rows(`
-      SELECT mi.meeting_id, i.name AS instrument_name, i.is_retired AS instrument_retired
-      FROM meeting_instruments mi
-      JOIN instruments i ON i.id = mi.instrument_id
-      JOIN meetings mt ON mt.id = mi.meeting_id
-      WHERE ${RANGE_SQL}`, rangeParams(from, to));
-  }
-  function computeBookingRows(from, to) {
+  function computeBookingRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    const meetings = loadMeetingsInRange(from, to);
-    const annotated = annotateMeetings(meetings);
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'bookingRows', () => computeBookingRowsImpl(from, to, facts));
+  }
+  function computeBookingRowsImpl(from, to, facts) {
+    const meetings = loadMeetingsInRange(from, to, facts);
+    const annotated = annotateMeetings(meetings, facts);
 
+    // Same rows loadInstrumentLines already pulls (same join, same range) — just without
+    // line_cost, which this sheet doesn't need — so this reuses that memoized query instead of
+    // running a near-identical one of its own.
     const instrByMeeting = new Map(); // meeting_id -> [retired-suffixed name, ...]
-    loadBookingInstrumentNames(from, to).forEach((ln) => {
+    loadInstrumentLines(from, to, facts).forEach((ln) => {
       if (!instrByMeeting.has(ln.meeting_id)) instrByMeeting.set(ln.meeting_id, []);
       instrByMeeting.get(ln.meeting_id).push(UI.retiredName(ln.instrument_name, ln.instrument_retired));
     });
 
     const staffByMeeting = new Map(); // meeting_id -> { names: [...], hours: number }
-    loadStaffLines(from, to).forEach((ln) => {
+    loadStaffLines(from, to, facts).forEach((ln) => {
       const mm = annotated.get(ln.meeting_id);
       if (!mm) return;
       if (!staffByMeeting.has(ln.meeting_id)) staffByMeeting.set(ln.meeting_id, { names: [], hours: 0 });
@@ -1149,33 +1314,43 @@
   const ENTITY_DEFS = {
     instrument: {
       label: 'Instrument Utilization',
-      notes: [],
-      buildRows: (from, to) => computeInstrumentRows(from, to).rows,
+      // R1 disclosure: "Line Charges" is a sum of raw meeting_instruments.line_cost snapshots —
+      // priced BEFORE the booking's group/manual discount, overhead, and tax are applied (those
+      // are a whole-booking calculation, not a per-line one — see computeBookingBOM in ui.js). It
+      // will not match a project's Total Cost, which is post-discount/overhead/tax. Renamed from
+      // "Billed Revenue" (which implied the opposite) rather than leaving the old name with just a
+      // footnote, since a column a reader copies straight into their own spreadsheet carries no
+      // footnote with it — the name itself needs to say what it is.
+      notes: ['"Line Charges" is each instrument\'s raw booking line-cost total, before any group/manual discount, overhead, or tax is applied at the whole-booking level — it will not match a project\'s Total Cost (see Projects & Groups), which is after all three.'],
+      buildRows: (from, to, facts) => computeInstrumentRows(from, to, facts).rows,
       columns: [
         ccol('name', 'Instrument', 'text', (r) => UI.retiredName(r.name, r.retired)),
         ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
         ccol('hours', 'Booked Hours', 'hours', (r) => r.hours),
-        ccol('revenue', 'Billed Revenue', 'money', (r) => r.revenue),
+        ccol('revenue', 'Line Charges', 'money', (r) => r.revenue),
         ccol('sharePct', 'Share of Total Hours %', 'number', (r) => Math.round(r.sharePct * 100) / 100)
       ]
     },
     staff: {
       label: 'Staff Time',
-      notes: [],
-      buildRows: (from, to) => computeStaffRows(from, to).rows,
+      // Same disclosure as the instrument entity above, for meeting_staff.line_cost — staff lines
+      // are never discounted, but a booking's overhead/tax is still applied to the whole booking
+      // total, not reflected in this per-line figure.
+      notes: ['"Line Charges" is each staff member\'s raw booking line-cost total, before the booking\'s overhead or tax is applied at the whole-booking level — it will not match a project\'s Total Cost (see Projects & Groups).'],
+      buildRows: (from, to, facts) => computeStaffRows(from, to, facts).rows,
       columns: [
         ccol('name', 'Staff Member', 'text', (r) => UI.retiredName(r.name, r.retired)),
         ccol('sessions', 'Sessions', 'number', (r) => r.sessions),
         ccol('rawHours', 'Raw Hours', 'hours', (r) => r.rawHours),
         ccol('billHours', 'Billed Hours', 'hours', (r) => r.billHours),
-        ccol('revenue', 'Staff Revenue', 'money', (r) => r.revenue)
+        ccol('revenue', 'Line Charges', 'money', (r) => r.revenue)
       ]
     },
     projects: {
       label: 'Projects & Groups',
       notes: ['A booking contributes to both its Project row and its Lab/Group row — the Scope column is required so summing Hours/Total Cost across both scopes can never be mistaken for a single total (it would double every booking).'],
-      buildRows: (from, to) => {
-        const p = computeProjectRows(from, to);
+      buildRows: (from, to, facts) => {
+        const p = computeProjectRows(from, to, facts);
         const rows = [];
         p.projects.forEach((r) => rows.push({ scope: 'Project', label: r.label, bookings: r.bookings, hours: r.hours, cost: r.cost }));
         p.groups.forEach((r) => rows.push({ scope: 'Lab / Group', label: r.label, bookings: r.bookings, hours: r.hours, cost: r.cost }));
@@ -1192,8 +1367,8 @@
     consults: {
       label: 'Consults',
       notes: ['The same consult count is reported three ways here (Total / By Instrument / By Period) — the Breakdown column is required so those three views are never summed together as if they were three different populations.'],
-      buildRows: (from, to) => {
-        const c = computeConsultRows(from, to);
+      buildRows: (from, to, facts) => {
+        const c = computeConsultRows(from, to, facts);
         const rows = [{ breakdown: 'Total', label: 'All', count: c.totalConsults }];
         c.instrumentRows.forEach((r) => rows.push({ breakdown: 'By Instrument', label: UI.retiredName(r.name, r.retired), count: r.count }));
         c.periodRows.forEach((r) => rows.push({ breakdown: 'By Period', label: r.period, count: r.count }));
@@ -1208,7 +1383,7 @@
     service: {
       label: 'Service Entries',
       notes: [],
-      buildRows: (from, to) => computeServiceEntryRows(from, to).rows,
+      buildRows: (from, to, facts) => computeServiceEntryRows(from, to, facts).rows,
       columns: [
         ccol('description', 'Description', 'text', (r) => r.description),
         ccol('project', 'Project', 'text', (r) => r.project_id == null ? 'Facility-wide' : (r.project_code ? r.project_code + ' — ' + r.project_title : r.project_title)),
@@ -1224,8 +1399,8 @@
     stewardship: {
       label: 'Stewardship',
       notes: ['A multi-supervisor instrument is repeated under every supervisor it is linked to — the SAME bookings/hours/revenue on each repeated row (see computeStewardshipRows). The Supervisor column is required so those identical rows can never be silently double- (or triple-) counted as if they were separate instruments.'],
-      buildRows: (from, to) => {
-        const s = computeStewardshipRows(from, to);
+      buildRows: (from, to, facts) => {
+        const s = computeStewardshipRows(from, to, facts);
         const rows = [];
         s.groups.forEach((g) => {
           const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
@@ -1242,7 +1417,7 @@
         ccol('name', 'Instrument', 'text', (r) => UI.retiredName(r.name, r.retired)),
         ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
         ccol('hours', 'Hours', 'hours', (r) => r.hours),
-        ccol('revenue', 'Revenue', 'money', (r) => r.revenue),
+        ccol('revenue', 'Line Charges', 'money', (r) => r.revenue),
         ccol('distinctUsers', 'Distinct Users', 'number', (r) => r.distinctUsers),
         ccol('newUsers', 'New Users', 'number', (r) => r.newUsers),
         ccol('projectsServed', 'Projects Served', 'number', (r) => r.projectsServed),
@@ -1253,8 +1428,8 @@
     activitymix: {
       label: 'Activity Mix',
       notes: ['Each period repeats once per category present in the data — the Category column is required so hours from different categories in the same period are never mistaken for duplicate rows of the same total.'],
-      buildRows: (from, to) => {
-        const mix = computeActivityMixRows(from, to);
+      buildRows: (from, to, facts) => {
+        const mix = computeActivityMixRows(from, to, facts);
         const rows = [];
         mix.rows.forEach((r) => mix.categories.forEach((c) => rows.push({ period: r.period, category: c, hours: r.hours[c] || 0 })));
         return rows;
@@ -1273,8 +1448,8 @@
       // them — the same counts exportReportsXlsx's own Notes sheet and Funnel sheet surface (see
       // exports.js). A STATIC string array can't carry these, so this is computed per (from,to)
       // instead of a plain `notes` array, and computeCustomRows below calls it that way.
-      buildNotes: (from, to) => {
-        const f = computeFunnelRows(from, to);
+      buildNotes: (from, to, facts) => {
+        const f = computeFunnelRows(from, to, facts);
         const notes = ['Each stage repeats the same underlying projects that reached it — the Stage column is required so summing Count across stages can never be mistaken for a count of distinct projects (it would double- or quadruple-count them). The two "Median" rows report days, not project counts, and share the Count column — with Stage visible they can still be told apart from the stage rows.'];
         notes.push('"Completed" is dated by end_date (or archive date) when set; a completed project with neither date has no date to place in a bounded range and ' + (f.completedNoDateCount ? `is excluded here (${f.completedNoDateCount} completed project${f.completedNoDateCount === 1 ? '' : 's'} with no end/archive date).` : 'none are excluded in this range.'));
         notes.push('Both medians exclude (but disclose) projects where the later event predates the earlier one — real for backfilled/imported data: '
@@ -1282,8 +1457,8 @@
           + `${f.medians.activeToOutput.excludedNegative} project${f.medians.activeToOutput.excludedNegative === 1 ? '' : 's'} excluded from "first booking → first output" (n=${f.medians.activeToOutput.sampleSize}).`);
         return notes;
       },
-      buildRows: (from, to) => {
-        const f = computeFunnelRows(from, to);
+      buildRows: (from, to, facts) => {
+        const f = computeFunnelRows(from, to, facts);
         const rows = f.stages.map((s) => ({ stage: s.label, count: s.count, conversionPct: s.conversionPct }));
         rows.push({ stage: 'Median: created → first booking (days)', count: f.medians.createdToActive.days, conversionPct: null });
         rows.push({ stage: 'Median: first booking → first output (days)', count: f.medians.activeToOutput.days, conversionPct: null });
@@ -1298,7 +1473,7 @@
     bookings: {
       label: 'Bookings (Row-Level)',
       notes: [],
-      buildRows: (from, to) => computeBookingRows(from, to).rows,
+      buildRows: (from, to, facts) => computeBookingRows(from, to, facts).rows,
       columns: [
         ccol('date', 'Date', 'text', (r) => r.date || '—'),
         ccol('title', 'Title', 'text', (r) => r.title || '—'),
@@ -1346,15 +1521,16 @@
      showing. Required columns are force-re-added even if the caller's spec omitted them (a stale
      persisted column list from before a column became required, or a hand-built spec) — see the
      FLATTENED-TABLE INTEGRITY note above for why that matters. */
-  function computeCustomRows(spec, from, to) {
+  function computeCustomRows(spec, from, to, facts) {
     const entity = spec && spec.entity;
     const def = ENTITY_DEFS[entity];
     if (!def) return { entity, columns: [], rows: [], notes: [] };
+    facts = useFacts(facts, from, to);
     const requested = new Set((spec.columns || []).filter((k) => def.columns.some((c) => c.key === k)));
     def.columns.forEach((c) => { if (c.required) requested.add(c.key); });
     const columns = def.columns.filter((c) => requested.has(c.key));
-    const dataRows = def.buildRows(from, to);
-    const notes = def.buildNotes ? def.buildNotes(from, to) : (def.notes || []);
+    const dataRows = def.buildRows(from, to, facts);
+    const notes = def.buildNotes ? def.buildNotes(from, to, facts) : (def.notes || []);
     const rows = dataRows.map((r) => {
       const out = {};
       columns.forEach((c) => { out[c.key] = c.get(r); });
@@ -1383,16 +1559,21 @@
   /* ---------------- Screen ---------------- */
   function render() {
     const { from, to } = getRange();
-    const instr = computeInstrumentRows(from, to);
-    const staff = computeStaffRows(from, to);
-    const matrix = computeStaffInstrumentMatrix(from, to);
-    const proj = computeProjectRows(from, to);
-    const stewardship = computeStewardshipRows(from, to);
-    const consult = computeConsultRows(from, to);
-    const svc = computeServiceEntryRows(from, to);
-    const breadth = computeBreadthRows(from, to);
-    const mix = computeActivityMixRows(from, to);
-    const funnel = computeFunnelRows(from, to);
+    // One facts bundle for the whole screen: every compute* below shares it, so the meetings/
+    // instrument-line/staff-line queries each run at most once regardless of how many cards ask
+    // for them, and computeStewardshipRows reuses the instrument/consult rows computed just above
+    // it rather than re-deriving them. See the facts-bundle comment above loadMeetingsInRange.
+    const facts = makeFacts(from, to);
+    const instr = computeInstrumentRows(from, to, facts);
+    const staff = computeStaffRows(from, to, facts);
+    const matrix = computeStaffInstrumentMatrix(from, to, facts);
+    const proj = computeProjectRows(from, to, facts);
+    const stewardship = computeStewardshipRows(from, to, facts);
+    const consult = computeConsultRows(from, to, facts);
+    const svc = computeServiceEntryRows(from, to, facts);
+    const breadth = computeBreadthRows(from, to, facts);
+    const mix = computeActivityMixRows(from, to, facts);
+    const funnel = computeFunnelRows(from, to, facts);
     const labConsultsOn = getLabConsultsEnabled();
 
     return `
@@ -1415,7 +1596,7 @@
       <div class="mb-16">${chartUtilization(instr.rows)}</div>
       <div class="tbl-wrap">
         <table class="tbl">
-          <thead><tr><th>Instrument</th><th>Bookings</th><th>Booked Hours</th><th>Billed Revenue</th><th>Share of Total Hours</th></tr></thead>
+          <thead><tr><th>Instrument</th><th>Bookings</th><th>Booked Hours</th><th>Line Charges</th><th>Share of Total Hours</th></tr></thead>
           <tbody>
             ${instr.rows.map((r) => `
               <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1428,7 +1609,7 @@
           </tbody>
         </table>
       </div>`}
-      <div class="faint small mt-8">Bookings and hours exclude cancelled bookings entirely (a cancelled booking releases its slot). Billed revenue follows the same rule used everywhere else in the app: a cancelled booking's charge still counts only if it was retained rather than waived.</div>
+      <div class="faint small mt-8">Bookings and hours exclude cancelled bookings entirely (a cancelled booking releases its slot). Line Charges follows the same cancellation rule used everywhere else in the app: a cancelled booking's charge still counts only if it was retained rather than waived. It's the raw instrument-charge line for each booking, though — before that booking's group/manual discount, overhead, and tax are applied — so it will not match a project's Total Cost on the Projects &amp; Groups card, which is after all three.</div>
     </div>
 
     <div class="card mb-16">
@@ -1436,7 +1617,7 @@
       ${!staff.rows.length ? global.Views.emptyState('users', 'No staff time in this range', 'Widen the date range or assign facility staff to bookings.') : `
       <div class="tbl-wrap">
         <table class="tbl">
-          <thead><tr><th>Staff Member</th><th>Sessions</th><th>Raw Hours</th><th>Billed Hours</th><th>Staff Revenue</th></tr></thead>
+          <thead><tr><th>Staff Member</th><th>Sessions</th><th>Raw Hours</th><th>Billed Hours</th><th>Line Charges</th></tr></thead>
           <tbody>
             ${staff.rows.map((r) => `
               <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1449,7 +1630,7 @@
           </tbody>
         </table>
       </div>`}
-      <div class="faint small mt-8">Raw hours are the actual time booked (a blank per-staff window on a booking means "the whole booking window", not zero). Billed hours apply the same 1-hour floor / round-up-to-the-hour rule as the booking cost calculator, which is why they can be higher than raw hours.</div>
+      <div class="faint small mt-8">Raw hours are the actual time booked (a blank per-staff window on a booking means "the whole booking window", not zero). Billed hours apply the same 1-hour floor / round-up-to-the-hour rule as the booking cost calculator, which is why they can be higher than raw hours. Line Charges is the raw staff-time line for each booking, before that booking's overhead or tax is applied — it will not match a project's Total Cost on the Projects &amp; Groups card.</div>
     </div>
 
     <div class="card mb-16">
@@ -1471,7 +1652,7 @@
           </tbody>
         </table>
       </div>`}
-      <div class="faint small mt-8">Sessions count bookings unsplit — the number that actually answers "which instruments do I spend my time on". Attributed hours divide that booking's staff hours evenly across every instrument on it, purely so the column sums back to the person's true total in the Facility staff time card above; the underlying sample runs were mostly parallel, so this split is a bookkeeping convenience, not a claim about which instrument the time "really" belongs to.</div>
+      <div class="faint small mt-8">Sessions count bookings unsplit — the number that actually answers "which instruments do I spend my time on". Attributed hours divide that booking's staff hours evenly across every instrument on it, purely so the column sums back to the person's true total in the Facility staff time card above; the underlying sample runs were mostly parallel, so this split is a bookkeeping convenience, not a claim about which instrument the time "really" belongs to. A booking with no instrument line (a pure consult/sync) still has real staff hours, so those are grouped under a "No Instrument" column — without it, that time would be missing from this table even though it counts on the Facility staff time card.</div>
     </div>
 
     <div class="card mb-16">
@@ -1526,7 +1707,7 @@
           <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">${g.supervisor ? 'Supervisor: ' + nameCell(g.supervisor.name, g.supervisor.retired) : 'Unassigned (no supervisor on file)'}</div>
           <div class="tbl-wrap">
             <table class="tbl">
-              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Revenue</th><th>Distinct Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
+              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Line Charges</th><th>Distinct Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
               <tbody>
                 ${g.rows.map((r) => `
                   <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1544,7 +1725,7 @@
             </table>
           </div>
         </div>`).join('')}
-      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Revenue follows the retained-charge rule used everywhere else. Omitted on purpose (need Tier 4 data this app doesn't have yet): trained-user pool trend and downtime share.</div>
+      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Line Charges follows the retained-charge rule used everywhere else. Omitted on purpose (need Tier 4 data this app doesn't have yet): trained-user pool trend and downtime share.</div>
     </div>
 
     <div class="card mb-16">
@@ -1744,6 +1925,10 @@
     // Exposed so js/exports.js's XLSX exporter builds its sheets from the exact same aggregation
     // the screen renders from — a report whose export disagrees with its screen is worse than no
     // report. Each accepts an explicit (from,to) so the exporter never has to mutate module state.
+    // makeFacts lets exports.js build one shared facts bundle up front and pass it into every
+    // compute* call below, exactly like render() does, so exportReportsXlsx/buildAllXlsxBlob get
+    // the same single-query-per-range benefit instead of each compute* re-loading its own rows.
+    makeFacts,
     computeInstrumentRows,
     computeStaffRows,
     computeStaffInstrumentMatrix,

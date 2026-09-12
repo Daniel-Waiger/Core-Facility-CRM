@@ -267,6 +267,64 @@ describe('date rule lint: no toISOString().slice/substring(0, 10)', () => {
 });
 
 /* ---------------------------------------------------------------------------------------------
+ * 4b. The topmost-modal rule as a lint: js/app.js must never read the FIRST `.modal`/`.modal-dim`
+ * in the DOM (document.querySelector always returns the OUTERMOST/bottommost one, since later
+ * modals are appended later and so sort later in `querySelectorAll` order too). With modals that
+ * can stack — Today's Agenda -> Edit Booking, or any "+ Add New" opened from inside another form —
+ * a first-match lookup silently operates on the wrong (buried) modal instead of the one the user
+ * is actually looking at. `UI.topModal()`/`UI.topDim()` (js/ui.js) are the only correct way to
+ * find "the modal in front right now". See CLAUDE.md's "Modal system" section and the H4 finding
+ * in the 2026-09-11 adversarial review.
+ * ------------------------------------------------------------------------------------------- */
+
+describe('topmost-modal rule lint: js/app.js never reads the first .modal/.modal-dim', () => {
+  // Matches `document.querySelector('.modal')` / `.modal-dim` in either quote style, with or
+  // without whitespace inside the parens — the exact first-match shape that returns the OUTERMOST
+  // modal rather than the topmost one. Deliberately narrow (only this literal call shape) so it
+  // can't accidentally flag `UI.topModal()`, `m.closest('.modal-dim')`, or a `.modal-dim:last-of-
+  // type` / `dims[dims.length - 1]` pattern, all of which correctly resolve to the topmost modal.
+  const BAD_PATTERN = /document\s*\.\s*querySelector\s*\(\s*(['"])\.modal(?:-dim)?\1\s*\)/;
+
+  function blankComments(src) {
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
+  }
+
+  test('js/app.js does not look up the first .modal/.modal-dim in the DOM', () => {
+    const codeOnly = blankComments(SOURCES['app.js']);
+    const m = codeOnly.match(BAD_PATTERN);
+    if (m) {
+      const line = codeOnly.slice(0, m.index).split('\n').length;
+      assert.fail(`js/app.js:${line} reads the first .modal/.modal-dim in the DOM instead of ` +
+        `UI.topModal()/UI.topDim() (H4, 2026-09-11 review): "${m[0]}"`);
+    }
+    assert.ok(true);
+  });
+
+  test('js/app.js never calls the broken DB.q1 (its Statement.getArray() throws in the shipped sql.js build)', () => {
+    // msSave and iSave both used `DB.q1('SELECT last_insert_rowid()')[0]` to read back the row
+    // they'd just inserted — DB.q1 (js/db.js) calls `stmt.getArray()`, a method the bundled
+    // libs/sql-asm.js build's Statement prototype never exposes (only .get/.getAsObject/...).
+    // It throws immediately, silently aborting the save AFTER the row was written but BEFORE the
+    // owner/instrument join rows and the modal's own close ever ran — "Add Milestone" and "Add
+    // Instrument" both appeared to hang. Every other saver in this file reads the new id back with
+    // `DB.row('SELECT last_insert_rowid() as id').id`, which works; this guards against either
+    // function regressing back to DB.q1.
+    assert.doesNotMatch(SOURCES['app.js'], /DB\.q1\s*\(/, 'js/app.js calls the broken DB.q1 helper');
+  });
+
+  test('js/ui.js defines topModal/topDim/closeAllModals and exports them on window.UI', () => {
+    assert.match(SOURCES['ui.js'], /function\s+topModal\s*\(/);
+    assert.match(SOURCES['ui.js'], /function\s+topDim\s*\(/);
+    assert.match(SOURCES['ui.js'], /function\s+closeAllModals\s*\(/);
+    assert.match(ALL_SOURCE, /global\.UI\s*=\s*\{[\s\S]*?\btopModal\b[\s\S]*?\};/);
+    assert.match(ALL_SOURCE, /global\.UI\s*=\s*\{[\s\S]*?\btopDim\b[\s\S]*?\};/);
+    assert.match(ALL_SOURCE, /global\.UI\s*=\s*\{[\s\S]*?\bcloseAllModals\b[\s\S]*?\};/);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------
  * 5. Every js/*.js parses.
  * ------------------------------------------------------------------------------------------- */
 

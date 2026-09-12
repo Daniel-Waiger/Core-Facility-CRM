@@ -186,6 +186,71 @@ describe('money: staffPctFactor', () => {
   });
 });
 
+describe('money: item 8 (second review) — overheadPct and staffPctFactor are capped, not just floored', () => {
+  test('a corrupted overheadPct above 100 is capped at 100, not applied as-is', () => {
+    const bom = UI.computeBookingBOM({
+      start: '09:00', end: '11:00', // 2h
+      instruments: [{ cost: 150, cost_unit: 'time' }], // instrTime = 300
+      staff: [],
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 250, taxPct: 0 }, // corrupted/mistyped: 250% overhead
+    });
+    assert.equal(bom.overheadPct, 100, 'overheadPct must be capped at 100, the same ceiling taxPct already has via clampPct');
+    assert.equal(bom.overheadAmt, 300, 'overhead must be computed on the CAPPED percentage (100% of 300 = 300), not 250% of it (750)');
+    assert.equal(bom.beforeTax, 600);
+  });
+
+  test('a corrupted staffPctFactor above 1 (e.g. a 150% category billing policy) is capped at 1, not applied as a >1x multiplier', () => {
+    const bom = UI.computeBookingBOM({
+      start: '09:00', end: '11:00', // 2h
+      instruments: [],
+      staff: [{ rate: 95, start: '', end: '' }], // floored/billed at 2h -> 190 before factor
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 0, taxPct: 0 },
+      staffPctFactor: 1.5, // corrupted/mistyped: a 150% staff billing policy
+    });
+    assert.equal(bom.staffPctFactor, 1, 'staffPctFactor must be capped at 1 (100%), never a >1x multiplier');
+    assert.equal(bom.staffLines[0].line, 95 * 2, 'the staff line must bill at the FLOORED rate*hours, not 1.5x it');
+    assert.equal(bom.staffTotal, 190);
+  });
+
+  test('the 490 / 546.25 / 589.95 regression figures are unaffected by the new caps (both inputs are well under 100/1)', () => {
+    const bom = UI.computeBookingBOM({
+      start: '09:00', end: '11:00',
+      instruments: [{ cost: 150, cost_unit: 'time' }],
+      staff: [{ rate: 95, start: '', end: '' }],
+      groupPct: 5, manualPct: 0,
+      rates: { overheadPct: 15, taxPct: 8 },
+    });
+    assert.equal(bom.subtotal, 490);
+    assert.equal(bom.beforeTax, 546.25);
+    assert.equal(bom.total, 589.95);
+  });
+});
+
+describe('money: UI.round2 is the one shared 2dp rounding helper', () => {
+  // js/app.js's service-entry savers (seSave/seEditSave) round `qty * rate` through UI.round2
+  // before storing it, rather than storing the raw float — the same rounding fmtMoney applies at
+  // display time, so a stored total and its displayed figure never disagree. CLAUDE.md requires
+  // exactly one copy of shared money arithmetic; this pins UI.round2 as that copy so a future
+  // change doesn't fork a second rounding formula into app.js.
+  test('qty 3 x rate 1.15 rounds to 3.45, not the raw floating-point 3.4499999999999997', () => {
+    const raw = 3 * 1.15;
+    assert.notEqual(raw, 3.45, 'sanity check: the unrounded float is NOT already 3.45');
+    assert.equal(UI.round2(raw), 3.45);
+  });
+
+  test('round2 matches the rounding fmtMoney applies for display (same figure, cent-accurate)', () => {
+    assert.equal(UI.round2(3 * 1.15), 3.45);
+    assert.equal(UI.fmtMoney(3 * 1.15), '$3.45');
+  });
+
+  test('round2 tolerates non-numeric/undefined input the same way the rest of the money helpers do', () => {
+    assert.equal(UI.round2(undefined), 0);
+    assert.equal(UI.round2(NaN), 0);
+  });
+});
+
 describe('money: the regression triple', () => {
   // js/db.js's seedSampleData, booking #1 (search its comment for "490 / 546.25 / 589.95"),
   // documents the exact inputs this must reproduce, and js/db.js's own seed data (peopleData /
@@ -212,5 +277,50 @@ describe('money: the regression triple', () => {
     assert.equal(bom.subtotal, 490, 'documented regression figure #1: subtotal');
     assert.equal(bom.beforeTax, 546.25, 'documented regression figure #2: total before tax (the invoiced figure)');
     assert.equal(bom.total, 589.95, 'documented regression figure #3: grand total including tax');
+  });
+});
+
+describe('money: subtotal must equal the sum of the rounded per-line amounts', () => {
+  // Item 13 (adversarial review of PR #44): instrTime/instrAmount/staffTotal used to accumulate
+  // the UNROUNDED per-line value while each line's own displayed/stored `.line` was round2()'d
+  // individually — so the subtotal these totals feed into could differ from the sum of the lines
+  // a facility would actually see and add up by hand. Three lines that each round the same
+  // direction (0.333... -> 0.33) make that drift land on a real cent, not just a float artifact.
+  test('three instrument lines of $0.333... each: subtotal is the sum of the ROUNDED lines (0.99), not 3 * 0.333... rounded once (1.00)', () => {
+    const bom = UI.computeBookingBOM({
+      start: '10:00', end: '11:00', // 1 booking hour, so a 'time' line's amount is just its cost
+      instruments: [
+        { cost: 1 / 3, cost_unit: 'time' },
+        { cost: 1 / 3, cost_unit: 'time' },
+        { cost: 1 / 3, cost_unit: 'time' },
+      ],
+      staff: [],
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 0, taxPct: 0 },
+    });
+    const sumOfLines = bom.instrumentLines.reduce((s, it) => s + it.line, 0);
+    assert.equal(bom.instrumentLines.map((it) => it.line).join(','), '0.33,0.33,0.33', 'each line rounds to $0.33 individually');
+    assert.equal(sumOfLines, 0.99, 'sanity check on the fixture itself: 0.33 * 3 = 0.99');
+    assert.equal(bom.instrTime, 0.99, 'instrTime must equal the sum of the ROUNDED lines the user actually sees, not 3 * (1/3) rounded once');
+    assert.equal(bom.subtotal, sumOfLines, 'subtotal must reconcile exactly against the sum of the stored/displayed lines');
+  });
+
+  test('same drift, staff side: three staff lines of $0.333... each sum to $0.99, not $1.00', () => {
+    const bom = UI.computeBookingBOM({
+      start: '10:00', end: '11:00', // 1 booking hour -> billableStaffHours floors to 1
+      instruments: [],
+      staff: [
+        { rate: 1 / 3, start: '', end: '' },
+        { rate: 1 / 3, start: '', end: '' },
+        { rate: 1 / 3, start: '', end: '' },
+      ],
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 0, taxPct: 0 },
+      staffPctFactor: 1,
+    });
+    const sumOfLines = bom.staffLines.reduce((s, p) => s + p.line, 0);
+    assert.equal(bom.staffLines.map((p) => p.line).join(','), '0.33,0.33,0.33');
+    assert.equal(bom.staffTotal, 0.99, 'staffTotal must equal the sum of the rounded staff lines, not the unrounded raw total');
+    assert.equal(bom.subtotal, sumOfLines, 'subtotal must reconcile exactly against the sum of the stored/displayed staff lines');
   });
 });

@@ -81,7 +81,7 @@
       <ul>
         <li><strong>Bookings</strong> — how many bookings used this instrument (cancelled ones excluded, per Rule 1).</li>
         <li><strong>Booked hours</strong> — the total time this instrument was reserved for, across those bookings.</li>
-        <li><strong>Billed revenue</strong> — the money those bookings' instrument charges brought in (per Rule 2, so a cancelled-but-charged booking's revenue still shows here even though its hours don't).</li>
+        <li><strong>Line charges</strong> — the sum of each booking's raw instrument-charge line, per Rule 2 (so a cancelled-but-charged booking's line charges still show here even though its hours don't). This is <strong>before</strong> that booking's group/manual discount, overhead, and tax are applied — those are worked out once for the whole booking, not per line — so it will not match the Total Cost you'd see for the same bookings on the Projects &amp; Groups card or in the project's own Costs view.</li>
         <li><strong>Share of total hours</strong> — a bar showing this instrument's hours as a percentage of all instrument hours in the range, so you can see at a glance which instruments are the busiest.</li>
       </ul>
       <div class="callout warn">
@@ -97,7 +97,7 @@
         <li><strong>Sessions</strong> — how many bookings this person was assigned to as staff (cancelled ones excluded).</li>
         <li><strong>Raw hours</strong> — their actual time on each booking: their own start/end window if they had one, or the whole booking if they didn't set one.</li>
         <li><strong>Billed hours</strong> — the same time run through the <a href="costs-math.html#staff-hours">one-hour minimum, round-up rule</a>, so this is always the same as or larger than raw hours — never smaller.</li>
-        <li><strong>Staff revenue</strong> — the money their billed hours brought in.</li>
+        <li><strong>Line charges</strong> — the sum of each booking's raw staff-time line. Staff lines aren't discounted, but a booking's overhead and tax are still worked out on the whole booking, not per line, so this won't match the Total Cost you'd see for the same bookings elsewhere.</li>
       </ul>
       <div class="callout tip"><p><strong>💡 Tip.</strong> If a staff member's line for a booking has no personal start/end time set, their raw hours count as the <em>whole booking window</em>, exactly the same rule the live cost breakdown uses (see <a href="costs-math.html#staff-hours">How Costs Are Calculated</a>).</p></div>
       <div class="callout try">
@@ -112,6 +112,7 @@
         <li>Each cell reads as <strong>"n sess · x h"</strong> — a count of sessions, and a number of hours.</li>
         <li><strong>Sessions are not split.</strong> If a staff member worked one booking that used two instruments, that's one full session credited under each instrument column they touched.</li>
         <li><strong>Hours ARE split</strong> across the booking's instruments, so that each staff member's row still adds up to their real total hours rather than over-counting them. If someone spent 2 hours on a booking that used 2 instruments, each instrument's cell gets 1 of those 2 hours — the two combined give back their true 2 hours.</li>
+        <li>A booking with <strong>no instrument at all</strong> (a pure consult or sync) still has real staff hours on it — those land in a standing <strong>"No Instrument"</strong> column at the right of the table, rather than being left out of the matrix, so a person's row always sums to their true total.</li>
       </ul>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This is the opposite of Card 1's rule, and deliberately so: the Instrument card is answering "how occupied was this instrument?" (both instruments really were tied up for the whole time, so each gets full hours). The matrix is answering "how did this person's time break down by instrument?" — and a person only has so many hours in a day, so splitting keeps their row honest rather than making it look like they worked twice as many hours as they did.</p></div>
       <div class="callout try"><p><strong>🧪 Try it.</strong> In the demo sandbox, find a staff member and instrument pair in its matrix, then cross-check the hours against that person's Raw hours total on Card 2 — the matrix row should sum to the same total.</p></div>
@@ -133,7 +134,7 @@
       <h2 id="stewardship-card">Card 5 — Instrument stewardship scorecard</h2>
       <p>Where Card 1 answers "how busy is this instrument," this card answers the question a supervisor is actually asked: "why do we still have this instrument, and is it earning its keep?" It's grouped by <strong>supervising staff</strong> — the people set as an instrument's Supervising Staff on its own edit form — with one row per instrument under each supervisor:</p>
       <ul>
-        <li><strong>Bookings, Hours, Revenue</strong> — the same figures as Card 1, for this instrument alone.</li>
+        <li><strong>Bookings, Hours, Line Charges</strong> — the same figures as Card 1, for this instrument alone.</li>
         <li><strong>Distinct Users</strong> — how many different people actually used the instrument in the range.</li>
         <li><strong>New Users</strong> — how many of those people were using <em>this instrument</em> for the very first time ever, with that first-ever booking falling inside the range. The app checks the instrument's whole booking history to know this, not just the range you've selected, so a returning user from three years ago is never mislabeled "new."</li>
         <li><strong>Projects Served</strong> — how many distinct projects booked the instrument.</li>
@@ -141,7 +142,7 @@
         <li><strong>Consults</strong> — how many of its bookings were tagged Category = "consult" (see the Consults card below).</li>
       </ul>
       <figure class="shot">
-        <img src="../screenshots/65-stewardship-scorecard.png" alt="The Instrument Stewardship card grouped by supervisor, with columns for bookings, hours, revenue, distinct users, new users, projects served, facility-wide sessions and consults" loading="lazy"
+        <img src="../screenshots/65-stewardship-scorecard.png" alt="The Instrument Stewardship card grouped by supervisor, with columns for bookings, hours, line charges, distinct users, new users, projects served, facility-wide sessions and consults" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/65-stewardship-scorecard.png</div>
         <figcaption>Grouped by supervisor — David Kim's four instruments, Priya Anand's one, Tom Alvarez's two, each with the full row of figures.</figcaption>
@@ -293,7 +294,7 @@
         <p>It shows up in By Project (as itself or under "Facility-wide" if it has no project either) and in the Instrument/Staff cards as usual — but it's omitted from the By Lab/Group table, since there's no lab to group it under.</p>
       </details>
       <details class="quiz-q">
-        <summary>An instrument has two supervisors on file. On the Stewardship card, should you add its Hours and Revenue together where it appears under each of them, to get a combined total?</summary>
+        <summary>An instrument has two supervisors on file. On the Stewardship card, should you add its Hours and Line Charges together where it appears under each of them, to get a combined total?</summary>
         <p>No. It's the same instrument, the same bookings, repeated once per supervisor so each can see it — not two different instruments or two halves of one. Adding the two appearances together would double-count every booking on it.</p>
       </details>
       <details class="quiz-q">
@@ -302,7 +303,7 @@
       </details>
       <details class="quiz-q">
         <summary>You're building a Custom Report on the Stewardship entity and try to uncheck the Supervisor column. What happens, and why?</summary>
-        <p>You can't — it's checked and disabled. Stewardship repeats a shared instrument's identical row under every supervisor it has; without the Supervisor column, two of those rows would look like separate instruments, and someone could add their hours or revenue together and double-count the same bookings.</p>
+        <p>You can't — it's checked and disabled. Stewardship repeats a shared instrument's identical row under every supervisor it has; without the Supervisor column, two of those rows would look like separate instruments, and someone could add their hours or line charges together and double-count the same bookings.</p>
       </details>
     </section>
 

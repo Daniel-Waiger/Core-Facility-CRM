@@ -3,6 +3,137 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] — 2026-09-12
+
+An adversarial review of the whole app — every screen driven in a real browser, the money and
+report rules re-derived from the code, every fix then re-checked by an independent pass — turned
+up a set of defects that had survived because no test reached them. This release closes them. The
+data-safety fixes come first; the rest is the report layer telling the truth, dialogs that behave,
+and phone-width layout.
+
+### Added
+- **Restoring a backup now shows a preview first.** Before anything is replaced you see how many
+  projects, people, instruments, bookings and milestones are in your current data versus the file,
+  when the backup was made and its most recent booking date. A backup made in the demo sandbox is
+  refused in your real facility data (restoring it into the sandbox itself is still fine).
+- **A second browser tab on the same data is read-only.** Two tabs used to race each other and
+  whichever saved last silently won. A second tab now shows a banner on every screen, refuses to
+  save, and if the tab that was saving is closed, the other one reloads from the last save before
+  taking over — so it can never overwrite a save it never saw. Restoring a backup is refused in a
+  read-only tab for the same reason.
+- **Booking an instrument marked Maintenance or Down now warns you** — live while filling in the
+  form, and with a confirmation before the booking is saved. It never blocks the booking.
+- **A Notes sheet in the facility-wide spreadsheet export**, matching the Reports export,
+  explaining the "(Retired)" suffix, what a waived cancellation shows, and why Overhead % is blank
+  on a booking priced before pricing tiers existed.
+- **Two new columns on the facility-wide Bookings & Costs sheet**, Overhead % and Effective Tax %,
+  so a row's Subtotal → Before Tax → Total math can be checked without the app open. The last
+  money column is now labelled "Charged Total" so a waived cancellation's zero does not read as a
+  broken calculation. Existing columns keep their meaning.
+- **The PDF project report renders Hebrew, Cyrillic and Greek.** A Hebrew PI or lab name used to
+  print as garbage because the built-in PDF font only knows Western Latin. The report now embeds
+  Open Sans (shipped with the app, so it works offline too) and draws right-to-left names in
+  reading order, parentheses included. Arabic script is not covered by that font.
+
+### Changed
+- **Saves are all-or-nothing.** Every save that writes more than one thing at once — a booking and
+  its attendees, instruments and staff; a milestone and its owners; a project and its PI; an
+  instrument and its supervisors and rates; a grant and its people — now either lands completely
+  or not at all. If something goes wrong midway the app says so and leaves the dialog open with
+  your input, instead of failing silently with a half-written record.
+- **Reports & Utilization is three to four times faster** on a large booking history: the screen
+  reads the period's bookings once and every card works from that, and typing a date waits for a
+  short pause instead of recalculating on each keystroke.
+- **A saved booking's cost stays exactly as billed** unless something that affects price changes
+  (instruments, staff time, times, discount, category, or the assigned lab/tier). Editing only the
+  notes or next steps no longer silently reprices it at today's rates. Stored money is rounded to
+  the cent, service entries included.
+- **"Billed Revenue" and "Staff Revenue" are now "Line Charges"** — on the Reports screen, the
+  Stewardship scorecard, the Custom Report builder, the exports and the manual — with a note that
+  this is the raw per-line figure taken *before* discount, overhead and tax, so it will not match
+  Total Cost. The numbers are unchanged; the old name implied they were something they were not.
+- **The Staff × Instrument matrix gained a "No Instrument" column** for staff time on a booking
+  with no instrument attached (a pure consult or sync). That time used to be dropped, so a
+  person's row could add up to less than their real total.
+- **Dialogs behave like dialogs.** Focus moves into a dialog when it opens (on a delete, retire or
+  archive confirmation, onto the safe Cancel button), Tab stays inside it, Enter in a single-line
+  field saves it, and navigating to another screen closes any open dialog rather than leaving it
+  floating over the wrong record. Focus then lands on the new screen's heading.
+- **Negative and out-of-range numbers are refused with a message** — rates, costs, quantities,
+  durations, discounts, tax and category percentages — instead of being quietly stored. A negative
+  discount used to *add* money to a booking.
+- **Milestone status dropdowns show "Pending", "In Progress", "Done"** instead of the raw stored
+  values. Every date in the app, including the Email Attendees subject, now uses one fixed format,
+  matching the fixed money format introduced in 1.10.2.
+- **Wording:** Project Detail's booking card, its button and Today's Agenda's quick-log button all
+  say "Booking"; the Edit Booking dialog's dismiss button is "Close" so it no longer sits beside
+  "Cancel Booking"; the Grants table says in plain text that "Allowed Users" is for reference and
+  does not restrict who can be picked; the Settings startup checkbox reads in the same sense as the
+  welcome screen's; the calendar's "Today" button no longer looks like the active view.
+
+### Fixed
+- **Restoring a corrupted, empty or unrelated file could break the app for good.** Such a file was
+  accepted, overwrote your data, and left every screen unusable with no way back except clearing
+  the browser's storage. Bad files are now rejected up front and your data is left untouched.
+- **An edit made just before closing a tab could be lost.** Changes now also save the moment a tab
+  is closed or hidden. If a save to this browser's storage fails, the indicator says so, the app
+  retries every few seconds, and it warns once per run of failures rather than staying silent.
+- **Saving from a dialog opened on top of another one did nothing.** Logging or editing a booking
+  or milestone from inside Today's Agenda read the agenda's form instead of its own, failed with no
+  message and stayed open. Every dialog now saves the form you are actually looking at.
+- **Adding a milestone or an instrument could stall after the record was created**, leaving the
+  dialog open with its assignments unsaved.
+- **Editing a cancelled booking failed once its old slot had been re-booked.** A note can now be
+  added to a cancelled booking regardless of what took its slot.
+- **Renaming a person left the old name on every booking that listed them.** Changing a project's
+  Principal Investigator left the old PI with the PI role and never gave it to the new one.
+- **Deleting the two default pricing tiers brought them back on the next load.** Renaming a lab
+  left its old name in every lab picker.
+- **The archive dialog's "billing carried" figure counted waived charges** that Project Costs shows
+  as zero. A booking could be saved without a date and then vanish from the calendar and reports
+  while still counting in Project Costs.
+- **Deleted attachments lingered in the browser's storage and shipped in every backup.** They are
+  now removed with the record, and by Clear All Data.
+- **The facility-wide spreadsheet omitted "(Retired)"** on the Milestones and Bookings & Costs
+  sheets, unlike every other export. **Word and PDF reports printed unrounded money** with no
+  currency, and printed a waived cancellation's full charge where the spreadsheet showed zero. The
+  PDF also used two symbols its built-in font cannot draw.
+- **A project or milestone created late at night landed in the wrong month** in the Reports funnel
+  at the facility's own clock — the issue #14 class of bug, in a timestamp this time. A lab name
+  with a trailing space counted twice toward "New Labs Onboarded".
+- **Dashboard "Upcoming Milestones" listed overdue milestones too**, and with enough of them the
+  genuinely upcoming ones were pushed off the list. Overdue items now appear only in Overdue.
+- **Phone width:** the demo banner no longer takes a third of the screen; the Edit Booking dialog's
+  buttons no longer run off the right edge; row action buttons are big enough to tap; long email
+  addresses wrap instead of being cut off; faint text (table headings, dates, hints) now meets the
+  accessibility contrast guideline in both themes. The week view opens at 07:00 instead of
+  midnight, and a short booking on the Timeline shows its start time instead of shrinking to a
+  sliver showing only an icon. Today's Agenda's card is titled "Bookings Today", since it lists every
+  category of booking.
+- **Custom status values and a person's role were rendered without escaping** in a few places, as
+  was the instrument name in the new Maintenance/Down confirmation. Both are now displayed safely.
+- **A required-field message now also outlines the field it refers to**, not only a toast in the
+  corner. The "Category" label in the booking form no longer truncates to "Categ…": the "+ Add New"
+  button beside it shortens to "+ Add" only when its column is too narrow for both.
+- **From the review of this release's own changes:** every dialog now carries a name a screen
+  reader announces; a booking's subtotal always equals the sum of the lines shown under it (it
+  could differ by a cent); Billing Rates, Group Discounts & Tiers and Category Billing save all
+  their fields or none; a new booking refuses a cleared date instead of silently using today; the
+  safety backup before a restore and the daily automatic backup are no longer skipped for a
+  facility whose data is only bookings, milestones, grants or service entries; an undated
+  research output logged late in the day lands on the right local day in the funnel; and on the
+  Timeline, back-to-back and untimed bookings no longer hide one another.
+- The manual: four pages still said "Load Sample Data"; the Backups chapter promised Word tables
+  the export never had; the Reports chapter's "Try it" for the matrix promised a total that did not
+  hold; the Instruments page said a Down instrument booked with no warning.
+
+### Known and deferred
+- The PDF's right-to-left handling is a targeted fix for the names and notes this report draws,
+  not a full text engine, and the embedded font has no Arabic glyphs, so Arabic text still does
+  not display correctly (unchanged from before).
+- The facility-wide spreadsheet's Bookings & Costs sheet still runs one name lookup per row for
+  instruments and staff, so "Export All" on a very large history takes a couple of seconds.
+
 ## [1.10.2] — 2026-09-10
 
 ### Fixed

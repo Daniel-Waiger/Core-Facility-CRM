@@ -16,6 +16,49 @@
     get autoBackupFolderStatus() { return autoBackupFolderStatus; },
     onSaving() { UI.setSavedState('pending'); },
     onSaved() { UI.setSavedState('saved'); },
+    // H3: an autosave rejection used to be swallowed by a console.error only — no toast, no
+    // change to the saved-dot, and nothing ever retried it. Now the dot shows the failure
+    // persistently (it stays until a save actually succeeds) and a toast calls it out once; the
+    // retry itself lives in db.js (dirty stays true, so the next markDirty() tries again).
+    // Red-team D: db.js now retries a failed save on its own (a backoff timer, not just the next
+    // edit), and reports whether this is the FIRST failure of a streak or a repeat of one already
+    // reported — only toast on the first, so a save that keeps failing for a while doesn't spam a
+    // toast every retry; the dot stays in its error state the whole time regardless.
+    onSaveFailed(err, opts) {
+      UI.setSavedState('error');
+      if (!opts || !opts.repeat) {
+        UI.toast('Your last change could not be saved to this browser. It will keep retrying.', 'error');
+      }
+    },
+    // H2: told by DB's multi-tab guard that a second tab has this same database open. A read-only
+    // tab's writes are actually refused (see db.js's assertWritable, called from run()/
+    // clearAllData()) — this just keeps the UI in step with that: the saved-dot label, a
+    // persistent banner (so the state can't be missed the way a toast alone could), and, on
+    // promotion (this tab going from read-only back to writable after reloading the other tab's
+    // last save from disk — see db.js's reloadFromDiskAndPromote), closing any open modal (it may
+    // hold form state built from the now-replaced in-memory database) and re-rendering the current
+    // screen from the fresh copy.
+    onMultiTabState(readOnly, opts) {
+      UI.setSavedState(readOnly ? 'readonly' : 'saved');
+      if (readOnly) {
+        showReadOnlyTabBanner();
+        // `promoteFailed` means this tab was ALREADY read-only and just failed another attempt to
+        // catch up to the leader that closed — db.js already toasted that (once per failure
+        // streak, see its own `repeat` check). "This database is already open in another tab"
+        // would be actively wrong here: no other tab is holding it open, this one just hasn't
+        // finished switching over yet.
+        if (!opts || !opts.promoteFailed) {
+          UI.toast('This database is already open in another tab. This tab is read-only — changes here will not be saved.', 'error');
+        }
+      } else {
+        hideReadOnlyTabBanner();
+        if (opts && opts.promoted) {
+          UI.closeAllModals();
+          UI.toast('The other tab closed. This tab can now save changes.');
+          refresh();
+        }
+      }
+    },
     syncCategoryBillingHints: syncCategoryBillingHints,
   };
 
@@ -64,8 +107,8 @@
     return `
     <div class="field">
       <div class="field-vocab-head">
-        <label>${esc(label)}${required ? ' *' : ''}</label>
-        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add New</button>
+        <label title="${esc(label)}">${esc(label)}${required ? ' *' : ''}</label>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add<span class="vab-more"> New</span></button>
       </div>
       <select class="input vocab-select" id="${id}" data-cat="${category}" data-label="${esc(label)}" data-prev="${esc(selected)}">
         <option value="">${placeholder}</option>
@@ -89,7 +132,7 @@
     <div class="field">
       <div class="field-vocab-head">
         <label>${esc(label)}</label>
-        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add New</button>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add<span class="vab-more"> New</span></button>
       </div>
       <select class="input" id="${id}">
         <option value="">— None —</option>
@@ -212,7 +255,7 @@
             <div class="nav-item" data-nav="projects" title="Project Registry">${ic('folder')}<span class="lbl">Projects</span></div>
             <div class="nav-item" data-nav="people" title="Researchers &amp; Labs">${ic('users')}<span class="lbl">People &amp; Labs</span></div>
             <div class="nav-item" data-nav="instruments" title="Facility Equipment">${ic('cpu')}<span class="lbl">Instruments</span></div>
-            <div class="nav-item" data-nav="calendar" title="Monthly Schedule">${ic('calendar')}<span class="lbl">Calendar</span></div>
+            <div class="nav-item" data-nav="calendar" title="Bookings &amp; Milestones">${ic('calendar')}<span class="lbl">Calendar</span></div>
             <div class="nav-item" data-nav="reports" title="Usage &amp; Billing Reports">${ic('clock')}<span class="lbl">Reports</span></div>
           </nav>
           <div class="nav-spacer"></div>
@@ -227,7 +270,7 @@
         </aside>
         <div class="main">
           <div class="topbar">
-            <span class="title" id="page-title">Dashboard</span>
+            <span class="title" id="page-title" tabindex="-1">Dashboard</span>
             <div class="grow"></div>
             <span class="saved-dot" id="saved-state" data-tooltip="Your changes save automatically to this browser"><span class="dot"></span><span class="txt">Saved</span></span>
           </div>
@@ -292,9 +335,32 @@
     document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('active', n.dataset.nav === name));
     document.getElementById('page-title').innerHTML = TITLES[name] || 'Dashboard';
     renderView();
+    moveFocusToNewScreen();
+  }
+
+  // After a genuine route change (never after a same-screen data refresh — those call
+  // refresh()/renderView() directly and never reach applyRoute), move focus to the new screen's
+  // own heading. Without this, a keyboard or screen-reader user who navigates while focused on a
+  // field with no same-id counterpart on the destination screen (renderView's own focus-restore
+  // above only reattaches focus when that id still exists) is left on document.body — the DOM's
+  // default landing spot once a focused element is removed from the page — with no indication
+  // anything happened. Two cases deliberately skip the move: an open modal (its own focus should
+  // never be yanked away by a background route change) and a focus target renderView DID
+  // successfully restore inside the freshly rendered view (nothing to fix in that case).
+  function moveFocusToNewScreen() {
+    if (UI.topDim()) return;
+    const view = document.getElementById('view');
+    if (document.activeElement && view && view.contains(document.activeElement)) return;
+    const heading = document.getElementById('page-title');
+    if (heading) heading.focus({ preventScroll: true });
   }
 
   function onHashChange() {
+    // A route change makes every open modal stale — a booking/milestone dialog bound to whatever
+    // project the previous screen was on, or an id that only made sense there. Rather than let a
+    // save silently write against the wrong (or a now-null) context, close them: any draft is
+    // abandoned, deliberately, the same way it would be if the user had just closed the tab.
+    UI.closeAllModals();
     const parsed = parseHash(location.hash);
     if (!parsed) { location.replace('#/dashboard'); return; }
     if (parsed.name === 'project' && !DB.row('SELECT id FROM projects WHERE id=?', [parsed.id])) {
@@ -374,11 +440,62 @@
       if (instRetiredToggle) instRetiredToggle.onchange = (e) => Views.setInstrumentFilter({ showRetired: e.target.checked });
     }
 
+    // Week view's hour grid otherwise opens scrolled to 00:00 — sensible for no one, since the
+    // working day starts hours later. Scroll to 07:00, or earlier still if the week's first
+    // booking starts before that, reading the block positions the view already rendered rather
+    // than re-querying the database for the same thing.
+    if (name === 'calendar') {
+      const scrollEl = document.querySelector('.cal-week-scroll');
+      if (scrollEl) {
+        const hourPx = Views.calLayout.HOUR_PX;
+        let earliestTop = Infinity;
+        scrollEl.querySelectorAll('.ev[style*="top:"]').forEach((ev) => {
+          const m = /top:\s*(-?[\d.]+)px/.exec(ev.getAttribute('style') || '');
+          if (m) earliestTop = Math.min(earliestTop, parseFloat(m[1]));
+        });
+        const defaultTop = 7 * hourPx;
+        const target = Math.max(0, Math.min(defaultTop, isFinite(earliestTop) ? earliestTop : defaultTop));
+        scrollEl.scrollTop = target;
+      }
+      // Resource Timeline: a chip's box can be too narrow for its full "emoji + time + name" label
+      // (a short booking is only a few percent of a day column wide) — Views.calEvChipHtml renders
+      // all three label tiers (full / compact-time / icon-only) into every such chip, CSS shows
+      // only the "full" tier by default, and this measures (never estimates) which tier actually
+      // fits the chip's real, unwidened box, falling through compact -> icon-only as needed. Runs
+      // synchronously right after the DOM is inserted, so nothing visibly flashes the overflowing
+      // state first. The chip still expands to show its full label on :hover/:focus-visible (CSS),
+      // so a narrow chip is never permanently illegible, just compact until pointed at.
+      document.querySelectorAll('.cal-tl-daycell .ev').forEach((el) => {
+        el.classList.remove('lbl-compact', 'lbl-icon');
+        if (el.scrollWidth <= el.clientWidth + 0.5) return; // full label already fits
+        el.classList.add('lbl-compact');
+        if (el.scrollWidth <= el.clientWidth + 0.5) return; // compact "time" label fits
+        el.classList.add('lbl-icon');
+      });
+    }
+
     if (name === 'reports') {
+      // Debounced ~250ms: recomputing all nine Reports cards is real work at facility scale (see
+      // js/reports.js's facts-bundle comment), and re-rendering the whole screen on every
+      // keystroke while a date is still being typed is both wasted work and a distraction — the
+      // field the user is typing into gets rebuilt out from under them mid-edit. Waiting for a
+      // short pause after the last keystroke (or a blur, which fires 'change' immediately below)
+      // means a full retype settles once, not once per digit, and nothing flashes while typing.
+      let repRangeTimer = null;
+      const scheduleRangeChange = (patch) => {
+        clearTimeout(repRangeTimer);
+        repRangeTimer = setTimeout(() => Reports.setRange(patch), 250);
+      };
       const fromInput = document.getElementById('rep-from');
-      if (fromInput) fromInput.onchange = (e) => Reports.setRange({ from: e.target.value });
+      if (fromInput) {
+        fromInput.oninput = (e) => scheduleRangeChange({ from: e.target.value });
+        fromInput.onchange = (e) => { clearTimeout(repRangeTimer); Reports.setRange({ from: e.target.value }); };
+      }
       const toInput = document.getElementById('rep-to');
-      if (toInput) toInput.onchange = (e) => Reports.setRange({ to: e.target.value });
+      if (toInput) {
+        toInput.oninput = (e) => scheduleRangeChange({ to: e.target.value });
+        toInput.onchange = (e) => { clearTimeout(repRangeTimer); Reports.setRange({ to: e.target.value }); };
+      }
     }
 
     if (focusRestore) {
@@ -475,7 +592,16 @@
       const handleFresh = () => {
         const proceed = async () => {
           savePref();
-          DB.clearAllData();
+          // Item 4 (second review): clearAllData() now propagates an upload-deletion failure
+          // instead of swallowing it — a facility that hit that failure used to see "All facility
+          // data cleared" while old attachments were still sitting in IndexedDB. Report it instead.
+          try {
+            await DB.clearAllData();
+          } catch (e) {
+            console.error('clearAllData failed', e);
+            UI.toast('Could not fully clear the database: ' + e.message, 'error');
+            return;
+          }
           UI.closeDim(modalDim);
           route('dashboard');
           UI.toast('All facility data cleared.');
@@ -512,8 +638,17 @@
     }, () => { runAfterChoice(); }); // dismissing the welcome modal (outside click) still shows the notice
   }
 
+  // Every persisted data table, not just the three "top-level" ones — a database holding only
+  // bookings, milestones, grants, service entries, research outputs or attached files (e.g. all
+  // projects/people/instruments were themselves deleted, or a very targeted import) is not empty:
+  // it still has history worth a pre-restore safety backup and a real auto-backup, both of which
+  // this function gates. Missing that meant such a database silently skipped both.
   function hasAnyData() {
-    const r = DB.row('SELECT (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) as c');
+    const r = DB.row(`SELECT
+      (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) +
+      (SELECT COUNT(*) FROM meetings) + (SELECT COUNT(*) FROM milestones) + (SELECT COUNT(*) FROM grants) +
+      (SELECT COUNT(*) FROM service_entries) + (SELECT COUNT(*) FROM project_outputs) + (SELECT COUNT(*) FROM files)
+      as c`);
     return !!(r && r.c);
   }
 
@@ -618,7 +753,6 @@
 
     if (kind === 'auto') {
       const wroteSilently = await tryWriteSilentBackup(filename, json);
-      UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
       if (wroteSilently) {
         // The JSON backup landed silently — also drop a companion XLSX export into the same
         // folder. This is purely additive: if it fails for any reason (library not loaded, no
@@ -628,6 +762,9 @@
           const built = Exports && Exports.buildAllXlsxBlob ? Exports.buildAllXlsxBlob() : null;
           if (built) await tryWriteSilentBackup(`core-facility-export-${dateStamp}.xlsx`, built.blob);
         } catch (e) { console.error('silent auto XLSX export failed', e); }
+        // Stamped only once the backup this call promised is actually written — see below for
+        // why the fallback branch stamps at its own equivalent point instead of up here.
+        UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
         UI.toast('Automatic backup saved silently');
         return;
       }
@@ -640,6 +777,14 @@
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+    // Report §4 durability item 8: this used to be stamped BEFORE the silent-write attempt even
+    // resolved, so a failed/aborted silent write (or anything throwing between there and here)
+    // still marked today's automatic backup as done. There is no completion event for a
+    // synthesized <a download> click to await, so "the download was triggered" (right here,
+    // after buildBackup/tryWriteSilentBackup have already succeeded and the anchor has been
+    // clicked) is the closest this code can get to "the backup actually happened" — closer than
+    // stamping it up front before any of that had run.
+    if (kind === 'auto') UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
     UI.toast(kind === 'auto' ? 'Automatic backup downloaded (set a silent backup folder in Settings to skip the download prompt)'
       : kind === 'pre-restore' ? 'Safety copy of current data downloaded before restoring'
       : 'Complete backup exported');
@@ -756,6 +901,24 @@
       </div>`;
     const reloadBtn = document.getElementById('boot-reload');
     if (reloadBtn) reloadBtn.onclick = () => location.reload();
+  }
+
+  // H2: persistent (no dismiss — it isn't safe to let it be forgotten) banner shown for the life
+  // of a tab the multi-tab guard has put in read-only mode. Reuses the temp-session-banner styling
+  // (css/app.css), same reasoning as showDemoBanner below.
+  function showReadOnlyTabBanner() {
+    if (document.getElementById('readonly-tab-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'readonly-tab-banner';
+    bar.className = 'temp-session-banner';
+    bar.innerHTML = `
+      <span class="temp-session-banner-ic">${ic('alert')}</span>
+      <span>This tab is read-only because the database is open in another tab. Changes here will not be saved — close the other tab, or make your changes there instead.</span>`;
+    document.body.prepend(bar);
+  }
+  function hideReadOnlyTabBanner() {
+    const bar = document.getElementById('readonly-tab-banner');
+    if (bar) bar.remove();
   }
 
   function showTemporarySessionBanner() {
@@ -931,7 +1094,7 @@
     // asked BEFORE the call — it is the only way to tell a first open from a return visit, and
     // the tour should only take over the screen on a first open.
     const demoFirstOpen = window.IS_DEMO && !hasAnyData();
-    if (window.IS_DEMO) DB.seedSampleData();
+    if (window.IS_DEMO) await DB.seedSampleData();
 
     renderShell();
     wireGlobal();
@@ -996,14 +1159,44 @@
     document.addEventListener('click', (e) => {
       const goto = e.target.closest('[data-goto]');
       if (goto && !e.target.closest('[data-act]')) {
-        // If inside a modal, close modal when navigating to a project
-        const openModalDim = document.querySelector('.modal-dim');
-        if (openModalDim) UI.closeDim(openModalDim);
+        // Close every open modal (not just the first one in the DOM, which — with a modal opened
+        // from inside another modal, e.g. Today's Agenda -> Edit Booking -> "data-goto" a project
+        // link — would leave the topmost one stuck open floating over the newly-routed screen).
+        UI.closeAllModals();
         route(goto.dataset.goto, goto.dataset.id);
         return;
       }
       const act = e.target.closest('[data-act]');
-      if (act) handleAct(act.dataset.act, act);
+      if (act) {
+        // H2: a save attempted from a read-only tab throws (db.js's assertWritable already
+        // shows the toast) rather than silently doing nothing — catch it here, the one place
+        // every data-act click funnels through, so it never surfaces as an uncaught exception in
+        // the console instead of the toast the user already saw.
+        // G1: any OTHER exception (an FK violation, a stubbed/thrown save, a bug) used to escape
+        // uncaught — the modal stayed open with no explanation, or (worse) closed anyway leaving
+        // the visitor unsure whether the save happened. Every rebuild-join-rows saver now wraps
+        // its writes in DB.transaction(), so by the time an exception reaches here any partial
+        // write has already been rolled back (see DB.transaction's comment) — nothing is flagged
+        // dirty, so autosave can't persist a half-written record. handleActSafely funnels both the
+        // synchronous throw and the async .catch() through the same reporting so a saver written
+        // either way is covered identically; it deliberately leaves the modal open (no closeDim
+        // call here) so the visitor's input isn't lost and can be retried once whatever caused the
+        // error is fixed.
+        try {
+          const result = handleAct(act.dataset.act, act);
+          if (result && typeof result.catch === 'function') {
+            result.catch((err) => { handleActError(err); });
+          }
+        } catch (err) {
+          handleActError(err);
+        }
+      }
+    });
+
+    // Clears the "this field is the one the toast meant" marker as soon as the visitor starts
+    // fixing it, rather than leaving a red border on a field they've already corrected.
+    document.addEventListener('input', (e) => {
+      if (e.target.classList && e.target.classList.contains('is-invalid')) e.target.classList.remove('is-invalid');
     });
 
     // Editable vocabulary dropdowns: picking "Other" is a trigger, not a real value — open
@@ -1021,6 +1214,19 @@
         sel.dataset.prev = sel.value;
       }
     });
+  }
+
+  // Single place wireGlobal's click handler routes every data-act exception through, sync or
+  // async. err.dbReadOnly is already toasted by DB.js's assertWritable — surfacing it again here
+  // would double the message, so it's swallowed silently exactly as before. Everything else is a
+  // genuine failure: log it for diagnosis and tell the visitor plainly that nothing was saved,
+  // in sentence case per CLAUDE.md (a toast is prose, not a control). The modal is left open on
+  // purpose — closing it would look like the save succeeded.
+  function handleActError(err) {
+    if (err && err.dbReadOnly) return;
+    console.error('Action failed:', err);
+    const message = (err && err.message) ? err.message : String(err);
+    UI.toast('Something went wrong and nothing was saved: ' + message, 'error');
   }
 
   function handleAct(act, el) {
@@ -1043,9 +1249,18 @@
         // Surfaced from the demo banner (showDemoBanner), not from Settings — this data-act
         // only ever fires inside a demo tab, where DB.seedSampleData({ force: true }) is
         // allowed to actually re-seed over existing sandbox data.
-        UI.confirmModal('Reset Sandbox?', 'This restores the demo sandbox to its original sample data. Anything you changed here will be lost. This does not affect your real facility records.', { danger: true, confirmText: 'Reset Sandbox' }).then((yes) => {
+        UI.confirmModal('Reset Sandbox?', 'This restores the demo sandbox to its original sample data. Anything you changed here will be lost. This does not affect your real facility records.', { danger: true, confirmText: 'Reset Sandbox' }).then(async (yes) => {
           if (yes) {
-            DB.seedSampleData({ force: true });
+            // Item 4 (second review): seedSampleData() calls clearAllData(), which now propagates
+            // an upload-deletion failure instead of swallowing it — report that honestly rather
+            // than claiming the sandbox was reset.
+            try {
+              await DB.seedSampleData({ force: true });
+            } catch (e) {
+              console.error('seedSampleData failed', e);
+              UI.toast('Could not reset the demo sandbox: ' + e.message, 'error');
+              return;
+            }
             refresh();
             UI.toast('Demo sandbox reset to its original sample data.');
           }
@@ -1053,9 +1268,17 @@
         return;
       }
       case 'clear-data': {
-        UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and bookings? This cannot be undone.', { danger: true, confirmText: 'Delete Everything' }).then((yes) => {
+        UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and bookings? This cannot be undone.', { danger: true, confirmText: 'Delete Everything' }).then(async (yes) => {
           if (yes) {
-            DB.clearAllData();
+            // Item 4 (second review): clearAllData() now propagates an upload-deletion failure
+            // instead of swallowing it — report that honestly rather than claiming success.
+            try {
+              await DB.clearAllData();
+            } catch (e) {
+              console.error('clearAllData failed', e);
+              UI.toast('Could not fully clear the database: ' + e.message, 'error');
+              return;
+            }
             refresh();
             UI.toast('All facility data cleared.');
           }
@@ -1255,7 +1478,7 @@
           <label>Principal Investigator (PI)</label>
           <select class="input" id="np-pi">
             <option value="">-- Select Existing Person or Leave Blank --</option>
-            ${peopleList.map((pe) => `<option value="${pe.id}">${esc(pe.name)} (${pe.type}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
+            ${peopleList.map((pe) => `<option value="${pe.id}">${esc(pe.name)} (${esc(pe.type)}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
           </select>
         </div>
 
@@ -1304,28 +1527,19 @@
   }
 
   function npSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const title = m.querySelector('#np-title').value.trim();
-    if (!title) { UI.toast('Project title is required', 'error'); return; }
+    if (!title) { UI.toast('Project title is required', 'error'); m.querySelector('#np-title').classList.add('is-invalid'); return; }
 
     // Check if new person is specified inline
     let piId = m.querySelector('#np-pi').value ? Number(m.querySelector('#np-pi').value) : null;
     const pFirst = m.querySelector('#np-p-first').value.trim();
     const pLast = m.querySelector('#np-p-last').value.trim();
 
-    if (pFirst || pLast) {
-      const fullName = `${pFirst} ${pLast}`.trim();
-      const pType = m.querySelector('#np-p-type').value;
-      const pOrg = m.querySelector('#np-p-org').value.trim();
-      const pEmail = m.querySelector('#np-p-email').value.trim();
-
-      DB.run('INSERT INTO people (name, type, organization, email) VALUES (?,?,?,?)', [fullName, pType, pOrg, pEmail]);
-      const newPerson = DB.row('SELECT last_insert_rowid() as id');
-      if (newPerson) {
-        piId = newPerson.id;
-        UI.toast(`Registered ${fullName} (${pType})`);
-      }
-    }
+    const fullName = `${pFirst} ${pLast}`.trim();
+    const pType = m.querySelector('#np-p-type').value;
+    const pOrg = m.querySelector('#np-p-org').value.trim();
+    const pEmail = m.querySelector('#np-p-email').value.trim();
 
     const code = generateProjectCode();
     const status = m.querySelector('#np-status').value;
@@ -1341,21 +1555,38 @@
     const tags = m.querySelector('#np-tags').value.trim();
     const notes = m.querySelector('#np-notes').value.trim();
 
+    // G1: the inline "register a new person" insert, the project insert, and the new PI's
+    // project_people row are one save — if the project insert fails (e.g. a duplicate code), the
+    // person just registered above must not stick around as an orphan with no project attached to
+    // it. One transaction makes that atomic: any throw below rolls back every INSERT that ran so
+    // far, including the person, and leaves the database exactly as it was before Save was clicked.
+    let inserted, registeredPerson = false;
     try {
-      DB.run(`
-        INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes]
-      );
+      DB.transaction(() => {
+        if (pFirst || pLast) {
+          DB.run('INSERT INTO people (name, type, organization, email) VALUES (?,?,?,?)', [fullName, pType, pOrg, pEmail]);
+          const newPerson = DB.row('SELECT last_insert_rowid() as id');
+          if (newPerson) {
+            piId = newPerson.id;
+            registeredPerson = true;
+          }
+        }
+        DB.run(`
+          INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes]
+        );
+        inserted = DB.row('SELECT id FROM projects WHERE code=?', [code]);
+        if (piId && inserted) {
+          DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [inserted.id, piId, 'Principal Investigator']);
+        }
+      });
     } catch (e) {
       UI.toast('Could not create project: ' + (e.message || 'unknown error'), 'error');
       return;
     }
 
-    const inserted = DB.row('SELECT id FROM projects WHERE code=?', [code]);
-    if (piId && inserted) {
-      DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [inserted.id, piId, 'Principal Investigator']);
-    }
+    if (registeredPerson) UI.toast(`Registered ${fullName} (${pType})`);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Project created successfully');
     route('project', inserted ? inserted.id : null);
@@ -1389,7 +1620,7 @@
             </div>
             <select class="input" id="ep-pi">
               <option value="">-- Select or None --</option>
-              ${pis.map((pe) => `<option value="${pe.id}" ${pe.id === activePiId ? 'selected' : ''}>${esc(UI.retiredName(pe.name, pe.is_retired))} (${pe.type}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
+              ${pis.map((pe) => `<option value="${pe.id}" ${pe.id === activePiId ? 'selected' : ''}>${esc(UI.retiredName(pe.name, pe.is_retired))} (${esc(pe.type)}${pe.organization ? ' • ' + esc(pe.organization) : ''})</option>`).join('')}
             </select>
           </div>
           ${vocabField({ category: 'MODALITY', id: 'ep-modality', label: 'Modality / Technique', selected: p.modality, placeholder: '-- Select Modality --' })}
@@ -1427,10 +1658,11 @@
   }
 
   function epSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const title = m.querySelector('#ep-title').value.trim();
-    if (!title) { UI.toast('Title is required', 'error'); return; }
+    if (!title) { UI.toast('Title is required', 'error'); m.querySelector('#ep-title').classList.add('is-invalid'); return; }
 
+    const priorPiId = (DB.row('SELECT pi_id FROM projects WHERE id=?', [id]) || {}).pi_id;
     const code = m.querySelector('#ep-code').value.trim() || generateProjectCode();
     const status = m.querySelector('#ep-status').value;
     const priority = m.querySelector('#ep-priority').value;
@@ -1446,20 +1678,39 @@
     const tags = m.querySelector('#ep-tags').value.trim();
     const notes = m.querySelector('#ep-notes').value.trim();
 
+    // G1: the project row update and the two project_people rewrites below (clearing the old PI's
+    // role, upserting the new one) are one save — wrapped so a failure partway (say the UPDATE
+    // succeeds but a later step throws) can never leave the project record and its PI role rows
+    // disagreeing about who the PI is.
     try {
-      DB.run(`
-        UPDATE projects
-        SET title=?, code=?, status=?, priority=?, pi_id=?, grant_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
-        WHERE id=?`,
-        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes, id]
-      );
+      DB.transaction(() => {
+        DB.run(`
+          UPDATE projects
+          SET title=?, code=?, status=?, priority=?, pi_id=?, grant_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
+          WHERE id=?`,
+          [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes, id]
+        );
+
+        // The PI is tracked in two places: projects.pi_id (just written above) and a
+        // project_people row carrying the 'Principal Investigator' role. If the PI changed, the OLD
+        // PI's role row must be cleared — but only the role, not the person: if they hold some other
+        // role on this project too (added via "Add Team Member"), that membership stays. If the new
+        // PI was already a team member under a different role, an upsert (not INSERT OR IGNORE) is
+        // required or their role would silently stay whatever it was instead of becoming PI.
+        if (priorPiId && priorPiId !== piId) {
+          const oldRow = DB.row('SELECT role FROM project_people WHERE project_id=? AND person_id=?', [id, priorPiId]);
+          if (oldRow && oldRow.role === 'Principal Investigator') {
+            DB.run('DELETE FROM project_people WHERE project_id=? AND person_id=?', [id, priorPiId]);
+          }
+        }
+        if (piId) {
+          DB.run(`INSERT INTO project_people (project_id, person_id, role) VALUES (?,?,'Principal Investigator')
+                  ON CONFLICT(project_id, person_id) DO UPDATE SET role='Principal Investigator'`, [id, piId]);
+        }
+      });
     } catch (e) {
       UI.toast('Could not save project: ' + (e.message || 'unknown error'), 'error');
       return;
-    }
-
-    if (piId) {
-      DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [id, piId, 'Principal Investigator']);
     }
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Project updated');
@@ -1500,9 +1751,32 @@
       // project_outputs carries a real ON DELETE CASCADE, but this branch only runs when
       // countProjectRefs already counted zero of them, so the explicit delete here is a no-op in
       // practice and purely the same belt-and-suspenders convention as the line above.
-      DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
-      DB.run('DELETE FROM project_outputs WHERE project_id=?', [pid]);
-      DB.run('DELETE FROM projects WHERE id=?', [pid]);
+      // Same for files/uploads (M9): refs.total===0 already implies refs.files===0, so this is a
+      // no-op today too, but reads the same as every other belt-and-suspenders delete here — and
+      // it's what actually cleans up if a future path ever lets refs.total be 0 with files present.
+      const uploadPaths = DB.rows("SELECT path FROM files WHERE project_id=? AND kind='upload'", [pid]).map((r) => r.path);
+      // G1: the explicit child-row cleanup and the project row itself are one delete — see the
+      // belt-and-suspenders comments above for why these DELETEs exist at all even with cascade
+      // verified working.
+      DB.transaction(() => {
+        DB.run('DELETE FROM files WHERE project_id=?', [pid]);
+        DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
+        DB.run('DELETE FROM project_outputs WHERE project_id=?', [pid]);
+        DB.run('DELETE FROM projects WHERE id=?', [pid]);
+      });
+      // Awaited AFTER the transaction commits (blob cleanup isn't part of the SQL transaction and
+      // must never run inside DB.transaction()) — and awaited, not fire-and-forget, so a failure
+      // here is reported rather than silently assumed away by the "deleted" toast below.
+      if (uploadPaths.length) {
+        try {
+          await DB.deleteUploads(uploadPaths);
+        } catch (e) {
+          console.error('deleteUploads failed', e);
+          UI.toast('Project deleted, but some of its attached files could not be fully cleared from local storage.', 'error');
+          route('projects');
+          return;
+        }
+      }
       UI.toast('Project deleted');
       route('projects');
       return;
@@ -1605,15 +1879,15 @@
         <div class="field"><label>Milestone Title *</label><input class="input" id="ms-name" placeholder="e.g. Sample preparation &amp; fluorophore labeling" /></div>
         <div class="grid cols-2">
           <div class="field"><label>Due Date</label><input type="date" class="input" id="ms-due" value="${UI.today()}" /></div>
-          <div class="field"><label>Status</label><select class="input" id="ms-status">${C.MS_STATUS.map((s) => `<option value="${s}">${s}</option>`).join('')}</select></div>
+          <div class="field"><label>Status</label><select class="input" id="ms-status">${C.MS_STATUS.map((s) => `<option value="${s}">${esc(UI.msStatusLabel(s))}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label>Notes / Deliverables</label><input class="input" id="ms-note" placeholder="Specific criteria for completion..." /></div>
-        <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip" data-owner="${r.id}">${esc(r.name)} (${r.type}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
+        <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip" data-owner="${r.id}">${esc(r.name)} (${esc(r.type)}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
         <div class="field"><label>Assign Core Instruments</label><div class="chips">${inst.map((r) => `<span class="chip" data-inst="${r.id}">${esc(r.name)}</span>`).join('')}</div></div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="ms-save">Add Milestone</button>
+        <button class="btn btn-primary" data-act="ms-save" data-project-id="${ctx.project}">Add Milestone</button>
       </div>`, (m) => {
       m.querySelectorAll('[data-owner]').forEach((c) => (c.onclick = () => c.classList.toggle('on')));
       m.querySelectorAll('[data-inst]').forEach((c) => (c.onclick = () => c.classList.toggle('on')));
@@ -1621,23 +1895,36 @@
   }
 
   function msSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#ms-name').value.trim();
-    if (!name) { UI.toast('Milestone title required', 'error'); return; }
+    if (!name) { UI.toast('Milestone title required', 'error'); m.querySelector('#ms-name').classList.add('is-invalid'); return; }
 
-    const pid = ctx.project;
+    // Bound to whichever project was current when this modal was OPENED, not whatever ctx.project
+    // reads now — the route can only have changed away since then if the modal survived navigation,
+    // and it can't (hashchange closes every open modal; see onHashChange).
+    const pid = Number(m.querySelector('[data-act="ms-save"]').dataset.projectId) || ctx.project;
     const due = m.querySelector('#ms-due').value || null;
     const status = m.querySelector('#ms-status').value;
     const note = m.querySelector('#ms-note').value.trim();
 
-    DB.run('INSERT INTO milestones (project_id, name, due_date, status, note) VALUES (?,?,?,?,?)', [pid, name, due, status, note]);
-    const mid = DB.q1('SELECT last_insert_rowid()')[0];
+    // G1: the milestone insert and its owner/instrument join rows are one save — if an owner or
+    // instrument insert throws partway (e.g. a stale chip referencing a since-deleted id), the
+    // milestone row itself must not survive half-assigned.
+    DB.transaction(() => {
+      DB.run('INSERT INTO milestones (project_id, name, due_date, status, note) VALUES (?,?,?,?,?)', [pid, name, due, status, note]);
+      // DB.q1 reads back via stmt.getArray(), a method the bundled sql.js build's Statement
+      // prototype never exposes (only .get/.getAsObject/...) — it throws the moment it's called,
+      // which meant "Add Milestone" (like "Add Instrument" below) silently failed after the INSERT
+      // and before the owner/instrument join rows or the modal's own close ever ran. DB.row(...).id
+      // is the same last_insert_rowid() lookup every OTHER saver in this file already uses.
+      const mid = DB.row('SELECT last_insert_rowid() as id').id;
 
-    const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
-    const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
+      const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
+      const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
 
-    owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [mid, oid]));
-    insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [mid, iid]));
+      owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [mid, oid]));
+      insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [mid, iid]));
+    });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Milestone added');
@@ -1664,10 +1951,10 @@
         <div class="field"><label>Milestone Title *</label><input class="input" id="mse-name" value="${esc(m.name)}" /></div>
         <div class="grid cols-2">
           <div class="field"><label>Due Date</label><input type="date" class="input" id="mse-due" value="${m.due_date || ''}" /></div>
-          <div class="field"><label>Status</label><select class="input" id="mse-status">${C.MS_STATUS.map((s) => `<option value="${s}" ${s === m.status ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+          <div class="field"><label>Status</label><select class="input" id="mse-status">${C.MS_STATUS.map((s) => `<option value="${s}" ${s === m.status ? 'selected' : ''}>${esc(UI.msStatusLabel(s))}</option>`).join('')}</select></div>
         </div>
         <div class="field"><label>Notes / Deliverables</label><input class="input" id="mse-note" value="${esc(m.note || '')}" /></div>
-        <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip ${currentOwners.includes(r.id) ? 'on' : ''}" data-owner="${r.id}">${esc(UI.retiredName(r.name, r.is_retired))} (${r.type}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
+        <div class="field"><label>Assign Responsible People</label><div class="chips">${ppl.map((r) => `<span class="chip ${currentOwners.includes(r.id) ? 'on' : ''}" data-owner="${r.id}">${esc(UI.retiredName(r.name, r.is_retired))} (${esc(r.type)}${r.organization ? ' • ' + esc(r.organization) : ''})</span>`).join('')}</div></div>
         <div class="field"><label>Assign Core Instruments</label><div class="chips">${inst.map((r) => `<span class="chip ${currentInsts.includes(r.id) ? 'on' : ''}" data-inst="${r.id}">${esc(UI.retiredName(r.name, r.is_retired))}</span>`).join('')}</div></div>
       </div></div>
       <div class="foot">
@@ -1680,24 +1967,29 @@
   }
 
   function msEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#mse-name').value.trim();
-    if (!name) { UI.toast('Milestone title required', 'error'); return; }
+    if (!name) { UI.toast('Milestone title required', 'error'); m.querySelector('#mse-name').classList.add('is-invalid'); return; }
 
     const due = m.querySelector('#mse-due').value || null;
     const status = m.querySelector('#mse-status').value;
     const note = m.querySelector('#mse-note').value.trim();
 
-    DB.run("UPDATE milestones SET name=?, due_date=?, status=?, note=?, updated_at=datetime('now') WHERE id=?", [name, due, status, note, id]);
+    // G1: the update and the owner/instrument rebuild are one save — without this, a throw after
+    // the DELETEs but before every re-INSERT (e.g. a bad id from a stale chip) would leave the
+    // milestone with NO owners/instruments rather than either its old set or its new one.
+    DB.transaction(() => {
+      DB.run("UPDATE milestones SET name=?, due_date=?, status=?, note=?, updated_at=datetime('now') WHERE id=?", [name, due, status, note, id]);
 
-    DB.run('DELETE FROM milestone_owners WHERE milestone_id=?', [id]);
-    DB.run('DELETE FROM milestone_instruments WHERE milestone_id=?', [id]);
+      DB.run('DELETE FROM milestone_owners WHERE milestone_id=?', [id]);
+      DB.run('DELETE FROM milestone_instruments WHERE milestone_id=?', [id]);
 
-    const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
-    const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
+      const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
+      const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
 
-    owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [id, oid]));
-    insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [id, iid]));
+      owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [id, oid]));
+      insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [id, iid]));
+    });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Milestone updated');
@@ -1717,7 +2009,7 @@
         <div class="stack" style="gap:6px">
           ${C.MS_STATUS.map((s) => `
             <button type="button" class="btn ${s === m.status ? 'btn-primary' : 'btn-secondary'} ms-status-choice" data-status="${esc(s)}" style="justify-content:flex-start;gap:8px">
-              ${s === m.status ? ic('check') : ''}<span>${esc(s)}</span>
+              ${s === m.status ? ic('check') : ''}<span>${esc(UI.msStatusLabel(s))}</span>
             </button>`).join('')}
         </div>
       </div></div>
@@ -1782,10 +2074,9 @@
   function pSave() {
     // addPerson() can be opened stacked on another modal (e.g. the booking form) — operate on
     // the TOPMOST modal, not the first one in the DOM.
-    const dims = document.querySelectorAll('.modal-dim');
-    const m = dims[dims.length - 1].querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#p-name').value.trim();
-    if (!name) { UI.toast('Name required', 'error'); return; }
+    if (!name) { UI.toast('Name required', 'error'); m.querySelector('#p-name').classList.add('is-invalid'); return; }
     const type = m.querySelector('#p-type').value;
     const org = m.querySelector('#p-org').value.trim();
     const dept = m.querySelector('#p-dept').value.trim();
@@ -1793,6 +2084,7 @@
     const note = m.querySelector('#p-note').value.trim();
     const isStaff = m.querySelector('#p-is-staff').checked ? 1 : 0;
     const rate = Number(m.querySelector('#p-rate').value) || 0;
+    if (rejectNegative(rate, 'Rate')) return;
 
     DB.run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', [name, type, org, dept, email, note, isStaff, rate]);
     const newPerson = DB.row('SELECT last_insert_rowid() as id');
@@ -1840,18 +2132,36 @@
   }
 
   function pEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#pe-name').value.trim();
-    if (!name) { UI.toast('Name required', 'error'); return; }
+    if (!name) { UI.toast('Name required', 'error'); m.querySelector('#pe-name').classList.add('is-invalid'); return; }
     const type = m.querySelector('#pe-type').value;
     const org = m.querySelector('#pe-org').value.trim();
     const dept = m.querySelector('#pe-dept').value.trim();
     const email = m.querySelector('#pe-email').value.trim();
     const note = m.querySelector('#pe-note').value.trim();
     const isStaff = m.querySelector('#pe-is-staff').checked ? 1 : 0;
-    const rate = Number(m.querySelector('#pe-rate').value) || 0;
+    const rateVal = m.querySelector('#pe-rate').value;
+    const rate = Number(rateVal) || 0;
+    if (rate < 0) { UI.toast('Rate cannot be negative', 'error'); return; }
 
-    DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
+    // The denormalized meetings.attendees display string (CLAUDE.md: "keep both in sync on every
+    // save") is only ever built from a name, so only a rename can leave it stale — read the name
+    // as stored BEFORE this write to tell a real rename apart from an email/note/rate-only edit.
+    const before = DB.row('SELECT name FROM people WHERE id=?', [id]);
+    // G1: the name/field update and the attendees-string refresh across every meeting this person
+    // is on are one save — otherwise a throw partway through the refresh loop would leave some
+    // meetings.attendees strings updated to the new name and others still showing the old one.
+    DB.transaction(() => {
+      DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
+      // people.name may have just changed — meetings.attendees is a denormalized copy of it, so
+      // every meeting this person is on must be recomputed from meeting_people or it goes stale.
+      // Gated on an actual rename (not just called unconditionally): a person with a long booking
+      // history costs one query per meeting they've ever attended, which is real work for zero
+      // benefit on an email/note/rate-only edit, where the attendees string could not have gone
+      // stale in the first place.
+      if (before && before.name !== name) DB.refreshAttendeesForPerson(id);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Person updated');
     refresh();
@@ -1882,14 +2192,18 @@
       // a person with zero "real" refs can still hold either. Cascade would catch this too, but
       // the explicit delete is the belt-and-suspenders convention every other delete path here
       // follows.
-      DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
-      DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
-      // service_entries.person_id is a soft link (no REFERENCES) like instrument_staff/grant_users
-      // above — a person with zero "real" refs (countPersonRefs now counts entries too, so this
-      // branch is only reached when there genuinely are none) can't hold one, but the explicit
-      // clear is the same belt-and-suspenders convention every delete path here follows.
-      DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
-      DB.run('DELETE FROM people WHERE id=?', [id]);
+      // G1: wrapped so a throw partway through can't leave the person row gone with dangling
+      // instrument_staff/grant_users rows still pointing at the now-deleted id, or vice versa.
+      DB.transaction(() => {
+        DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
+        DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
+        // service_entries.person_id is a soft link (no REFERENCES) like instrument_staff/grant_users
+        // above — a person with zero "real" refs (countPersonRefs now counts entries too, so this
+        // branch is only reached when there genuinely are none) can't hold one, but the explicit
+        // clear is the same belt-and-suspenders convention every delete path here follows.
+        DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
+        DB.run('DELETE FROM people WHERE id=?', [id]);
+      });
       UI.toast('Person deleted');
       refresh();
       return;
@@ -1958,16 +2272,28 @@
   }
 
   function iSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#i-name').value.trim();
-    if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
-       Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time',
-       Number(m.querySelector('#i-min-duration').value) || 0, Number(m.querySelector('#i-max-duration').value) || 0,
-       Number(m.querySelector('#i-min-gap').value) || 0, Number(m.querySelector('#i-min-notice').value) || 0]);
-    const iid = DB.q1('SELECT last_insert_rowid()')[0];
-    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
+    if (!name) { UI.toast('Instrument name required', 'error'); m.querySelector('#i-name').classList.add('is-invalid'); return; }
+    const cost = Number(m.querySelector('#i-cost').value) || 0;
+    const minDuration = Number(m.querySelector('#i-min-duration').value) || 0;
+    const maxDuration = Number(m.querySelector('#i-max-duration').value) || 0;
+    const minGap = Number(m.querySelector('#i-min-gap').value) || 0;
+    const minNotice = Number(m.querySelector('#i-min-notice').value) || 0;
+    if (rejectNegative(cost, 'Cost') || rejectNegative(minDuration, 'Min Duration')
+      || rejectNegative(maxDuration, 'Max Duration') || rejectNegative(minGap, 'Min Gap')
+      || rejectNegative(minNotice, 'Min Notice')) return;
+    // G1: the instrument insert and its supervisor join rows are one save.
+    DB.transaction(() => {
+      DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
+         cost, m.querySelector('#i-cost-unit').value || 'time',
+         minDuration, maxDuration, minGap, minNotice]);
+      // See the matching comment in msSave — DB.q1 relies on a Statement method this build of
+      // sql.js doesn't have and throws; DB.row(...).id is the same lookup every other saver uses.
+      const iid = DB.row('SELECT last_insert_rowid() as id').id;
+      readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument added');
     refresh();
@@ -2040,25 +2366,43 @@
   }
 
   function iEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#ie-name').value.trim();
-    if (!name) { UI.toast('Instrument name required', 'error'); return; }
-    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
-      [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
-       Number(m.querySelector('#ie-cost').value) || 0, m.querySelector('#ie-cost-unit').value || 'time',
-       Number(m.querySelector('#ie-min-duration').value) || 0, Number(m.querySelector('#ie-max-duration').value) || 0,
-       Number(m.querySelector('#ie-min-gap').value) || 0, Number(m.querySelector('#ie-min-notice').value) || 0, id]);
-    DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
-    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
+    if (!name) { UI.toast('Instrument name required', 'error'); m.querySelector('#ie-name').classList.add('is-invalid'); return; }
+    const cost = Number(m.querySelector('#ie-cost').value) || 0;
+    const minDuration = Number(m.querySelector('#ie-min-duration').value) || 0;
+    const maxDuration = Number(m.querySelector('#ie-max-duration').value) || 0;
+    const minGap = Number(m.querySelector('#ie-min-gap').value) || 0;
+    const minNotice = Number(m.querySelector('#ie-min-notice').value) || 0;
+    if (rejectNegative(cost, 'Cost') || rejectNegative(minDuration, 'Min Duration')
+      || rejectNegative(maxDuration, 'Max Duration') || rejectNegative(minGap, 'Min Gap')
+      || rejectNegative(minNotice, 'Min Notice')) return;
     // Per-tier rate overrides — admin-gated, so these inputs simply don't exist in the DOM when
     // admin mode is off, and this loop is then a no-op that leaves any existing overrides alone
     // (unlike the supervisor picker above, this is NOT rebuilt-from-form on every save: a form
     // that never shows the override rows to a non-admin editor must not be read as "no overrides").
-    m.querySelectorAll('.tier-rate-input').forEach((inp) => {
-      const tierId = Number(inp.dataset.tierId);
+    // Validated BEFORE any write below so a bad Tier Rate is refused with nothing written at all,
+    // same as the rejectNegative calls above it.
+    const tierInputs = Array.from(m.querySelectorAll('.tier-rate-input'));
+    for (const inp of tierInputs) {
       const v = inp.value.trim();
-      if (v === '') DB.deleteInstrumentTierRate(id, tierId);
-      else DB.setInstrumentTierRate(id, tierId, Number(v) || 0);
+      if (v === '') continue;
+      if (rejectNegative(Number(v) || 0, 'Tier Rate')) return;
+    }
+    // G1: the instrument update, its supervisor rebuild, and the tier-rate overrides are one save.
+    DB.transaction(() => {
+      DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
+        [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
+         cost, m.querySelector('#ie-cost-unit').value || 'time',
+         minDuration, maxDuration, minGap, minNotice, id]);
+      DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+      readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
+      tierInputs.forEach((inp) => {
+        const tierId = Number(inp.dataset.tierId);
+        const v = inp.value.trim();
+        if (v === '') DB.deleteInstrumentTierRate(id, tierId);
+        else DB.setInstrumentTierRate(id, tierId, Number(v) || 0);
+      });
     });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
@@ -2084,13 +2428,17 @@
       // db.js), so an instrument with zero "real" refs can still have either. Cascade would catch
       // this too, but the explicit delete is the belt-and-suspenders convention every other delete
       // path here follows.
-      DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
-      DB.run('DELETE FROM instrument_tier_rates WHERE instrument_id=?', [id]);
-      // service_entries.instrument_id is a soft link (no REFERENCES), same reasoning as above —
-      // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
-      // but the explicit clear is the same belt-and-suspenders convention as every other field here.
-      DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
-      DB.run('DELETE FROM instruments WHERE id=?', [id]);
+      // G1: wrapped so a throw partway through can't leave the instrument row gone with its
+      // supervisor/tier-rate rows (or the reverse) still dangling.
+      DB.transaction(() => {
+        DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+        DB.run('DELETE FROM instrument_tier_rates WHERE instrument_id=?', [id]);
+        // service_entries.instrument_id is a soft link (no REFERENCES), same reasoning as above —
+        // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
+        // but the explicit clear is the same belt-and-suspenders convention as every other field here.
+        DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
+        DB.run('DELETE FROM instruments WHERE id=?', [id]);
+      });
       UI.toast('Instrument deleted');
       refresh();
       return;
@@ -2138,24 +2486,26 @@
             </button>
           </div>
           <select class="input" id="app-person-id">
-            ${available.length ? available.map((p) => `<option value="${p.id}">${esc(p.name)} (${p.type}${p.organization ? ' • ' + esc(p.organization) : ''})</option>`).join('') : '<option value="">-- No available unregistered people --</option>'}
+            ${available.length ? available.map((p) => `<option value="${p.id}">${esc(p.name)} (${esc(p.type)}${p.organization ? ' • ' + esc(p.organization) : ''})</option>`).join('') : '<option value="">-- No available unregistered people --</option>'}
           </select>
         </div>
         ${vocabField({ category: 'ROLE', id: 'app-person-role', label: 'Role on Project', placeholder: '-- Select Role --' })}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="app-person-save" ${!available.length ? 'disabled' : ''}>Add Member</button>
+        <button class="btn btn-primary" data-act="app-person-save" data-project-id="${ctx.project}" ${!available.length ? 'disabled' : ''}>Add Member</button>
       </div>`);
   }
 
   function appPersonSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const personId = Number(m.querySelector('#app-person-id').value);
     if (!personId) { UI.toast('Please select a person', 'error'); return; }
     const role = m.querySelector('#app-person-role').value.trim();
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const projectId = Number(m.querySelector('[data-act="app-person-save"]').dataset.projectId) || ctx.project;
 
-    DB.run('INSERT OR REPLACE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [ctx.project, personId, role]);
+    DB.run('INSERT OR REPLACE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [projectId, personId, role]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Team member added');
     refresh();
@@ -2182,20 +2532,22 @@
         <div class="field">
           <label>Select Instrument *</label>
           <select class="input" id="app-inst-id">
-            ${available.map((i) => `<option value="${i.id}">${esc(i.name)} (${esc(i.kind || 'Instrument')} - ${i.status})</option>`).join('')}
+            ${available.map((i) => `<option value="${i.id}">${esc(i.name)} (${esc(i.kind || 'Instrument')} - ${esc(i.status)})</option>`).join('')}
           </select>
         </div>
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="app-inst-save">Assign Instrument</button>
+        <button class="btn btn-primary" data-act="app-inst-save" data-project-id="${ctx.project}">Assign Instrument</button>
       </div>`);
   }
 
   function appInstSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const instId = Number(m.querySelector('#app-inst-id').value);
-    DB.run('INSERT OR IGNORE INTO project_instruments (project_id, instrument_id) VALUES (?,?)', [ctx.project, instId]);
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const projectId = Number(m.querySelector('[data-act="app-inst-save"]').dataset.projectId) || ctx.project;
+    DB.run('INSERT OR IGNORE INTO project_instruments (project_id, instrument_id) VALUES (?,?)', [projectId, instId]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument assigned');
     refresh();
@@ -2304,6 +2656,22 @@
   // changes displayed output from e.g. $1250.00 to $1,250.00 (thousands separators) — intended.
   function fmtMoney(n) {
     return UI.fmtMoney(n);
+  }
+
+  // Every rate/cost/quantity/duration form field carries a `min="0"` HTML hint, but nothing
+  // actually enforced it — `Number(x) || 0` lets a typed "-5" straight through to every saver
+  // (CLAUDE.md/review M7). Reject with a toast naming the field instead of silently clamping, so
+  // whoever typed it sees why nothing saved rather than watching their number change on its own.
+  // computeBookingBOM clamps defensively too (belt-and-suspenders for any input that reaches it
+  // some other way), but a form should never rely on that — it should refuse to save at all.
+  function rejectNegative(value, label) {
+    if (Number(value) < 0) { UI.toast(`${label} cannot be negative`, 'error'); return true; }
+    return false;
+  }
+  function rejectOutOfPercentRange(value, label) {
+    const n = Number(value);
+    if (n < 0 || n > 100) { UI.toast(`${label} must be between 0 and 100`, 'error'); return true; }
+    return false;
   }
 
 
@@ -2506,7 +2874,7 @@
      modal (which itself has a "+ Add New" lab picker) and drops the result straight into the
      People picker as a selected badge, so several new people can be added in a row. */
   function bookingAddPerson() {
-    const bookingModal = document.querySelector('.modal-dim:last-of-type .modal') || document.querySelector('.modal');
+    const bookingModal = UI.topModal();
     addPerson((newPersonId) => {
       if (newPersonId == null) return;
       const p = DB.row('SELECT id, name, type, organization, department FROM people WHERE id=?', [newPersonId]);
@@ -2878,6 +3246,29 @@
       : '';
   }
 
+  // Instrument operational-status advisory (README's "Maintenance/Down" status, previously read
+  // nowhere — findBookingConflicts never consulted it, so a Down instrument was bookable with no
+  // warning at all). Deliberately advisory, not a hard block, same class as categoryStaffAdvisory
+  // above: a facility may still need to book time on an instrument mid-repair (a vendor demo, a
+  // supervised test run), so this never joins findBookingConflicts' blocking array — but unlike
+  // that hint, the save path below turns it into an active confirm rather than silence, since
+  // booking a Down instrument by accident is a bigger deal than forgetting a staff assignee. Both
+  // the live feedback (renderBookingConflicts) and every save gate (bookingSave/bookingEditSave)
+  // call this SAME function so neither can drift from the other (roadmap: "every advisory must
+  // mirror its save gate").
+  function instrumentStatusAdvisory(instIds) {
+    if (!instIds || !instIds.length) return [];
+    return DB.rows(
+      `SELECT name, status FROM instruments WHERE id IN (${instIds.map(() => '?').join(',')}) AND status IN ('Maintenance','Down')`,
+      instIds
+    // Red-team b1: this list is joined straight into UI.confirmModal's HTML body below — an
+    // instrument name is free text a facility manager types, so it must be escaped like any other
+    // user-entered string rendered as HTML, not just the values that happen to come from a fixed
+    // vocab (status does too, for the same belt-and-suspenders reason as everywhere else in the
+    // app that renders a stored value).
+    ).map((r) => `${esc(r.name)} is currently marked "${esc(r.status)}"`);
+  }
+
   function renderBookingConflicts(m, ids) {
     const host = m.querySelector('#' + ids.prefix + '-conflicts');
     if (!host) return;
@@ -2909,8 +3300,12 @@
     }
     const advisory = suppressStaffAdvisory ? '' : categoryStaffAdvisory(currentCategory, staffIds);
     const advisoryHtml = advisory ? `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} ${esc(advisory)}</span></div>` : '';
+    const statusAdvisories = instrumentStatusAdvisory(instIds);
+    const statusAdvisoryHtml = statusAdvisories.length
+      ? `<div class="action-items mt-8">${statusAdvisories.map((a) => `<span class="badge warning font-medium">${ic('alert')} ${esc(a)}</span>`).join(' ')}</div>`
+      : '';
 
-    if (!start || !end) { host.innerHTML = advisoryHtml; return; }
+    if (!start || !end) { host.innerHTML = advisoryHtml + statusAdvisoryHtml; return; }
     // Mirror bookingEditSave's skipNotice exactly: a notes-only edit (date/start unchanged from
     // what's stored) shouldn't show a notice-advisory warning that bookingEditSave itself won't
     // enforce at save time either, or the advisory would drift from the hard gate.
@@ -2921,10 +3316,10 @@
     }
     const conflicts = findBookingConflicts({ date, start, end, excludeId: ids.excludeId, instrumentIds: instIds, staffIds, skipNotice });
     if (!conflicts.length) {
-      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>` + advisoryHtml;
+      host.innerHTML = `<div class="faint small mt-8">${ic('check')} No conflicts with existing bookings.</div>` + advisoryHtml + statusAdvisoryHtml;
       return;
     }
-    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>` + advisoryHtml;
+    host.innerHTML = `<div class="action-items mt-8"><span class="badge warning font-medium">${ic('alert')} Conflict${conflicts.length > 1 ? 's' : ''}:</span> ${conflicts.map(esc).join('; ')}</div>` + advisoryHtml + statusAdvisoryHtml;
   }
 
   function wireBomInputs(m, ids) {
@@ -2948,7 +3343,11 @@
     const categoryEl = ids.category ? m.querySelector('#' + ids.category) : null;
     if (categoryEl) categoryEl.addEventListener('change', () => { recalc(); recalcConflicts(); });
     const discEl = m.querySelector('#' + ids.prefix + '-discount');
-    if (discEl) discEl.addEventListener('input', () => { m._bom.manualPct = Number(discEl.value) || 0; recalc(); });
+    // Live-typing preview, not a "save" — clamp rather than reject so the on-screen total stays
+    // sane while typing; computeBookingBOM would clamp anyway (belt-and-suspenders), but clamping
+    // the stored value here too keeps m._bom.manualPct (what actually gets saved) in the same
+    // range as what's displayed instead of drifting from it.
+    if (discEl) discEl.addEventListener('input', () => { m._bom.manualPct = Math.max(0, Math.min(100, Number(discEl.value) || 0)); recalc(); });
 
     // Amount/partial-time inputs live inside rows rebuilt by renderBomRows, so this listener is
     // delegated on the whole modal rather than bound per-row (it survives the row rebuilds).
@@ -3160,12 +3559,30 @@
     return dates;
   }
 
-  function bookingSave() {
-    const m = document.querySelector('.modal');
+  // Red-team b16: bookingSave is async and awaits a confirm dialog mid-save (the Maintenance/Down
+  // advisory above) — a second click on the save button (or a stray Enter) while that confirm is
+  // open would re-enter this function while UI.topModal() now resolves to the CONFIRM dialog, not
+  // the booking form, crashing on a null `.querySelector`. Guard re-entry for the whole function,
+  // not just the awaited section, so a click during the earlier synchronous validation is refused
+  // exactly the same way.
+  let bookingSaveBusy = false;
+  async function bookingSave() {
+    if (bookingSaveBusy) return;
+    bookingSaveBusy = true;
+    try { return await bookingSaveImpl(); } finally { bookingSaveBusy = false; }
+  }
+  async function bookingSaveImpl() {
+    const m = UI.topModal();
     const title = m.querySelector('#bk-title').value.trim();
-    if (!title) { UI.toast('Booking title required', 'error'); return; }
+    if (!title) { UI.toast('Booking title required', 'error'); m.querySelector('#bk-title').classList.add('is-invalid'); return; }
 
-    const date = m.querySelector('#bk-date').value || UI.today();
+    // A blank date used to silently become today (UI.today()) — a facility scheduling a booking
+    // and clearing the date field by accident got a wrong, un-flagged date instead of a refusal.
+    // Same rule and same message as bookingEditSaveImpl's "Date is required" below, so clearing
+    // the date behaves identically whether the booking is new or being edited.
+    const dateEl = m.querySelector('#bk-date');
+    const date = dateEl ? dateEl.value : '';
+    if (!date) { UI.toast('Date is required', 'error'); if (dateEl) dateEl.classList.add('is-invalid'); return; }
     const start = m.querySelector('#bk-start').value || '';
     const end = m.querySelector('#bk-end').value || '';
     const projectVal = m.querySelector('#bk-project').value;
@@ -3224,6 +3641,18 @@
       }
     }
 
+    // Advisory, not a hard block (see instrumentStatusAdvisory) — a Maintenance/Down instrument
+    // is still bookable, but only after an active confirm, so it can never be booked by accident.
+    const statusAdvisories = instrumentStatusAdvisory(instIds);
+    if (statusAdvisories.length) {
+      const ok = await UI.confirmModal(
+        'Instrument Not Available',
+        `${statusAdvisories.join('; ')}. Book it anyway?`,
+        { confirmText: 'Book Anyway' }
+      );
+      if (!ok) return;
+    }
+
     const attendees = ownerIds.length
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
       : '';
@@ -3250,7 +3679,11 @@
       }
     }
 
-    dates.forEach((d) => insertBookingRow(d));
+    // G1: every occurrence's insert + its people/instrument/staff join rows are one save — the
+    // conflict pre-check above already made every occurrence individually safe to insert, so the
+    // only way this loop can now fail is a genuine error (bad row, thrown save), and a repeating
+    // booking must not create some occurrences and silently drop the rest of them.
+    DB.transaction(() => { dates.forEach((d) => insertBookingRow(d)); });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast(dates.length > 1 ? `${dates.length} bookings created` : 'Booking saved');
@@ -3308,7 +3741,7 @@
           ? `<button class="btn btn-secondary" data-act="booking-reinstate" data-id="${mt.id}" style="margin-right:auto">${ic('rocket')} Reinstate</button>`
           : `<button class="btn btn-secondary" data-act="booking-del" data-id="${mt.id}" style="margin-right:auto">${ic('archive')} Cancel Booking</button>`}
         <button class="btn btn-secondary" data-act="email-attendees" data-id="${mt.id}">${ic('mail')} Email Attendees</button>
-        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-secondary" data-act="close">Close</button>
         <button class="btn btn-primary" data-act="booking-edit-save" data-id="${mt.id}">Save Changes</button>
       </div>`, (m) => mountBookingModal(m, {
         noteId: 'bke-note', owners: currentOwners,
@@ -3320,12 +3753,35 @@
       }));
   }
 
-  function bookingEditSave(id) {
-    const m = document.querySelector('.modal');
+  // Pure, DOM-free decision behind M1's "frozen cost snapshot": given the booking's stored row +
+  // its stored meeting_instruments/meeting_staff rows, and the same shape freshly read off the
+  // edit form, decide whether a priced input actually changed. Exists mainly so test/unit can
+  // exercise this exact decision without a modal — see UI.bookingPricedInputsChanged, the pure
+  // comparison this wraps.
+  function bookingPriceSnapshot(row, instruments, staff) {
+    return {
+      start: row.start_time || '', end: row.end_time || '',
+      manualPct: row.discount_pct || 0, groupPct: row.group_discount_pct || 0,
+      category: row.category || '', groupOrg: row.group_org || '',
+      instruments: (instruments || []).map((r) => ({ id: r.id, amount: r.amount || 0 })),
+      staff: (staff || []).map((r) => ({ id: r.id, start: r.start || '', end: r.end || '' }))
+    };
+  }
+
+  // Red-team b16: same re-entry hazard as bookingSave above, guarded the same way.
+  let bookingEditSaveBusy = false;
+  async function bookingEditSave(id) {
+    if (bookingEditSaveBusy) return;
+    bookingEditSaveBusy = true;
+    try { return await bookingEditSaveImpl(id); } finally { bookingEditSaveBusy = false; }
+  }
+  async function bookingEditSaveImpl(id) {
+    const m = UI.topModal();
     const title = m.querySelector('#bke-title').value.trim();
-    if (!title) { UI.toast('Title required', 'error'); return; }
+    if (!title) { UI.toast('Title required', 'error'); m.querySelector('#bke-title').classList.add('is-invalid'); return; }
 
     const date = m.querySelector('#bke-date').value || null;
+    if (!date) { UI.toast('Date is required', 'error'); return; }
     const start = m.querySelector('#bke-start').value || '';
     const end = m.querySelector('#bke-end').value || '';
     const projectVal = m.querySelector('#bke-project').value;
@@ -3345,15 +3801,19 @@
     // minimum-advance-notice check — that constraint is about giving the facility warning before
     // a NEW time is committed to, not about blocking edits to a booking whose slot was already
     // locked in. Duration and gap constraints still apply regardless.
-    const stored = DB.row('SELECT date, start_time, category FROM meetings WHERE id=?', [id]) || {};
+    const stored = DB.row(`SELECT date, start_time, end_time, category, group_org, discount_pct,
+      group_discount_pct, is_cancelled, subtotal, total_before_tax, total_cost, tier_id,
+      tier_overhead_pct, category_staff_pct FROM meetings WHERE id=?`, [id]) || {};
     const skipNotice = stored.date === date && (stored.start_time || '') === start;
+    const storedInstruments = DB.rows('SELECT instrument_id AS id, amount FROM meeting_instruments WHERE meeting_id=?', [id]);
+    const storedStaff = DB.rows('SELECT person_id AS id, start_time AS start, end_time AS end FROM meeting_staff WHERE meeting_id=?', [id]);
 
     // Requires-staff enforcement (category billing policy), same class of history guard as
     // skipNotice just above: a legacy booking already saved with this exact category and no staff
     // must still be editable for notes/other fields without retroactively getting blocked by a
     // requirement that didn't exist (or wasn't enforced) when it was first saved. Any REAL change —
     // to the category, or to who's assigned as staff — drops the exemption and enforces normally.
-    const storedStaffIds = DB.rows('SELECT person_id FROM meeting_staff WHERE meeting_id=?', [id]).map((r) => r.person_id).sort((a, b) => a - b);
+    const storedStaffIds = storedStaff.map((r) => r.id).sort((a, b) => a - b);
     const currentStaffSorted = [...staffIds].sort((a, b) => a - b);
     const staffUnchanged = storedStaffIds.length === currentStaffSorted.length && storedStaffIds.every((v, i) => v === currentStaffSorted[i]);
     const categoryUnchanged = (stored.category || '') === category;
@@ -3364,8 +3824,35 @@
       return;
     }
 
-    const conflicts = findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds, skipNotice });
+    // A cancelled booking gave its slot back the moment it was cancelled (findBookingConflicts
+    // already filters on is_cancelled=0 for every OTHER booking) — so editing one (notes, action
+    // items, category) must not retroactively fail because something else now occupies that slot.
+    // reinstateBooking is the one path that re-checks, since clearing is_cancelled hands the slot
+    // back and it can conflict again right then.
+    const conflicts = stored.is_cancelled ? [] : findBookingConflicts({ date, start, end, excludeId: id, instrumentIds: instIds, staffIds, skipNotice });
     if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
+
+    // Advisory, not a hard block — mirrors bookingSave's identical gate exactly (roadmap: "every
+    // advisory must mirror its save gate"). Red-team b1: unlike a brand-new booking (bookingSave,
+    // where the instrument selection is always a fresh decision), an EDIT can be a notes-only
+    // change to an old, already-past booking whose instrument happens to be marked Down/
+    // Maintenance today for an unrelated reason — that booking already happened, so re-litigating
+    // "book it anyway?" on every subsequent notes edit is just noise, not a warning anyone can act
+    // on. Same reasoning as skipNotice just above: only actually ask when either the instrument
+    // selection changed (a real new decision) or the booking is still upcoming (the advisory is
+    // still actionable — the slot hasn't been used yet).
+    const storedInstIds = storedInstruments.map((r) => r.id).sort((a, b) => a - b);
+    const currentInstSorted = [...instIds].sort((a, b) => a - b);
+    const instrumentsUnchanged = storedInstIds.length === currentInstSorted.length && storedInstIds.every((v, i) => v === currentInstSorted[i]);
+    const statusAdvisories = (!instrumentsUnchanged || !bookingHasStarted({ date, start_time: start })) ? instrumentStatusAdvisory(instIds) : [];
+    if (statusAdvisories.length) {
+      const ok = await UI.confirmModal(
+        'Instrument Not Available',
+        `${statusAdvisories.join('; ')}. Book it anyway?`,
+        { confirmText: 'Book Anyway' }
+      );
+      if (!ok) return;
+    }
 
     const attendees = ownerIds.length
       ? DB.rows(`SELECT name FROM people WHERE id IN (${ownerIds.map(() => '?').join(',')})`, ownerIds).map((r) => r.name).join(', ')
@@ -3375,19 +3862,53 @@
     recomputeBomTotals(m, ids);
     const bom = m._bom.last;
 
-    DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
-              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
-              tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct, id]);
+    // M1 "frozen cost snapshot": a saved booking's totals stay put unless a PRICED input actually
+    // changed (instruments/amounts, staff/windows, times, discount, category, group/tier). Compare
+    // what was stored against what the form shows now; if nothing priced moved, keep the exact
+    // money AND line-item rows this booking was saved with — even if a rate changed elsewhere in
+    // the meantime — instead of silently repricing a notes-only edit.
+    const before = bookingPriceSnapshot(stored, storedInstruments, storedStaff);
+    const after = bookingPriceSnapshot(
+      { start_time: start, end_time: end, discount_pct: bom.manualPct, group_discount_pct: bom.groupPct, category, group_org: groupOrg },
+      instIds.map((iid) => ({ id: iid, amount: m._bom.instrAmounts[iid] || 0 })),
+      staffIds.map((sid) => ({ id: sid, start: (m._bom.staffWindows[sid] || {}).start || '', end: (m._bom.staffWindows[sid] || {}).end || '' }))
+    );
+    const pricedChanged = UI.bookingPricedInputsChanged(before, after);
 
-    DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
-    ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [id, oid]));
-    bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [id, line.id, line.amount || 0, line.line]));
-    bom.staffLines.forEach((line) => {
-      const win = m._bom.staffWindows[line.id] || {};
-      DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [id, line.id, win.start || '', win.end || '', line.line]);
+    // G1: the meetings row update and the attendees/line-item rebuild below are one save — a throw
+    // partway (say after the DELETEs but before every line re-INSERT) must not leave the booking
+    // with its old total but no line rows to back it, or vice versa.
+    DB.transaction(() => {
+      DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
+                discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
+                tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
+        [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct,
+         pricedChanged ? bom.subtotal : stored.subtotal,
+         pricedChanged ? bom.beforeTax : stored.total_before_tax,
+         pricedChanged ? bom.total : stored.total_cost,
+         category,
+         pricedChanged ? bom.tierId : stored.tier_id,
+         pricedChanged ? bom.tierOverheadPct : stored.tier_overhead_pct,
+         pricedChanged ? bom.categoryStaffPct : stored.category_staff_pct,
+         id]);
+
+      // Attendees (who was there, not what it cost) always rebuild from the form regardless.
+      DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
+      ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [id, oid]));
+
+      // Line items only rebuild when a priced input actually changed — an unchanged selection keeps
+      // its exact stored line_cost rows, which is what actually freezes the total against a rate
+      // that moved elsewhere in the meantime (deleting and reinserting from CURRENT rates would
+      // silently reprice every line even though nothing on this form did).
+      if (pricedChanged) {
+        DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
+        DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
+        bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [id, line.id, line.amount || 0, line.line]));
+        bom.staffLines.forEach((line) => {
+          const win = m._bom.staffWindows[line.id] || {};
+          DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [id, line.id, win.start || '', win.end || '', line.line]);
+        });
+      }
     });
 
     UI.closeDim(m.closest('.modal-dim'));
@@ -3403,10 +3924,14 @@
     // codebase (verified empirically — see CLAUDE.md's cascading-deletes section): currentBytes()
     // reasserts PRAGMA foreign_keys after every export. The explicit deletes guard against any
     // future code path that exports without that reassert, silently turning cascades back off.
-    DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meetings WHERE id=?', [id]);
+    // G1: wrapped so a throw partway through (say the meetings row itself fails) can't leave the
+    // join rows deleted with the meeting still sitting there orphaned from its own history.
+    DB.transaction(() => {
+      DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
+      DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
+      DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
+      DB.run('DELETE FROM meetings WHERE id=?', [id]);
+    });
   }
 
   // Has the session's intended start time passed? Cancelling before it means nothing was held;
@@ -3561,12 +4086,12 @@
     })(mt.note) : '';
 
     const bodyLines = [];
-    if (mt.date) bodyLines.push('Date: ' + mt.date);
+    if (mt.date) bodyLines.push('Date: ' + UI.fmtDate(mt.date));
     if (noteText) bodyLines.push('', 'Notes:', noteText);
     if (mt.actions) bodyLines.push('', 'Next Steps / Action Items:', mt.actions);
 
     const attendeesText = withEmail.map((p) => p.email.trim()).join(', ');
-    const subjectText = (mt.date ? '[' + mt.date + '] ' : '') + mt.title;
+    const subjectText = (mt.date ? '[' + UI.fmtDate(mt.date) + '] ' : '') + mt.title;
     const bodyText = bodyLines.join('\n');
 
     UI.openModal(`
@@ -3613,8 +4138,7 @@
     // cancelBooking refreshes the page underneath; close the edit modal if it acted.
     const mt = DB.row('SELECT is_cancelled FROM meetings WHERE id=?', [id]);
     if (!mt || mt.is_cancelled) {
-      const dim = document.querySelector('.modal-dim');
-      if (dim) UI.closeDim(dim);
+      UI.closeDim(UI.topDim());
     }
   }
 
@@ -3628,17 +4152,19 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="kv-save">Add Field</button>
+        <button class="btn btn-primary" data-act="kv-save" data-project-id="${ctx.project}">Add Field</button>
       </div>`);
   }
 
   function kvSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const k = m.querySelector('#kv-k').value.trim();
     const v = m.querySelector('#kv-v').value.trim();
     if (!k || !v) { UI.toast('Both field name and value are required', 'error'); return; }
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const projectId = Number(m.querySelector('[data-act="kv-save"]').dataset.projectId) || ctx.project;
 
-    DB.run('INSERT INTO kv (project_id, key, value) VALUES (?,?,?)', [ctx.project, k, v]);
+    DB.run('INSERT INTO kv (project_id, key, value) VALUES (?,?,?)', [projectId, k, v]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Field added');
     refresh();
@@ -3661,7 +4187,7 @@
   }
 
   function kvEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const k = m.querySelector('#kve-k').value.trim();
     const v = m.querySelector('#kve-v').value.trim();
     if (!k || !v) { UI.toast('Both field name and value are required', 'error'); return; }
@@ -3704,7 +4230,7 @@
   }
 
   function outputSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const projectId = Number(m.querySelector('[data-act="output-save"]').dataset.projectId) || ctx.project;
     const type = m.querySelector('#out-type').value.trim();
     const title = m.querySelector('#out-title').value.trim();
@@ -3740,7 +4266,7 @@
   }
 
   function outputEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const type = m.querySelector('#oute-type').value.trim();
     const title = m.querySelector('#oute-title').value.trim();
     const reference = m.querySelector('#oute-ref').value.trim();
@@ -3783,15 +4309,16 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="f-save">Save Attachment</button>
+        <button class="btn btn-primary" data-act="f-save" data-project-id="${ctx.project}">Save Attachment</button>
       </div>`);
   }
 
   async function fSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const fileInput = m.querySelector('#f-file');
     const link = m.querySelector('#f-link').value.trim();
-    const pid = ctx.project;
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const pid = Number(m.querySelector('[data-act="f-save"]').dataset.projectId) || ctx.project;
 
     if (fileInput.files.length) {
       const f = fileInput.files[0];
@@ -3832,12 +4359,27 @@
   }
 
   async function deleteFile(id) {
-    const f = DB.row('SELECT name FROM files WHERE id=?', [id]);
+    const f = DB.row('SELECT name, kind, path FROM files WHERE id=?', [id]);
     if (!f) return;
     const ok = await UI.confirmModal('Delete Attachment', `Delete "${esc(f.name)}"? This cannot be undone.`, { danger: true, confirmText: 'Delete' });
     if (!ok) return;
 
     DB.run('DELETE FROM files WHERE id=?', [id]);
+    // M9: kind='link' rows have no blob (path is just the URL/share path itself, never an
+    // uploads: key) — only an actual upload has a blob in IndexedDB to clean up. Awaited AFTER
+    // the row delete above (a sync write) so a failed blob cleanup never blocks or rolls back the
+    // record itself — but the toast/refresh below now wait on it too, so a failure here is
+    // reported honestly instead of assumed away.
+    if (f.kind === 'upload' && f.path) {
+      try {
+        await DB.deleteUpload(f.path);
+      } catch (e) {
+        console.error('deleteUpload failed', e);
+        UI.toast('Attachment record removed, but its file could not be fully cleared from local storage.', 'error');
+        refresh();
+        return;
+      }
+    }
     UI.toast('Attachment removed');
     refresh();
   }
@@ -3845,7 +4387,22 @@
   /* ---------------- Backup & Restore ---------------- */
   function doBackup() { return performBackupDownload('manual'); }
 
+  // Row-count line for the restore preview dialog — same five core tables inspectBackupCandidate
+  // requires to exist (H1), read either from the uploaded file's preview or the live database.
+  // confirmModal wraps its body in one <p>, so this stays inline (<br>, no block elements) rather
+  // than nested <div>s, which a browser would otherwise close that <p> early to make room for.
+  function restorePreviewLine(label, key, live, incoming) {
+    return `${esc(label)}: ${live.counts[key]} → ${incoming.counts[key]}`;
+  }
+
   async function doRestore() {
+    // Check the read-only guard before even opening the file picker — DB.restoreBackup() also
+    // refuses (see its own assertWritable() call), but there's no reason to make a visitor pick a
+    // file and step through the whole preview/confirm flow only to be refused at the very end.
+    if (DB.isReadOnly) {
+      UI.toast('This tab is read-only because the database is open in another tab.', 'error');
+      return;
+    }
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'application/json';
@@ -3853,22 +4410,62 @@
       const f = input.files[0];
       if (!f) return;
       const text = await f.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        UI.toast('Restore failed: that file is not valid JSON.', 'error');
+        return;
+      }
+
+      // H1: validate BEFORE ever touching the live database or showing a confirm dialog that
+      // implies this file is usable. inspectBackupCandidate opens the bytes in a scratch
+      // database and throws with a user-facing message on anything short of every core table
+      // (projects/people/instruments/meetings/milestones) existing and being queryable.
+      let preview;
+      try {
+        preview = await DB.inspectBackupCandidate(data);
+      } catch (e) {
+        UI.toast('Restore failed: ' + e.message, 'error');
+        return;
+      }
+      // A demo-origin backup (buildBackup's `demo` marker — absent on pre-1.11 files, which are
+      // treated as real per the package brief) must never be restored into a real facility's
+      // data; the sandbox itself is free to accept either, since nothing there is real.
+      if (preview.demo && !window.IS_DEMO) {
+        UI.toast('Restore failed: this backup was exported from the demo sandbox and cannot be restored into real facility data.', 'error');
+        return;
+      }
+
+      const live = DB.liveSummary();
+      const previewRows = [
+        restorePreviewLine('Projects', 'projects', live, preview),
+        restorePreviewLine('People', 'people', live, preview),
+        restorePreviewLine('Instruments', 'instruments', live, preview),
+        restorePreviewLine('Bookings', 'meetings', live, preview),
+        restorePreviewLine('Milestones', 'milestones', live, preview),
+      ].join('<br>');
+      const meta = [
+        preview.created ? `backup created ${esc(String(preview.created).slice(0, 10))}` : '',
+        preview.newestBooking ? `newest booking ${esc(preview.newestBooking)}` : '',
+      ].filter(Boolean).join(', ');
+
       // Skip the safety copy when there's effectively nothing to lose — same emptiness check
       // the auto-backup skip uses (hasAnyData), so an empty/fresh DB doesn't produce a pointless
       // download or hold up the confirm dialog with a promise that has nothing to protect.
       const willSafetyBackup = hasAnyData();
-      const body = willSafetyBackup
-        ? 'Restoring a backup will replace your current database with the backup file. A safety copy of your current data will be downloaded first. Continue?'
-        : 'Restoring a backup will replace your current database with the backup file. Continue?';
+      const body = `Restoring will replace your current database with the uploaded file (current → backup):<br><br>${previewRows}${meta ? `<br><br>${esc(meta)}` : ''}<br><br>${willSafetyBackup ? 'A safety copy of your current data will be downloaded first. ' : ''}Continue?`;
       const ok = await UI.confirmModal('Restore Facility Backup', body, { danger: true, confirmText: 'Restore' });
       if (!ok) return;
       try {
         if (willSafetyBackup) await performBackupDownload('pre-restore');
-        await DB.restoreBackup(JSON.parse(text));
+        await DB.restoreBackup(data);
         UI.toast('Database restored successfully');
         route('projects');
       } catch (e) {
-        UI.toast('Restore failed: ' + e.message, 'error');
+        // DB.restoreBackup's own assertWritable() guard already shows the read-only toast — don't
+        // double it with a second "Restore failed: ..." message for the exact same reason.
+        if (!e || !e.dbReadOnly) UI.toast('Restore failed: ' + e.message, 'error');
       }
     };
     input.click();
@@ -3893,8 +4490,15 @@
     const taxEl = document.getElementById('cfg-tax');
     const curEl = document.getElementById('cfg-currency');
     if (!taxEl) return;
-    DB.setConfig('tax_pct', Number(taxEl.value) || 0);
-    DB.setConfig('currency', curEl.value.trim() || '$');
+    const taxPct = Number(taxEl.value) || 0;
+    if (rejectOutOfPercentRange(taxPct, 'Tax %')) return;
+    // Validated-all-or-nothing: both config keys are one logical save, so a mid-write failure
+    // (e.g. a storage error between the two setConfig calls) must never leave tax and currency
+    // out of sync with each other.
+    DB.transaction(() => {
+      DB.setConfig('tax_pct', taxPct);
+      DB.setConfig('currency', curEl.value.trim() || '$');
+    });
     UI.toast('Billing rates saved');
     refresh();
   }
@@ -3919,11 +4523,20 @@
   // feature) — a blank tier selection clears the org's assignment (DB.setGroupTier deletes the
   // row rather than storing a null, so it falls back to the legacy overhead sum, see db.js).
   function saveGroupDiscounts() {
-    document.querySelectorAll('.group-discount-input').forEach((inp) => {
-      DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0);
-    });
-    document.querySelectorAll('.group-tier-select').forEach((sel) => {
-      DB.setGroupTier(sel.dataset.org, sel.value ? Number(sel.value) : null);
+    const inputs = [...document.querySelectorAll('.group-discount-input')];
+    // Validate every row BEFORE writing any of them — a partial save (some labs written, one
+    // rejected midway) would be more confusing than refusing the whole thing up front.
+    for (const inp of inputs) {
+      if (rejectOutOfPercentRange(Number(inp.value) || 0, `${inp.dataset.org} discount %`)) return;
+    }
+    // Validated-all-or-nothing: every lab's discount AND tier assignment is one save from the
+    // admin's point of view (one button), so a failure partway through must not leave some labs
+    // written and others not.
+    DB.transaction(() => {
+      inputs.forEach((inp) => DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0));
+      document.querySelectorAll('.group-tier-select').forEach((sel) => {
+        DB.setGroupTier(sel.dataset.org, sel.value ? Number(sel.value) : null);
+      });
     });
     UI.toast('Group discounts & tiers saved');
     refresh();
@@ -3933,16 +4546,36 @@
   // independent DB.setCategoryPolicy call — a facility-SETTINGS write, same "applies to NEW
   // bookings only" framing as the card's own copy; no existing meetings row is ever touched here.
   function saveCategoryPolicies() {
-    document.querySelectorAll('.cat-policy-row').forEach((rowEl) => {
+    const rowEls = [...document.querySelectorAll('.cat-policy-row')];
+    // Validate every row BEFORE writing any of them, via the same rejectOutOfPercentRange helper
+    // every other percent field in this file uses: DB.setCategoryPolicy clamps a negative to 0 as
+    // a defensive floor (a belt-and-suspenders guard against some other future caller), but a
+    // value the admin actually typed here — negative, or over 100% — is a mistake that should be
+    // rejected with a toast naming the category, not silently clamped and saved without a word.
+    // A whole-form validation (rather than skipping just the bad row) avoids half the categories
+    // saving and one silently not, which the admin would have no way to notice.
+    for (const rowEl of rowEls) {
       const category = rowEl.dataset.category;
-      if (!category) return;
+      if (!category) continue;
       const pctEl = rowEl.querySelector('.cat-staff-pct');
-      const reqEl = rowEl.querySelector('.cat-requires-staff');
-      const followEl = rowEl.querySelector('.cat-follow-assisted');
-      DB.setCategoryPolicy(category, {
-        staff_pct: pctEl ? Number(pctEl.value) || 0 : 100,
-        requires_staff: !!(reqEl && reqEl.checked),
-        follow_assisted: !!(followEl && followEl.checked)
+      if (!pctEl) continue;
+      if (rejectOutOfPercentRange(pctEl.value, `"${category}" staff %`)) return;
+    }
+    // Validated-all-or-nothing: every category's policy is written by one button, so a failure
+    // partway through must not leave some categories saved and others still holding their old
+    // policy — the whole-form validation above already promises "all or nothing" to the admin.
+    DB.transaction(() => {
+      rowEls.forEach((rowEl) => {
+        const category = rowEl.dataset.category;
+        if (!category) return;
+        const pctEl = rowEl.querySelector('.cat-staff-pct');
+        const reqEl = rowEl.querySelector('.cat-requires-staff');
+        const followEl = rowEl.querySelector('.cat-follow-assisted');
+        DB.setCategoryPolicy(category, {
+          staff_pct: pctEl ? Number(pctEl.value) || 0 : 100,
+          requires_staff: !!(reqEl && reqEl.checked),
+          follow_assisted: !!(followEl && followEl.checked)
+        });
       });
     });
     UI.toast('Category billing policies saved');
@@ -4099,17 +4732,20 @@
   }
 
   function gSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#g-name').value.trim();
     if (!name) { UI.toast('Grant name required', 'error'); return; }
     const number = m.querySelector('#g-number').value.trim();
     const note = m.querySelector('#g-note').value.trim();
-    DB.run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', [name, number, note]);
-    const inserted = DB.row('SELECT last_insert_rowid() as id');
-    const gid = inserted ? inserted.id : null;
-    if (gid) {
-      readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [gid, pid]));
-    }
+    // G1: the grant insert and its allowed-users join rows are one save.
+    DB.transaction(() => {
+      DB.run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', [name, number, note]);
+      const inserted = DB.row('SELECT last_insert_rowid() as id');
+      const gid = inserted ? inserted.id : null;
+      if (gid) {
+        readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [gid, pid]));
+      }
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Grant added');
     refresh();
@@ -4138,16 +4774,19 @@
   }
 
   function gEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#ge-name').value.trim();
     if (!name) { UI.toast('Grant name required', 'error'); return; }
     const number = m.querySelector('#ge-number').value.trim();
     const note = m.querySelector('#ge-note').value.trim();
-    DB.run('UPDATE grants SET name=?, number=?, note=? WHERE id=?', [name, number, note, id]);
-    // Rebuilt from the picker every save, same as every other join table here — an allowed user
-    // filtered out of the form (retired-but-assigned excepted, see grantUserItems) is dropped.
-    DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
-    readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [id, pid]));
+    // G1: the grant update and the allowed-users rebuild are one save.
+    DB.transaction(() => {
+      DB.run('UPDATE grants SET name=?, number=?, note=? WHERE id=?', [name, number, note, id]);
+      // Rebuilt from the picker every save, same as every other join table here — an allowed user
+      // filtered out of the form (retired-but-assigned excepted, see grantUserItems) is dropped.
+      DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
+      readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [id, pid]));
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Grant updated');
     refresh();
@@ -4267,7 +4906,7 @@
   function recomputeServiceEntryTotal(m, prefix) {
     const qty = Number((m.querySelector('#' + prefix + '-qty') || {}).value) || 0;
     const rate = Number((m.querySelector('#' + prefix + '-rate') || {}).value) || 0;
-    const total = qty * rate;
+    const total = UI.round2(qty * rate);
     const el = m.querySelector('#' + prefix + '-total');
     if (el) el.textContent = fmtMoney(total);
     return total;
@@ -4324,7 +4963,7 @@
   }
 
   function seSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const desc = m.querySelector('#se-desc').value.trim();
     if (!desc) { UI.toast('Description required', 'error'); return; }
     const date = m.querySelector('#se-date').value || UI.today();
@@ -4339,11 +4978,16 @@
     const qty = Number(m.querySelector('#se-qty').value) || 0;
     const unit = m.querySelector('#se-unit').value || 'hour';
     const rate = Number(m.querySelector('#se-rate').value) || 0;
-    const total = qty * rate;
+    if (rejectNegative(qty, 'Quantity') || rejectNegative(rate, 'Rate')) return;
+    const total = UI.round2(qty * rate);
 
-    DB.run(`INSERT INTO service_entries (project_id, grant_id, person_id, instrument_id, date, description, qty, unit, rate, total_cost)
-            VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total]);
+    // G1: a single-statement write, but wrapped like every other saver here so a partial write
+    // (and a flagged-dirty autosave of it) is never possible even as the entry gains more fields.
+    DB.transaction(() => {
+      DB.run(`INSERT INTO service_entries (project_id, grant_id, person_id, instrument_id, date, description, qty, unit, rate, total_cost)
+              VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total]);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Service entry saved');
     refresh();
@@ -4388,7 +5032,7 @@
   }
 
   function seEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const desc = m.querySelector('#see-desc').value.trim();
     if (!desc) { UI.toast('Description required', 'error'); return; }
     // Same default as seSave: a NULL date would drop out of Reports' date-range filters
@@ -4405,10 +5049,13 @@
     const qty = Number(m.querySelector('#see-qty').value) || 0;
     const unit = m.querySelector('#see-unit').value || 'hour';
     const rate = Number(m.querySelector('#see-rate').value) || 0;
-    const total = qty * rate;
+    if (rejectNegative(qty, 'Quantity') || rejectNegative(rate, 'Rate')) return;
+    const total = UI.round2(qty * rate);
 
-    DB.run(`UPDATE service_entries SET project_id=?, grant_id=?, person_id=?, instrument_id=?, date=?, description=?, qty=?, unit=?, rate=?, total_cost=? WHERE id=?`,
-      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total, id]);
+    DB.transaction(() => {
+      DB.run(`UPDATE service_entries SET project_id=?, grant_id=?, person_id=?, instrument_id=?, date=?, description=?, qty=?, unit=?, rate=?, total_cost=? WHERE id=?`,
+        [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total, id]);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Service entry updated');
     refresh();
@@ -4597,7 +5244,7 @@
   }
 
   function repCustomRun() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     if (!m) return;
     const spec = currentCustomReportSpec(m);
     saveCustomReportPrefs(spec.entity, spec.columns);
@@ -4607,7 +5254,7 @@
   }
 
   function repCustomExport() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     if (!m) return;
     const spec = currentCustomReportSpec(m);
     saveCustomReportPrefs(spec.entity, spec.columns);
@@ -4644,10 +5291,11 @@
   }
 
   function ptSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#pt-name').value.trim();
     if (!name) { UI.toast('Tier name required', 'error'); return; }
     const pct = Number(m.querySelector('#pt-pct').value) || 0;
+    if (rejectNegative(pct, 'Overhead %')) return;
     DB.run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', [name, pct]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Pricing tier added');
@@ -4671,10 +5319,11 @@
   }
 
   function ptEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#pte-name').value.trim();
     if (!name) { UI.toast('Tier name required', 'error'); return; }
     const pct = Number(m.querySelector('#pte-pct').value) || 0;
+    if (rejectNegative(pct, 'Overhead %')) return;
     DB.run('UPDATE pricing_tiers SET name=?, overhead_pct=? WHERE id=?', [name, pct, id]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Pricing tier updated');
@@ -4736,7 +5385,7 @@
   function openTodayModal() {
     const todayStr = UI.today();
     const dateObj = new Date();
-    const dateFormatted = dateObj.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const dateFormatted = dateObj.toLocaleDateString(UI.DATE_LOCALE, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
     // Milestones due today
     const msToday = DB.rows(`
@@ -4800,8 +5449,8 @@
           <!-- Meetings Section -->
           <div class="card">
             <div class="row mb-8">
-              <span class="card-title grow">${ic('calendar')} Consultations &amp; Syncs Today (${mtgsToday.length})</span>
-              <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log</button>
+              <span class="card-title grow">${ic('calendar')} Bookings Today (${mtgsToday.length})</span>
+              <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log Booking</button>
             </div>
             <div class="card-body">
               ${mtgsToday.length ? mtgsToday.map((m) => `

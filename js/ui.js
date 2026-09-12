@@ -116,16 +116,80 @@
      need to close the dim themselves should get it via `m.closest('.modal-dim')` or the `dim`
      param onMount receives, not by assuming the return value IS the dim (that mismatch used to
      leave the blurred backdrop stuck on screen after a promise-based modal like confirmModal
-     resolved — the inner card was removed but the outer overlay never was). */
+     resolved — the inner card was removed but the outer overlay never was).
+
+     Modals can stack (a nested "+ Add New" opened from inside another form, a confirm on top of
+     an edit dialog, …). `topModal()`/`topDim()` are the one place that answers "which modal is
+     the user actually looking at right now" — every save/run function in app.js reads its form
+     fields off `UI.topModal()` rather than the first `.modal` in the DOM, which would silently be
+     whichever modal happened to open FIRST (e.g. Today's Agenda) instead of whatever is on top of
+     it (e.g. Edit Booking opened from that agenda). */
+  function topDim() {
+    const dims = document.querySelectorAll('.modal-dim');
+    return dims.length ? dims[dims.length - 1] : null;
+  }
+  function topModal() {
+    const dim = topDim();
+    return dim ? dim.querySelector('.modal') : null;
+  }
+  // Closes every open modal, topmost first, so each one's stored `_prevFocus` restores focus in
+  // the right order (ending on whatever had focus before the FIRST modal opened). Used when the
+  // app navigates out from under an open modal (hashchange, a nested `data-goto`) — a draft in a
+  // modal is deliberately abandoned in that case, since the record it was bound to may no longer
+  // be the one on screen.
+  function closeAllModals() {
+    const dims = [...document.querySelectorAll('.modal-dim')];
+    for (let i = dims.length - 1; i >= 0; i--) closeDim(dims[i]);
+  }
+
+  // Elements a modal can usefully move focus to/trap Tab between. Excludes disabled controls and
+  // negative-tabindex elements (those are programmatically focusable but deliberately skipped in
+  // tab order elsewhere in the app).
+  const FOCUSABLE_SEL = 'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), ' +
+    'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+  function focusableIn(container) {
+    return [...container.querySelectorAll(FOCUSABLE_SEL)].filter((el) => el.offsetParent !== null || el === document.activeElement);
+  }
+  // Moves focus to the first focusable field in `m` — the first form field for an ordinary
+  // dialog, or (confirmModal's DOM order puts it first) the Cancel button on a confirm dialog,
+  // which is deliberately "the safe way out" for a danger dialog. Callers with a more specific
+  // idea of what should be focused (a search box, a freshly-added row) call `.focus()` themselves
+  // afterward from their `onMount`, which simply overrides this.
+  function focusFirstIn(m) {
+    const first = focusableIn(m)[0];
+    if (first) { try { first.focus(); } catch (_) {} }
+  }
+  // role="dialog" alone gives assistive tech no name to announce for the dialog itself — every
+  // modal in this app renders its heading as `<span class="modal-title">...</span>` (the `newX`/
+  // `editX` convention) except confirmModal, whose own markup wraps its title in `.head`/`.t`
+  // instead. Prefer `.modal-title` (assigning it an id if it doesn't have one) via
+  // aria-labelledby; fall back to the `.head`/`.t` text (covers confirmModal) via aria-label so
+  // every dialog this app ever opens has SOME accessible name.
+  let modalTitleIdSeq = 0;
+  function labelModal(m) {
+    const titleEl = m.querySelector('.modal-title');
+    if (titleEl) {
+      if (!titleEl.id) titleEl.id = 'modal-title-' + (++modalTitleIdSeq);
+      m.setAttribute('aria-labelledby', titleEl.id);
+      return;
+    }
+    const head = m.querySelector('.head, .t');
+    const text = ((head && head.textContent) || m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 200);
+    if (text) m.setAttribute('aria-label', text);
+  }
   function openModal(html, onMount, onOutsideClick) {
     const dim = document.createElement('div');
     dim.className = 'modal-dim';
-    dim.innerHTML = `<div class="modal">${html}</div>`;
+    dim.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
     document.body.appendChild(dim);
     const m = dim.querySelector('.modal');
+    labelModal(m);
     // Stash the dismissal handler so Esc can reuse the exact outside-click semantics
     // (important for promise-based modals like confirmModal, which resolve on dismissal).
     dim._onDismiss = onOutsideClick || null;
+    // Captured BEFORE we move focus into the modal, so closeDim can put it back afterward.
+    dim._prevFocus = document.activeElement;
+    focusFirstIn(m);
     if (onMount) onMount(m, dim);
     dim.addEventListener('click', (e) => {
       if (e.target !== dim) return;
@@ -134,7 +198,14 @@
     });
     return m;
   }
-  function closeDim(dim) { if (dim) dim.remove(); }
+  function closeDim(dim) {
+    if (!dim) return;
+    const prev = dim._prevFocus;
+    dim.remove();
+    if (prev && document.body.contains(prev) && typeof prev.focus === 'function') {
+      try { prev.focus(); } catch (_) {}
+    }
+  }
 
   /* ---------------- Global keyboard shortcuts ----------------
      Esc closes the topmost modal (reusing its dismissal handler so promise-based modals
@@ -146,9 +217,8 @@
   }
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const dims = document.querySelectorAll('.modal-dim');
-      if (!dims.length) return;
-      const dim = dims[dims.length - 1]; // topmost
+      const dim = topDim();
+      if (!dim) return;
       const onDismiss = dim._onDismiss;
       closeDim(dim);
       if (onDismiss) onDismiss();
@@ -161,6 +231,35 @@
         || document.getElementById('people-search')
         || document.getElementById('inst-search');
       if (box) { e.preventDefault(); box.focus(); box.select && box.select(); }
+    }
+    if (e.key === 'Tab') {
+      const dim = topDim();
+      if (!dim) return; // no modal open: ordinary page Tab order
+      const m = dim.querySelector('.modal');
+      const focusable = focusableIn(m);
+      if (!focusable.length) { e.preventDefault(); return; }
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      // Trap Tab/Shift+Tab inside the topmost modal. If focus is already at an edge, wrap instead
+      // of letting it escape to whatever's underneath; if focus has somehow ended up OUTSIDE the
+      // modal entirely (shouldn't happen, but don't leave the user stuck on the dimmed page
+      // behind a danger confirm), pull it back in rather than let Tab do nothing useful.
+      if (!m.contains(active)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      return;
+    }
+    if (e.key === 'Enter') {
+      const el = e.target;
+      if (el.tagName === 'TEXTAREA' || el.isContentEditable) return;      // never hijack multi-line input
+      if (el.closest && el.closest('.token-picker')) return;              // filtering/picking, not submitting
+      const isSingleLineInput = el.tagName === 'INPUT' &&
+        !['checkbox', 'radio', 'file', 'button', 'submit', 'reset', 'range', 'color'].includes(el.type);
+      if (!isSingleLineInput && el.tagName !== 'SELECT') return;
+      const dim = topDim();
+      if (!dim || !dim.contains(el)) return;
+      const primary = dim.querySelector('.modal .foot .btn-primary');
+      if (primary && !primary.disabled) { e.preventDefault(); primary.click(); }
     }
   });
 
@@ -483,22 +582,39 @@
     return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
   }
 
-  /* ---------------- Autosave indicator ---------------- */
+  /* ---------------- Autosave indicator ----------------
+     'error' and 'readonly' are additions for H2/H3: a failed autosave (surfaced by
+     App.onSaveFailed) and a tab that has lost the multi-tab write race (App.onMultiTabState)
+     each need their own persistent, visibly-different state here — the dot used to only ever be
+     able to say "Saving…" or "Saved", so a failed save silently stuck at "Saving…" forever
+     with nothing to tell a user their edits weren't being written at all. */
   function setSavedState(state) {
     const el = document.getElementById('saved-state');
     if (!el) return;
-    el.className = 'saved-dot' + (state === 'pending' ? ' pending' : '');
-    el.querySelector('.txt').textContent = state === 'pending' ? 'Saving…' : 'Saved';
+    el.className = 'saved-dot' + (state === 'pending' ? ' pending' : state === 'error' ? ' error' : state === 'readonly' ? ' readonly' : '');
+    const label = state === 'pending' ? 'Saving…' : state === 'error' ? 'Save Failed' : state === 'readonly' ? 'Read-Only' : 'Saved';
+    el.querySelector('.txt').textContent = label;
+    const tip = state === 'error'
+      ? 'Your last change failed to save to this browser. It will keep retrying automatically.'
+      : state === 'readonly'
+        ? 'This database is already open in another browser tab. Changes made here will not be saved.'
+        : 'Your changes save automatically to this browser';
+    el.setAttribute('data-tooltip', tip);
   }
 
   /* ---------------- Helpers ---------------- */
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
+  /* Pinned for the same reason MONEY_LOCALE (below) is pinned: toLocaleDateString(undefined, …)
+     follows the viewer's browser locale, so the same booking would render 9/12/2026 for one
+     person and 12/9/2026 for another reading the same screen or export. One facility, one date
+     format — see MONEY_LOCALE's comment for the full rationale. */
+  const DATE_LOCALE = 'en-US';
   function fmtDate(d) {
     if (!d) return '—';
     const dt = new Date(String(d).slice(0, 10) + 'T00:00:00');
-    return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString();
+    return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString(DATE_LOCALE);
   }
   /* 'YYYY-MM-DD' for a Date's LOCAL calendar day.
      Why not toISOString().slice(0,10)? A Date is a single instant, and toISOString() re-describes
@@ -571,16 +687,53 @@
   // same division of labor as overheadPct/instrument tier rates above — this function only does
   // arithmetic on whatever factor it's handed. Omitted/undefined ⇒ 1, so every existing caller
   // that predates this parameter (and any legacy booking recomputation) is unaffected.
+  // Every stored money figure round-trips through this — 2 decimal places, applied once at the
+  // very end of the calculation below (never mid-formula), so a chain of clean inputs still lands
+  // on the exact figures money.test.js pins (490 / 546.25 / 589.95) while a chain that would
+  // otherwise leave a float like 146.66666666… gets the same 2dp precision fmtMoney displays and
+  // every export reads back, instead of column-drifting a cent or two.
+  function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+  // Percentages and quantities that price a booking are meaningless (or actively wrong — see the
+  // review's M7) once negative: a negative discount is a surcharge in disguise, a negative
+  // instrument amount or staff rate flips a charge into a phantom credit. This is the last-resort
+  // belt-and-suspenders clamp — every real form also validates and rejects a negative value with
+  // a toast rather than silently coercing it (see app.js's savers) — but computeBookingBOM must
+  // never trust its inputs, since a legacy row or a future caller could still hand it one.
+  function clampNonNeg(n) { return Math.max(0, Number(n) || 0); }
+  function clampPct(n) { return Math.min(100, Math.max(0, Number(n) || 0)); }
+  // Item 8 (second review): a 1.0 ratio is the ceiling a "percent of the floored staff hours"
+  // factor can mean (100% — the whole line) before it stops being a percentage and starts being a
+  // multiplier; a category billing policy with a corrupted/mistyped staff_pct of 150 must not turn
+  // into a 1.5x multiplier on every staff line. Same defensive belt-and-suspenders reasoning as
+  // clampNonNeg/clampPct above: real callers already validate staff_pct at 0-100 before dividing by
+  // 100 to get this factor, but computeBookingBOM must never trust its inputs.
+  function clampFactor(n) { return Math.min(1, Math.max(0, Number(n) || 0)); }
+
   function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates, staffPctFactor }) {
     const bookingHours = hoursBetween(start, end);
-    const overheadPct = (rates && rates.overheadPct) || 0;
-    const taxPct = (rates && rates.taxPct) || 0;
-    const pctFactor = staffPctFactor == null ? 1 : staffPctFactor;
+    // Item 8 (second review): overheadPct was floored at 0 but never capped — a corrupted/mistyped
+    // overhead rate above 100% silently inflated every "before tax" figure with no ceiling. Capped
+    // the same way taxPct already is via clampPct, just below.
+    const overheadPct = clampPct((rates && rates.overheadPct) || 0);
+    const taxPct = clampPct((rates && rates.taxPct) || 0);
+    const pctFactor = staffPctFactor == null ? 1 : clampFactor(staffPctFactor);
+    const safeGroupPct = clampPct(groupPct);
+    const safeManualPct = clampPct(manualPct);
 
+    // Each line is rounded to 2 decimal places (round2) below because that rounded figure is what
+    // actually gets stored per-line and shown to the user — instrTime/instrAmount/staffTotal MUST
+    // accumulate those same rounded values, not the raw unrounded ones, or the subtotal these
+    // totals feed into can differ from the sum of the stored/displayed lines by a cent (three
+    // lines of $0.333... each round individually to $0.33, summing to $0.99 — accumulating the
+    // unrounded 0.333...*3 = $1.00 instead would silently disagree with what the user sees added
+    // up by hand).
     let instrTime = 0, instrAmount = 0;
     const instrumentLines = (instruments || []).map((it) => {
       const isTime = (it.cost_unit || 'time') === 'time';
-      const line = isTime ? (it.cost || 0) * bookingHours : (it.cost || 0) * (Number(it.amount) || 0);
+      const cost = clampNonNeg(it.cost);
+      const amount = clampNonNeg(it.amount);
+      const line = round2(isTime ? cost * bookingHours : cost * amount);
       if (isTime) instrTime += line; else instrAmount += line;
       return Object.assign({}, it, { isTime, line });
     });
@@ -589,13 +742,13 @@
     const staffLines = (staff || []).map((p) => {
       const rawHours = (p.start && p.end) ? hoursBetween(p.start, p.end) : bookingHours;
       const billHours = billableStaffHours(rawHours);
-      const line = (p.rate || 0) * billHours * pctFactor;
+      const line = round2(clampNonNeg(p.rate) * billHours * pctFactor);
       staffTotal += line;
       return Object.assign({}, p, { rawHours, billHours, line });
     });
 
     const subtotal = instrTime + instrAmount + staffTotal;
-    const discPct = Math.min(100, (groupPct || 0) + (manualPct || 0));
+    const discPct = Math.min(100, safeGroupPct + safeManualPct);
     const discountAmt = instrTime * (discPct / 100);
     const afterDiscount = subtotal - discountAmt;
     const overheadAmt = afterDiscount * (overheadPct / 100);
@@ -604,11 +757,40 @@
     const total = beforeTax + taxAmt;
 
     return {
-      bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
-      groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
-      overheadPct, overheadAmt, beforeTax, taxPct, taxAmt, total, staffPctFactor: pctFactor
+      bookingHours, instrumentLines, staffLines,
+      instrTime: round2(instrTime), instrAmount: round2(instrAmount), staffTotal: round2(staffTotal), subtotal: round2(subtotal),
+      groupPct: safeGroupPct, manualPct: safeManualPct, discPct, discountAmt: round2(discountAmt), afterDiscount: round2(afterDiscount),
+      overheadPct, overheadAmt: round2(overheadAmt), beforeTax: round2(beforeTax), taxPct, taxAmt: round2(taxAmt), total: round2(total), staffPctFactor: pctFactor
     };
-  }  /* A retired person/instrument keeps its real name in the database — the suffix is added at
+  }
+
+  /* Booking edit "frozen cost snapshot" decision (CLAUDE.md / roadmap: a saved booking's total
+     stays put unless a PRICED input actually changed). Pure and DOM-free on purpose — the real
+     bookingEditSave in app.js reads its two DOM-bound snapshots and hands them here, so this exact
+     decision is what test/unit exercises without needing a modal. `before`/`after` are plain
+     {start, end, manualPct, groupPct, category, groupOrg, instruments:[{id,amount}], staff:[{id,start,end}]}
+     objects; instrument/staff order never matters (both signatures sort by id first). */
+  function instrumentsPriceSig(list) {
+    return (list || []).slice().sort((a, b) => a.id - b.id)
+      .map((it) => `${it.id}:${round2(it.amount)}`).join(',');
+  }
+  function staffPriceSig(list) {
+    return (list || []).slice().sort((a, b) => a.id - b.id)
+      .map((it) => `${it.id}:${it.start || ''}:${it.end || ''}`).join(',');
+  }
+  function bookingPricedInputsChanged(before, after) {
+    if (!before || !after) return true;
+    if ((before.start || '') !== (after.start || '')) return true;
+    if ((before.end || '') !== (after.end || '')) return true;
+    if (round2(before.manualPct) !== round2(after.manualPct)) return true;
+    if (round2(before.groupPct) !== round2(after.groupPct)) return true;
+    if ((before.category || '') !== (after.category || '')) return true;
+    if ((before.groupOrg || '') !== (after.groupOrg || '')) return true;
+    if (instrumentsPriceSig(before.instruments) !== instrumentsPriceSig(after.instruments)) return true;
+    if (staffPriceSig(before.staff) !== staffPriceSig(after.staff)) return true;
+    return false;
+  }
+  /* A retired person/instrument keeps its real name in the database — the suffix is added at
      display time only, so historical records still read back exactly as they were entered. */
   function retiredName(name, isRetired) {
     return isRetired ? String(name == null ? '' : name) + ' (Retired)' : String(name == null ? '' : name);
@@ -637,9 +819,13 @@
      and two people reading the same invoice figure should not see two different numbers.
      Pinning also keeps the exports and the printed reports identical whoever generated them. */
   const MONEY_LOCALE = 'en-US';
+  // round2 (the shared 2-decimal-place rounding helper) is defined once, above, next to
+  // computeBookingBOM — reused here rather than redefined, and reused again by app.js's
+  // service-entry savers so a value rounded before storage can never disagree with how fmtMoney
+  // displays it.
   function fmtMoney(n) {
     const cur = (global.DB && global.DB.getConfig) ? global.DB.getConfig('currency', '$') : '$';
-    return cur + (Math.round((Number(n) || 0) * 100) / 100)
+    return cur + round2(n)
       .toLocaleString(MONEY_LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
@@ -716,6 +902,9 @@
     updateThemeToggleButtons,
     openModal,
     closeDim,
+    closeAllModals,
+    topModal,
+    topDim,
     confirmModal,
     startTour,
     stopTour,
@@ -727,6 +916,7 @@
     noteHtml,
     fmtDate,
     computeBookingBOM,
+    bookingPricedInputsChanged,
     ymd,
     today,
     todayPlusDays,
@@ -736,6 +926,8 @@
     retiredName,
     isSafeUrl,
     fmtMoney,
+    DATE_LOCALE,
+    round2,
     unitLabel,
     msStatusLabel,
     detectOS,

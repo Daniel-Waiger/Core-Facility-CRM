@@ -6,6 +6,7 @@
   const ic = global.UI.icon;
   const fmt = global.UI.fmtDate;
   const today = global.UI.today;
+  const DATE_LOCALE = global.UI.DATE_LOCALE;
 
   /* ---------------- Dashboard ---------------- */
   function dashboard() {
@@ -21,8 +22,8 @@
     const upcoming = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
-      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date <= ? AND m.status != 'done'
-      ORDER BY m.due_date ASC LIMIT 10`, [winStr]);
+      WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date >= ? AND m.due_date <= ? AND m.status != 'done'
+      ORDER BY m.due_date ASC LIMIT 10`, [now, winStr]);
 
     const overdue = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id as project_id, p.title as project_title
@@ -116,7 +117,7 @@
         </div>
         <select class="input select-filter" id="proj-status-filter" style="width:140px">
           <option value="">All Statuses</option>
-          ${global.DB.vocabList('STATUS').map((s) => `<option value="${s}" ${projectFilter.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+          ${global.DB.vocabList('STATUS').map((s) => `<option value="${esc(s)}" ${projectFilter.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
         </select>
         <select class="input select-filter" id="proj-priority-filter" style="width:130px">
           <option value="">All Priorities</option>
@@ -311,8 +312,8 @@
         <span class="faint small font-medium">Quick Status:</span>
         <div class="row" style="gap:6px;flex-wrap:wrap">
           ${global.DB.vocabList('STATUS').map((st) => `
-            <button class="btn btn-sm ${p.status === st ? 'btn-primary' : 'btn-ghost'}" data-act="set-project-status" data-status="${st}">
-              ${st}
+            <button class="btn btn-sm ${p.status === st ? 'btn-primary' : 'btn-ghost'}" data-act="set-project-status" data-status="${esc(st)}">
+              ${esc(st)}
             </button>
           `).join('')}
           <button class="btn btn-sm btn-secondary" data-act="vocab-add" data-cat="STATUS" data-target="" data-label="Status" data-tooltip="Add a custom project status">${ic('plus')} Add Status</button>
@@ -540,11 +541,11 @@
         </div>
       </div>
 
-      <!-- Meetings Card -->
+      <!-- Bookings Card -->
       <div class="card">
         <div class="row mb-8">
-          <div class="grow"><span class="card-title">${ic('calendar')} Meetings &amp; Syncs</span></div>
-          <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Add Meeting</button>
+          <div class="grow"><span class="card-title">${ic('calendar')} Bookings &amp; Syncs</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Add Booking</button>
         </div>
         <div class="card-body">
           ${mtgs.length ? mtgs.map((m) => `
@@ -553,7 +554,7 @@
                 <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email Attendees">${ic('mail')}</button>
-                <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit Meeting">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit Booking">${ic('edit')}</button>
                 ${m.is_cancelled
                   ? `<button class="btn btn-ghost btn-sm" data-act="booking-reinstate" data-id="${m.id}" title="Reinstate — puts it back in the schedule">${ic('rocket')}</button>`
                   : `<button class="btn btn-ghost btn-sm" data-act="meeting-cancel" data-id="${m.id}" title="Cancel — keeps the record, frees the slot">${ic('archive')}</button>`}
@@ -561,7 +562,7 @@
               ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
               ${m.note ? `<div class="small muted mt-8 rte-content">${global.UI.noteHtml(m.note)}</div>` : ''}
               ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
-            </div>`).join('') : emptyState('calendar', 'No meetings recorded', 'Log sync meetings, consultation notes, and action items.')}
+            </div>`).join('') : emptyState('calendar', 'No bookings recorded', 'Log bookings, consultation notes, and action items.')}
         </div>
       </div>
     </div>`;
@@ -658,8 +659,8 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:15%"><col style="width:10%"><col style="width:15%"><col style="width:12%">
-            <col style="width:14%"><col style="width:10%"><col style="width:56px"><col style="width:120px">
+            <col style="width:20%"><col style="width:10%"><col style="width:14%"><col style="width:11%">
+            <col style="width:10%"><col style="width:9%"><col style="width:56px"><col style="width:120px">
             <col style="width:78px"><col style="width:78px">
           </colgroup>
           <thead>
@@ -679,11 +680,11 @@
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
-                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
+                <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
                 <td><span class="badge neutral">${esc(r.type)}</span></td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td>${r.department ? `<span class="chip-sm" style="font-weight:600">${esc(r.department)}</span>` : '<span class="faint small">—</span>'}</td>
-                <td class="muted small">${esc(r.email || '—')}</td>
+                <td class="muted small tbl-email" title="${esc(r.email || '')}">${esc(r.email || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td><span class="badge primary" title="${r.proj_count} active project${r.proj_count === 1 ? '' : 's'}">${r.proj_count}</span></td>
                 <td>${r.is_staff ? `<span class="badge success" data-tooltip="Facility Staff — billable by the hour on bookings">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
@@ -763,14 +764,14 @@
       <div class="tbl-wrap">
         <table class="tbl">
           <colgroup>
-            <col style="width:14%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
-            <col style="width:13%"><col style="width:13%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
+            <col style="width:18%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
+            <col style="width:11%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
           </colgroup>
           <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
-                <td style="font-weight:600">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new bookings">Retired</span>' : ''}</td>
+                <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new bookings">Retired</span>' : ''}</td>
                 <td class="muted small">${esc(r.kind || '—')}</td>
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
                 <td class="faint small">${esc(r.location || '—')}</td>
@@ -778,7 +779,7 @@
                 <td class="faint small">${esc(r.supervisors || '—')}</td>
                 <td class="mono small">${esc(global.UI.fmtMoney(r.cost || 0))}</td>
                 <td class="muted small">${esc(global.UI.unitLabel(r.cost_unit || 'time'))}</td>
-                <td><span class="badge neutral">${r.proj_count} projects</span></td>
+                <td><span class="badge neutral">${r.proj_count} project${r.proj_count === 1 ? '' : 's'}</span></td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
                   ${r.is_retired
@@ -819,7 +820,7 @@
           <button class="btn ${calMode === 'week' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="week">Week</button>
           <button class="btn ${calMode === 'timeline' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="timeline">Timeline</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous ${unitLabel}">${ic('chevron-left')} Prev</button>
-          <button class="btn btn-primary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next ${unitLabel}">Next ${ic('chevron-right')}</button>
           <button class="btn btn-secondary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">${ic('clock')} Agenda</button>
         </div>
@@ -903,13 +904,42 @@
 
   // One event chip, shared by month cells (no styleAttr) and week event blocks (styleAttr carries
   // the absolute top/height positioning from calEventBlockLayout).
-  function calEvChipHtml(e, styleAttr) {
+  //
+  // opts.compactable marks a chip whose box can end up too narrow for its full label to read (the
+  // Resource Timeline's per-instrument lanes, where a short booking's width is a few percent of a
+  // day column) — see the Timeline call site. Rather than guess a width in pixels here (the actual
+  // column width is a grid `1fr` unknown until layout), the chip renders all three label tiers at
+  // once (.ev-label-full/-compact/-icon), and a post-render pass in app.js's renderView (after the
+  // DOM is inserted, so nothing flashes) adds `lbl-compact`/`lbl-icon` to pick whichever tier
+  // actually fits (`scrollWidth > clientWidth`) — a measurement, not an estimate, so it holds at
+  // any column width, and never needs to widen the box itself (CSS shows the full tier again, and
+  // grows the box, on :hover/:focus-visible instead).
+  function calEvChipHtml(e, styleAttr, opts) {
+    const compactable = !!(opts && opts.compactable);
+    const icon = e.kind === 'mt' ? '📅' : '🎯';
+    const cls = `ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}`;
+    const dataAttrs = `data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"`;
+    const title = `title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}"`;
+    if (!compactable) {
+      return `
+      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title}>
+        ${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+      </div>`;
+    }
+    // Resource Timeline chips: a short booking's box (a few percent of a day column) can be too
+    // narrow even for "📅 09:00", let alone the full name. Rather than widen the box (which used
+    // to overlap the neighbouring booking — see the CSS `min-width` this replaces), the chip
+    // carries all three label tiers at once (full / compact-time / icon-only), and a post-render
+    // measuring pass in app.js's renderView adds `lbl-compact`/`lbl-icon` to pick whichever one
+    // actually fits its real, unwidened box — CSS shows only one tier at a time by default, but
+    // reveals the full label again (and grows the box, via :hover/:focus-visible) so it's always
+    // readable without relying solely on the title tooltip's hover delay. tabindex makes that
+    // keyboard-reachable too, not just mouse-hover.
     return `
-      <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
-           style="${styleAttr || ''}"
-           data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
-           title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
-        ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title} tabindex="0">
+        <span class="ev-label-full">${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}</span>
+        <span class="ev-label-compact">${icon} <span class="mono" style="font-size:10px">${esc(e.start_time || '')}</span></span>
+        <span class="ev-label-icon">${icon}</span>
       </div>`;
   }
 
@@ -1004,7 +1034,7 @@
     const base = new Date();
     const shifted = new Date(base.getFullYear(), base.getMonth() + calOffset, 1);
     const sy = shifted.getFullYear(), sm = shifted.getMonth();
-    const monthLabel = shifted.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const monthLabel = shifted.toLocaleDateString(DATE_LOCALE, { month: 'long', year: 'numeric' });
 
     const firstDayOfMonth = new Date(sy, sm, 1);
     const lastDayOfMonth = new Date(sy, sm + 1, 0);
@@ -1074,8 +1104,8 @@
     const byDay = calFetchByDay(startStr, endStr);
     const todayStr = today();
 
-    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
-      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const weekLabel = `${days[0].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
     const dayInfos = days.map((d, i) => {
       const ds = global.UI.ymd(d); // local calendar day, not toISOString() — see calFetchByDay/ymd comments
@@ -1147,8 +1177,8 @@
     const endStr = global.UI.ymd(days[6]);
     const todayStr = today();
 
-    const weekLabel = `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – `
-      + `${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    const weekLabel = `${days[0].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric' })} – `
+      + `${days[6].toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
     // Lanes: every active instrument, plus any retired instrument booked somewhere in this
     // range — history renders (labelled via UI.retiredName), it just doesn't clutter every other
@@ -1199,22 +1229,57 @@
       const dayCells = days.map((d) => {
         const ds = global.UI.ymd(d);
         const evs = byInstDay[inst.id + '|' + ds] || [];
-        const blocksHtml = evs.map((e) => {
+        // Untimed bookings (saved without a start_time) used to ALL render the exact same
+        // full-height strip (left:2px;right:2px;top:2px;bottom:2px) — a second one silently sat
+        // on top of and hid the first, so a lane with more than one untimed booking on the same
+        // day only ever showed one of them. Collected separately here and stacked into thin
+        // horizontal slices of the cell (one per booking) instead, so every untimed booking stays
+        // its own visible, clickable chip.
+        const timedEvs = [], untimedEvs = [];
+        evs.forEach((e) => {
+          (calTimeToPx(e.start_time, CAL_TL_HOUR_PCT) == null ? untimedEvs : timedEvs).push(e);
+        });
+        // Sorted by start so each chip's MIN_W floor can be checked against the NEXT chip's own
+        // left edge — a floor that would push past a neighbour's slot is exactly the ~3px overlap
+        // two back-to-back 1-hour bookings used to show (MIN_W is a generous floor for an
+        // isolated short booking with room to spare; it must never win against an actual
+        // neighbour). Ties (identical leftPct) can't be reordered away, so a neighbour distance of
+        // 0 simply drops the floor entirely for that chip rather than overlapping regardless.
+        const sortedTimed = timedEvs.slice().sort((a, b) => (calTimeToPx(a.start_time, CAL_TL_HOUR_PCT) || 0) - (calTimeToPx(b.start_time, CAL_TL_HOUR_PCT) || 0));
+        const timedHtml = sortedTimed.map((e, i) => {
           // Reuses calTimeToPx (the same time→position math the Week grid uses) at a % scale —
           // see CAL_TL_HOUR_PCT. calEventBlockLayout's own MIN_H clamp assumes px, so its 20px
           // floor isn't reused verbatim here: at a % width, a 20% minimum would make short
           // bookings look hours long, so a small % floor (MIN_W) is applied directly instead.
           const leftPct = calTimeToPx(e.start_time, CAL_TL_HOUR_PCT);
-          if (leftPct == null) {
-            // Untimed booking (saved without a start_time) — still shown, as a full-width strip,
-            // rather than silently vanishing from the lane.
-            return calEvChipHtml(e, 'position:absolute;left:2px;right:2px;top:2px;bottom:2px');
-          }
           const endPct = calTimeToPx(e.end_time, CAL_TL_HOUR_PCT);
           const MIN_W = 4;
-          const widthPct = (endPct != null && endPct > leftPct) ? Math.max(MIN_W, endPct - leftPct) : MIN_W;
-          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px`);
+          const natural = (endPct != null && endPct > leftPct) ? endPct - leftPct : 0;
+          // How far this chip could stretch before it would overlap the NEXT one — the rest of
+          // the day column (100% - leftPct) when this is the last chip of the day. Two bookings
+          // starting at the exact same instant (a rare tie: normally only possible when one of
+          // them is cancelled, since findBookingConflicts blocks real overlaps) leave zero room —
+          // there is no width that avoids overlapping there, so this floors out at (near) 0
+          // rather than reintroduce the ~3px overlap MIN_W used to cause for the common case.
+          const next = sortedTimed[i + 1];
+          const roomPct = next ? Math.max(0, calTimeToPx(next.start_time, CAL_TL_HOUR_PCT) - leftPct) : Math.max(0, 100 - leftPct);
+          const widthPct = Math.min(Math.max(MIN_W, natural), roomPct);
+          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px;z-index:2`, { compactable: true });
         }).join('');
+        // CAL_TL_CELL_H must match .cal-tl-daycell's CSS height (css/app.css); the 2px top/bottom
+        // inset matches the single-untimed-booking case this replaces.
+        const CAL_TL_CELL_H = 34;
+        const availH = CAL_TL_CELL_H - 4;
+        const slotH = untimedEvs.length ? availH / untimedEvs.length : availH;
+        const untimedHtml = untimedEvs.map((e, i) => {
+          const top = 2 + i * slotH;
+          return calEvChipHtml(e, `position:absolute;left:2px;right:2px;top:${top}px;height:${Math.max(slotH - 1, 4)}px`, { compactable: true });
+        }).join('');
+        // Untimed chips are full-width strips (left:2px;right:2px) that would otherwise sit on top
+        // of and swallow any timed chip sharing the same cell, since later DOM order paints last —
+        // emit them FIRST so a timed chip (also lifted with its own z-index above) stays clickable
+        // rather than being hit-tested as whichever untimed strip happens to cover it.
+        const blocksHtml = untimedHtml + timedHtml;
         // A retired instrument's lane still shows its history, but an empty slot in it should not
         // pre-lock a brand-new booking to a resource that's no longer available for new work —
         // omit data-inst there so the click still opens New Booking (date/time prefilled) without
@@ -1286,8 +1351,8 @@
             <div class="faint small">Show the welcome screen, offering "Demo Sandbox &amp; Walkthrough" or "Start Fresh (Empty Workspace)", when the app opens.</div>
           </div>
           <label class="row" style="cursor:pointer;gap:8px">
-            <input type="checkbox" id="pref-hide-startup" ${!hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '0' : '1'); UI.toast('Startup preference updated');" />
-            <span class="small font-medium">Show on startup</span>
+            <input type="checkbox" id="pref-hide-startup" ${hideStartup ? 'checked' : ''} onchange="UI.storage.setItem('crm-hide-startup-modal', this.checked ? '1' : '0'); UI.toast('Startup preference updated');" />
+            <span class="small font-medium">Don't show on startup</span>
           </label>
         </div>
         <div class="row mb-8">
@@ -1324,6 +1389,7 @@
     <div class="card mb-16" data-tour="settings-backup">
       <div class="card-title">${ic('folder')} Portable Data &amp; Backups</div>
       <div class="card-body">
+        ${global.DB.isReadOnly ? `<div class="row mb-8" style="background:var(--warning-soft);border-radius:8px;padding:8px 10px"><div class="grow small">${ic('alert')} This browser tab is read-only: this database is already open in another tab, so changes made here will not be saved. Close this tab, or use the other one instead.</div></div>` : ''}
         <div class="row mb-8">
           <div class="grow">
             <div style="font-weight:600">Single-File Backup &amp; Recovery</div>
@@ -1430,7 +1496,7 @@
             <span class="small font-medium" style="min-width:130px">${esc(p.category)}</span>
             <div class="field" style="margin:0">
               <label class="small faint">Staff %</label>
-              <input type="number" min="0" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} ${p.category === 'assisted session' ? 'oninput="window.App && window.App.syncCategoryBillingHints && window.App.syncCategoryBillingHints()"' : ''} />
+              <input type="number" min="0" max="100" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} ${p.category === 'assisted session' ? 'oninput="window.App && window.App.syncCategoryBillingHints && window.App.syncCategoryBillingHints()"' : ''} />
             </div>
             <label class="row small" style="gap:6px;align-items:center;cursor:pointer">
               <input type="checkbox" class="cat-requires-staff" ${p.requires_staff ? 'checked' : ''} /> Requires facility staff
@@ -1465,7 +1531,7 @@
         ${grants.length ? `
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>Name</th><th>Number</th><th>Note</th><th title="People allowed to be picked for this grant">Allowed Users</th><th style="text-align:right">Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Number</th><th>Note</th><th title="People associated with this grant, for reference — bookings and projects are not restricted to them">Allowed Users</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
               ${grants.map((g) => `
                 <tr class="${g.is_retired ? 'row-retired' : ''}">
@@ -1482,7 +1548,8 @@
                 </tr>`).join('')}
             </tbody>
           </table>
-        </div>` : emptyState('tag', 'No grants yet', 'Add a grant to make it pickable on projects and bookings.')}
+        </div>
+        <div class="faint small mt-8">Allowed Users is for your own reference — it does not restrict who can pick this grant on a project or booking.</div>` : emptyState('tag', 'No grants yet', 'Add a grant to make it pickable on projects and bookings.')}
       </div>
     </div>
 

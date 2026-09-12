@@ -103,6 +103,12 @@
     if (!m.is_cancelled) return '';
     return m.billing_retained ? '  [CANCELLED — charge kept]' : '  [CANCELLED — charge waived]';
   }
+  // The one money rule, shared by the DOCX and PDF paths below (and identical to XLSX's `counts`
+  // everywhere it appears): a row's charge still counts unless it was BOTH cancelled AND waived.
+  // R4: DOCX/PDF used to print the raw stored total_cost unconditionally, so a waived-cancelled
+  // booking/entry showed its full original price here while the XLSX export (and the app's own
+  // Project Costs view) already showed 0 for the same row — this closes that drift.
+  function moneyCounts(row) { return !(row.is_cancelled && !row.billing_retained); }
   function htmlToPlainText(html) {
     let s = '';
     (function walk(node) {
@@ -174,6 +180,213 @@
     return paras;
   }
 
+  /* ---------------- PDF font: Latin + Hebrew + Cyrillic + Greek in one file ----------------
+     jsPDF's built-in "helvetica" is metrics for the WinAnsi encoding only — a Hebrew, Cyrillic or
+     Greek character (a HUJI PI or lab name, say) renders as a blank box or garbled glyph, the same
+     root cause as the '→'/'✓' fix elsewhere in this file. Open Sans Regular covers Latin, the full
+     Hebrew block, Cyrillic and Greek in one ~144KB TTF — one embed, not a per-script font switch —
+     shipped at libs/fonts/OpenSans-Regular.ttf under the SIL Open Font License 1.1 (see
+     libs/fonts/OpenSans-OFL.txt). It does not cover Arabic; PDF_RTL_RE below still recognizes the
+     Arabic block for the bidi reversal (a trivial addition — see PDF_RTL_RE) but an Arabic string
+     drawn with this font still shows the wrong glyphs, same as before.
+
+     Only the Regular weight is shipped, so a bold/italic run that contains a non-Latin1 character
+     is drawn at normal weight in the fallback font rather than not at all — a readable name matters
+     more than a bold one this file can't draw for an unsupported script anyway.
+
+     Loaded lazily: fetched only when a PDF is actually exported (never on app load), and cached in
+     memory for the rest of the session so a second export doesn't re-fetch it. A failed fetch
+     (offline before the first PDF export) falls back to Helvetica for every string and surfaces a
+     toast rather than throwing — the export still completes, just without non-Latin glyphs. */
+  const PDF_FONT_FILE_NAME = 'OpenSans-Regular.ttf';
+  const PDF_FONT_URL = 'libs/fonts/' + PDF_FONT_FILE_NAME;
+  const PDF_FONT_NAME = 'OpenSansMulti';
+  let pdfFontB64Promise = null;
+
+  function loadPdfFontBase64() {
+    if (!pdfFontB64Promise) {
+      pdfFontB64Promise = global.fetch(PDF_FONT_URL)
+        .then((res) => {
+          if (!res || !res.ok) throw new Error('HTTP ' + (res && res.status));
+          return res.arrayBuffer();
+        })
+        .then((buf) => {
+          // btoa needs a binary string; built in chunks so ~150KB of bytes doesn't blow the call
+          // stack through String.fromCharCode.apply's argument limit.
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          const CHUNK = 0x8000;
+          for (let i = 0; i < bytes.length; i += CHUNK) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+          }
+          return global.btoa(binary);
+        })
+        .catch((err) => {
+          pdfFontB64Promise = null; // don't cache a failure — a later export (maybe back online) retries
+          throw err;
+        });
+    }
+    return pdfFontB64Promise;
+  }
+
+  // Registers the font on ONE jsPDF document instance — addFileToVFS/addFont are per-document in
+  // jsPDF, so this runs once per exportPdf() call, not once per session.
+  function registerPdfFontOnDoc(pdf, b64) {
+    pdf.addFileToVFS(PDF_FONT_FILE_NAME, b64);
+    pdf.addFont(PDF_FONT_FILE_NAME, PDF_FONT_NAME, 'normal');
+  }
+
+  // Resolves the font (fetching/caching it the first time), registers it on this document, and
+  // flags success/failure on the document itself (pdf.__pdfMultiFont) — read by pdfText/
+  // pdfSplitTextToSize below — rather than in module state, so two exports in flight can never
+  // stomp on each other's "is it loaded yet" flag. Never rejects: a failure still lets the export
+  // proceed (Helvetica-only) after one toast.
+  function preparePdfFont(pdf) {
+    return loadPdfFontBase64().then((b64) => {
+      registerPdfFontOnDoc(pdf, b64);
+      pdf.__pdfMultiFont = true;
+    }).catch(() => {
+      pdf.__pdfMultiFont = false;
+      UI.toast('Could not load the PDF’s Hebrew/Cyrillic/Greek font (offline?) — non-Latin names may not display correctly in this export.', 'error');
+    });
+  }
+
+  // Hebrew + Arabic (+ their presentation-form blocks) — anything jsPDF's built-in Helvetica
+  // (WinAnsi) cannot draw AND that reads right-to-left, so it also needs the run reversal below.
+  const PDF_RTL_RE = /[\u0591-\u07FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  // Everything outside Latin-1 (which Helvetica/WinAnsi covers) — Cyrillic and Greek included —
+  // triggers the fallback font even when it doesn't also need bidi reversal.
+  function pdfNeedsCustomFont(s) {
+    for (let i = 0; i < s.length; i++) { if (s.charCodeAt(i) > 0x00ff) return true; }
+    return false;
+  }
+
+  // Minimal bidi run-reversal — NOT a full Unicode Bidi Algorithm implementation, just enough for
+  // the strings this app actually draws (a name, a title, a label, and English sentences that
+  // embed one): jsPDF always draws a string strictly left-to-right character-by-character, so a
+  // Hebrew/Arabic run typed in logical (reading) order comes out backwards unless reordered into
+  // visual order first — but the correct reordering depends on which script the STRING as a whole
+  // reads as, same as the real Unicode Bidi Algorithm's own base-direction rule (its first-strong-
+  // character heuristic, simplified here to one scan):
+  //
+  //  - A string that opens with a Latin letter is an LTR sentence with an RTL run embedded in it —
+  //    "Principal Investigator: <a Hebrew name>   |   Funding: —" is exactly this shape. Only the
+  //    embedded run itself needs reversing (in place); the English labels and their order must not
+  //    move, or the labels themselves come out scrambled (confirmed by rendering this exact case:
+  //    reversing the WHOLE line moved "Principal Investigator:" to the end of it).
+  //  - A string that opens with an RTL letter (a lab name given entirely in Hebrew, say) reads as
+  //    an RTL paragraph: the whole string reverses, including which of two Hebrew words ends up
+  //    drawn further left — reversing only the embedded run's own characters would leave the WORDS
+  //    in reading order instead of visual order. Any embedded digit/Latin run (a number, a Western
+  //    name) still needs its own internal order restored after that whole-string reversal.
+  //
+  // A single interior space is allowed inside an RTL run (so "שרה כהן", a first+last name, reverses
+  // as one two-word unit) without extending the run across a genuinely non-RTL boundary.
+  const PDF_RTL_RUN_RE = /[\u0591-\u07FF](?:[\u0591-\u07FF ]*[\u0591-\u07FF])?/g;
+  // Item 6 (second review) \u2014 investigated further than the reported bug: pdfBidiReverse used to
+  // follow the whole-string reversal with `reversed.replace(PDF_LTR_RUN_RE, run =>
+  // run.split('').reverse().join(''))`, manually un-reversing each embedded LTR/digit run back into
+  // reading order. That regex had a real bug (a boundary space got swept into the run and glued the
+  // run to the neighbouring RTL word), but fixing the regex alone does not fix the actual PDF: the
+  // bundled jsPDF's own __bidiEngine__ ALSO detects an embedded LTR/digit run inside a string that
+  // contains RTL characters and restores ITS reading order on its own \u2014 independent of, and without
+  // knowledge of, whatever this function already did to the string. Handing jsPDF a string whose
+  // embedded run was already manually un-reversed made jsPDF un-reverse it a SECOND time, so the
+  // digits/Latin text drawn on the actual page came out backwards again regardless of the regex.
+  // Verified empirically on glyph x-origins in a real generated PDF (PyMuPDF get_texttrace, per
+  // docs/cma-lessons.md's "a rendered image is not evidence for bidi"), across digits, multi-word
+  // Latin phrases, money ("$1,234.56"), and an email address: jsPDF's own engine restores every one
+  // of these correctly, and MORE completely than the old regex's fixed character class ever could
+  // (multi-word phrases in particular \u2014 the regex only ever allowed a single interior space). A
+  // pure-RTL string with no embedded LTR run (checked the same way) is NOT touched further by jsPDF,
+  // matching this function's existing "leaves it in logical order" behavior for that case. So the
+  // correct fix removes the manual run un-reversal entirely for a base-RTL line: jsPDF's own engine
+  // already does this job, correctly, given the plain whole-string reversal below.
+  // Item 7 (second review): this only recognized plain ASCII Latin (/[A-Za-z]/) as a strong LTR
+  // character. A line whose first strong character is Latin-1/Latin Extended (an accented name —
+  // "Rene", "Muller"), Greek or Cyrillic fell through to the RTL branch below on nothing but a
+  // later Hebrew/Arabic character, and the WHOLE line got reversed wholesale — scrambling the very
+  // Latin/Greek/Cyrillic name that should have stayed in reading order at the front of the line.
+  // Widened to cover exactly the scripts this app's own bundled font (preparePdfFont, above) can
+  // draw and that read left-to-right: Latin (ASCII + Latin-1 Supplement + Latin Extended-A/B,
+  // plus Latin Extended Additional), Greek, and Cyrillic (plus Cyrillic Supplement).
+  // C4-followups #4: the Latin-1 Supplement range À-ʯ this used to span whole is not ALL letters —
+  // × (U+00D7, multiplication sign) and ÷ (U+00F7, division sign) sit inside it but are ordinary
+  // neutral punctuation, not strong LTR characters. Counting them as strong LTR made a line that is
+  // otherwise all Hebrew/Arabic (e.g. "× שלום עולם") misclassify as base-LTR on nothing but a math
+  // symbol, so pdfBaseIsRtl() never reversed it and the whole line drew in logical (backwards)
+  // order. The range is split around exactly those two code points (À–Ö, Ø–ö, ø–ʯ) so every
+  // accented Latin letter between them — Ø, ß, à, é, ñ, ö and the rest — still counts as strong
+  // LTR, and the verdict comes from the FIRST real letter instead.
+  const PDF_STRONG_LTR_RE = /[A-Za-zÀ-ÖØ-öø-ʯͰ-ϿЀ-ӿԀ-ԯḀ-ỿ]/;
+  function pdfBaseIsRtl(s) {
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (PDF_STRONG_LTR_RE.test(c)) return false;
+      if (PDF_RTL_RE.test(c)) return true;
+    }
+    return false; // no strong (directional) character found — digits/punctuation only
+  }
+  // The bundled jsPDF ships its own bidi engine, and it handles a MIXED line (an English label
+  // with a Hebrew name in it) correctly on its own — but it leaves a line that is predominantly
+  // right-to-left in logical order, which draws backwards. So this helper only touches lines whose
+  // base direction is RTL; for a base-LTR line it must be a no-op, or the two reorderings cancel
+  // each other and the name comes out scrambled. Verified on glyph x-origins in the content
+  // stream, not on a rendered image (a viewer re-applies bidi and would hide the error).
+  //
+  // C4-followups #3: a plain character-by-character reversal flips the ORDER of a pair of mirrored
+  // brackets but not which glyph each position draws — so "(דנה)" (open, name, close) reverses to
+  // "(", then the name, then ")" in REVERSE character order, i.e. the glyph sequence ")…(", which
+  // draws as a close-paren on the left and an open-paren on the right: backwards-looking brackets
+  // around a now-correctly-ordered name. A real bidi renderer mirrors paired characters (U+0028
+  // "(" draws as ")" and vice versa) precisely to counteract this. jsPDF's own engine does this for
+  // an embedded LTR run it re-reverses, but never sees these brackets at all when they sit in an
+  // otherwise-RTL string with no embedded LTR run for it to touch — which is exactly this function's
+  // job. Map each paired bracket to its mirror once the reversal has already put it in visual order.
+  const PDF_BIDI_MIRROR_MAP = { '(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '<': '>', '>': '<' };
+  // A plain whole-string character reversal is ALL a base-RTL line needs here — see the item 6
+  // comment above PDF_RTL_RUN_RE for why an additional manual pass to "restore" an embedded LTR/
+  // digit run's reading order is not just unnecessary but actively wrong: jsPDF's own engine
+  // already restores that run's reading order on its own once it sees RTL characters in the string,
+  // so doing it here too un-reverses it a second time and the run is drawn backwards on the page.
+  function pdfBidiReverse(s) {
+    if (!PDF_RTL_RE.test(s)) return s;
+    if (!pdfBaseIsRtl(s)) return s;
+    return s.split('').reverse().map((c) => PDF_BIDI_MIRROR_MAP[c] || c).join('');
+  }
+
+  // Runs fn() with the doc's font temporarily switched to the multi-script font when `text` needs
+  // it (see pdfNeedsCustomFont) and the font actually loaded, restoring the caller's exact
+  // font+style afterward — so a heading's bold Helvetica, say, is never left clobbered for whatever
+  // text() call comes next. No-ops when the font isn't needed or isn't loaded.
+  function withPdfFont(pdf, text, fn) {
+    const str = String(text == null ? '' : text);
+    if (!pdf.__pdfMultiFont || !pdfNeedsCustomFont(str)) return fn();
+    const prev = pdf.getFont();
+    pdf.setFont(PDF_FONT_NAME, 'normal');
+    const result = fn();
+    pdf.setFont(prev.fontName, prev.fontStyle);
+    return result;
+  }
+
+  // The one helper every text-drawing call in the PDF path goes through: reverses RTL runs into
+  // visual order, and switches to the multi-script font for the call when the text needs it.
+  function pdfText(pdf, text, x, y, opts) {
+    const str = String(text == null ? '' : text);
+    const display = pdfBidiReverse(str);
+    return withPdfFont(pdf, str, () => pdf.text(display, x, y, opts));
+  }
+
+  // Same idea for splitTextToSize, which measures wrap width with whatever font is currently set —
+  // switch to the multi-script font first when the text needs it so line breaks land in the same
+  // place they would if the font were set permanently. Bidi reversal is applied per returned line
+  // by the caller (via pdfText), not here, since reversing before wrapping would wrap on the wrong
+  // (visual, not logical) character boundaries.
+  function pdfSplitTextToSize(pdf, text, maxWidth) {
+    const str = String(text == null ? '' : text);
+    return withPdfFont(pdf, str, () => pdf.splitTextToSize(str, maxWidth));
+  }
+
   // Render note HTML into a jsPDF doc. `cur` = { get y / set y, checkPage } so page-break
   // bookkeeping stays in sync with the caller's cursor. Returns the final y.
   function htmlToPdf(pdf, html, x, width, cur) {
@@ -191,7 +404,7 @@
         if (line === '') return;
         checkPage(6);
         setStyle(lineStyle || {});
-        pdf.text((bullet ? '• ' : '') + line, startX, cur.y);
+        pdfText(pdf, (bullet ? '• ' : '') + line, startX, cur.y);
         cur.y += 4.6;
         line = '';
       };
@@ -208,7 +421,8 @@
           if (!word) return;
           setStyle(r.style);
           const test = line + word;
-          if (pdf.getTextWidth((bullet ? '• ' : '') + test) > avail && line !== '') {
+          const testWidth = withPdfFont(pdf, test, () => pdf.getTextWidth((bullet ? '• ' : '') + test));
+          if (testWidth > avail && line !== '') {
             flush();
             bullet = false;               // wrapped continuation lines are not re-bulleted
             line = word.replace(/^\s+/, '');
@@ -316,13 +530,17 @@
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
+    // One tier-name lookup built up front rather than a SELECT per booking row (see
+    // DB.buildTierLabelMap) — a per-project export is usually small, but there's no reason to pay
+    // even that per row when the same one-time query answers every row.
+    const tierMap = DB.buildTierLabelMap();
     const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
     ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
@@ -378,6 +596,7 @@
     if (!docx) { UI.toast('DOCX library not loaded', 'error'); return; }
 
     const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle } = docx;
+    const tierMap = DB.buildTierLabelMap(); // one query instead of one per meeting below
 
     const children = [
       new Paragraph({ text: d.p.title, heading: HeadingLevel.TITLE }),
@@ -452,8 +671,8 @@
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
         if (m.total_cost) {
-          if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id)}`, italics: true }));
-          children.push(new Paragraph({ text: `Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, bold: true }));
+          if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id, tierMap)}`, italics: true }));
+          children.push(new Paragraph({ text: `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, bold: true }));
         }
       });
     } else {
@@ -468,7 +687,7 @@
         if (e.person_name) children.push(new Paragraph({ text: `Staff: ${UI.retiredName(e.person_name, e.person_retired)}`, italics: true }));
         if (e.instrument_name) children.push(new Paragraph({ text: `Instrument: ${UI.retiredName(e.instrument_name, e.instrument_retired)}`, italics: true }));
         if (e.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(e)}`, italics: true }));
-        children.push(new Paragraph({ text: `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${e.rate || 0}   |   Total: ${e.total_cost || 0}`, bold: true }));
+        children.push(new Paragraph({ text: `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, bold: true }));
       });
     } else {
       children.push(new Paragraph({ text: 'No service entries recorded.' }));
@@ -507,6 +726,9 @@
   }
 
   /* ---------------- Multi-Page PDF Export ---------------- */
+  // The font is fetched lazily (only when a PDF is actually exported), so building the document
+  // waits on that one async step; nothing else here needs to be async, and the dispatcher in
+  // app.js does not await this call (fire-and-forget, same as every other export action).
   function exportPdf(id) {
     const d = loadProject(id);
     if (!d) { UI.toast('Project not found', 'error'); return; }
@@ -514,6 +736,11 @@
     if (!jsPDF) { UI.toast('jsPDF library not loaded', 'error'); return; }
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    return preparePdfFont(pdf).then(() => buildPdfBody(pdf, d));
+  }
+
+  function buildPdfBody(pdf, d) {
+    const tierMap = DB.buildTierLabelMap(); // one query instead of one per meeting below
     const pageHeight = 280;
     const margin = 14;
     let y = 20;
@@ -525,7 +752,7 @@
         // Header on extra pages
         pdf.setFontSize(8);
         pdf.setTextColor(140, 150, 165);
-        pdf.text(`Core Facility Tracker • ${d.p.code} • ${d.p.title}`, margin, 10);
+        pdfText(pdf, `Core Facility Tracker • ${d.p.code} • ${d.p.title}`, margin, 10);
         pdf.line(margin, 12, 210 - margin, 12);
         pdf.setTextColor(20, 20, 20);
       }
@@ -537,7 +764,7 @@
       pdf.setFontSize(12);
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(79, 70, 229); // Primary indigo
-      pdf.text(text, margin, y);
+      pdfText(pdf, text, margin, y);
       y += 2;
       pdf.setDrawColor(226, 232, 240);
       pdf.line(margin, y, 210 - margin, y);
@@ -549,13 +776,13 @@
     // Title
     pdf.setFontSize(18);
     pdf.setFont('helvetica', 'bold');
-    pdf.text(d.p.title, margin, y);
+    pdfText(pdf, d.p.title, margin, y);
     y += 7;
 
     pdf.setFontSize(10);
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(100, 116, 139);
-    pdf.text(`Core Facility Project Report • Code: ${d.p.code} • Created: ${UI.fmtDate(d.p.created_at)}`, margin, y);
+    pdfText(pdf, `Core Facility Project Report • Code: ${d.p.code} • Created: ${UI.fmtDate(d.p.created_at)}`, margin, y);
     y += 8;
 
     // Summary Box
@@ -565,22 +792,25 @@
     y += 6;
     pdf.setFontSize(9);
     pdf.setTextColor(20, 20, 20);
-    pdf.text(`Status: ${d.p.status}   |   Priority: ${d.p.priority || 'Medium'}   |   Progress: ${d.prog.pct}% (${d.prog.done}/${d.prog.total} milestones done)`, margin + 4, y);
+    pdfText(pdf, `Status: ${d.p.status}   |   Priority: ${d.p.priority || 'Medium'}   |   Progress: ${d.prog.pct}% (${d.prog.done}/${d.prog.total} milestones done)`, margin + 4, y);
     y += 6;
-    pdf.text(`Principal Investigator: ${d.p.pi_name || '—'}   |   Funding: ${d.p.funding || '—'}   |   Modality: ${d.p.modality || '—'}`, margin + 4, y);
+    pdfText(pdf, `Principal Investigator: ${d.p.pi_name || '—'}   |   Funding: ${d.p.funding || '—'}   |   Modality: ${d.p.modality || '—'}`, margin + 4, y);
     y += 6;
-    pdf.text(`Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} → ${UI.fmtDate(d.p.end_date)}`, margin + 4, y);
+    // R6: '→' (U+2192) is outside WinAnsi, the only encoding jsPDF's built-in Helvetica supports —
+    // it silently renders as a blank/garbled glyph, unlike the DOCX path just above (a real
+    // Word/LibreOffice font renders it fine, so that one keeps the arrow). ASCII "to" instead.
+    pdfText(pdf, `Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} to ${UI.fmtDate(d.p.end_date)}`, margin + 4, y);
     y += 6;
-    pdf.text(`Grant: ${grantLabelFor(d.p)}`, margin + 4, y);
+    pdfText(pdf, `Grant: ${grantLabelFor(d.p)}`, margin + 4, y);
     y += 12;
 
     if (d.p.notes) {
       addHeading('Project Notes');
       pdf.setFontSize(9);
-      const splitNotes = pdf.splitTextToSize(d.p.notes, 210 - (margin * 2));
+      const splitNotes = pdfSplitTextToSize(pdf, d.p.notes, 210 - (margin * 2));
       for (const line of splitNotes) {
         checkPage(5);
-        pdf.text(line, margin, y);
+        pdfText(pdf, line, margin, y);
         y += 5;
       }
     }
@@ -593,11 +823,14 @@
         checkPage(12);
         // Derive from the shared UI.msStatusLabel map (not a hand-rolled ternary) so a
         // facility-added status shows its own label here instead of silently reading "PENDING".
-        const statusPrefix = `[${m.status === 'done' ? '✓ ' : ''}${UI.msStatusLabel(m.status).toUpperCase()}]`;
+        // R6: '✓' (U+2713) is also outside WinAnsi and unrenderable here (see the '→' fix above)
+        // — dropped rather than replaced with an ASCII stand-in, since UI.msStatusLabel already
+        // spells out "DONE" right after it, so the checkmark was pure decoration, not information.
+        const statusPrefix = `[${UI.msStatusLabel(m.status).toUpperCase()}]`;
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`${statusPrefix} ${m.name}`, margin, y);
+        pdfText(pdf, `${statusPrefix} ${m.name}`, margin, y);
         pdf.setFont('helvetica', 'normal');
-        pdf.text(`Due: ${UI.fmtDate(m.due_date)}`, 160, y);
+        pdfText(pdf, `Due: ${UI.fmtDate(m.due_date)}`, 160, y);
         y += 5;
         if (m.owners || m.instruments || m.note) {
           const detail = [
@@ -607,7 +840,7 @@
           ].filter(Boolean).join(' • ');
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(detail, margin + 4, y);
+          pdfText(pdf, detail, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 5;
@@ -615,7 +848,7 @@
       });
     } else {
       pdf.setFontSize(9);
-      pdf.text('No milestones recorded.', margin, y);
+      pdfText(pdf, 'No milestones recorded.', margin, y);
       y += 6;
     }
 
@@ -626,12 +859,12 @@
       d.ppl.forEach((pe) => {
         checkPage(6);
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
+        pdfText(pdf, `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
         y += 5;
       });
     } else {
       pdf.setFontSize(9);
-      pdf.text('No team members assigned.', margin, y);
+      pdfText(pdf, 'No team members assigned.', margin, y);
       y += 6;
     }
 
@@ -641,12 +874,12 @@
       pdf.setFontSize(9);
       d.inst.forEach((i) => {
         checkPage(6);
-        pdf.text(`• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}`, margin, y);
+        pdfText(pdf, `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}`, margin, y);
         y += 5;
       });
     } else {
       pdf.setFontSize(9);
-      pdf.text('No instruments assigned.', margin, y);
+      pdfText(pdf, 'No instruments assigned.', margin, y);
       y += 6;
     }
 
@@ -659,13 +892,13 @@
         pdf.setFont('helvetica', 'bold');
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
         const catStr = m.category ? ` [${m.category}]` : '';
-        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, margin, y);
+        pdfText(pdf, `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (m.grant_id) {
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(`Grant: ${grantLabelFor(m)}`, margin + 4, y);
+          pdfText(pdf, `Grant: ${grantLabelFor(m)}`, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 4;
@@ -673,7 +906,7 @@
         if (m.attendees) {
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(`Attendees: ${m.attendees}`, margin + 4, y);
+          pdfText(pdf, `Attendees: ${m.attendees}`, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 4;
@@ -687,7 +920,7 @@
         if (m.actions) {
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
-          pdf.text(`Actions: ${m.actions}`, margin + 4, y);
+          pdfText(pdf, `Actions: ${m.actions}`, margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
@@ -696,14 +929,14 @@
             checkPage(5);
             pdf.setFontSize(8);
             pdf.setTextColor(100, 116, 139);
-            pdf.text(`Tier: ${DB.tierLabel(m.tier_id)}`, margin + 4, y);
+            pdfText(pdf, `Tier: ${DB.tierLabel(m.tier_id, tierMap)}`, margin + 4, y);
             pdf.setTextColor(20, 20, 20);
             pdf.setFontSize(9);
             y += 4;
           }
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
-          pdf.text(`Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, margin + 4, y);
+          pdfText(pdf, `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
@@ -718,7 +951,7 @@
       d.entries.forEach((e) => {
         checkPage(14);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`${UI.fmtDate(e.date)}: ${e.description}${bookingStatusSuffix(e)}`, margin, y);
+        pdfText(pdf, `${UI.fmtDate(e.date)}: ${e.description}${bookingStatusSuffix(e)}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         const bits = [];
@@ -728,14 +961,14 @@
         if (bits.length) {
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(bits.join('   |   '), margin + 4, y);
+          pdfText(pdf, bits.join('   |   '), margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 4;
         }
         checkPage(6);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${e.rate || 0}   |   Total: ${e.total_cost || 0}`, margin + 4, y);
+        pdfText(pdf, `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, margin + 4, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         y += 2;
@@ -753,14 +986,14 @@
         // ', logged' because prose has no header legend to carry a '*'.
         const when = o.date ? ' (' + UI.fmtDate(o.date) + ')'
           : (o.eff_date ? ' (' + UI.fmtDate(o.eff_date) + ', logged)' : '');
-        pdf.text(`[${o.type.toUpperCase()}] ${o.title}${when}`, margin, y);
+        pdfText(pdf, `[${o.type.toUpperCase()}] ${o.title}${when}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (o.reference || o.note) {
           const detail = [o.reference, o.note].filter(Boolean).join(' — ');
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(detail, margin + 4, y);
+          pdfText(pdf, detail, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 5;
@@ -774,7 +1007,7 @@
       pdf.setFontSize(9);
       d.kv.forEach((k) => {
         checkPage(6);
-        pdf.text(`• ${k.key}: ${k.value}`, margin, y);
+        pdfText(pdf, `• ${k.key}: ${k.value}`, margin, y);
         y += 5;
       });
     }
@@ -785,7 +1018,7 @@
       pdf.setPage(i);
       pdf.setFontSize(8);
       pdf.setTextColor(140, 150, 165);
-      pdf.text(`Page ${i} of ${totalPages}`, 210 / 2, 290, { align: 'center' });
+      pdfText(pdf, `Page ${i} of ${totalPages}`, 210 / 2, 290, { align: 'center' });
     }
 
     pdf.save(`${d.p.code}_${d.p.title.replace(/[^a-z0-9_-]/gi, '_')}.pdf`);
@@ -835,8 +1068,8 @@
     const msRows = [['Project Code', 'Project', 'Milestone', 'Status', 'Due Date', 'Owners', 'Instruments', 'Notes']];
     DB.rows(`
       SELECT m.*, p.code as project_code, p.title as project_title,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
       FROM milestones m JOIN projects p ON p.id = m.project_id
       ORDER BY p.code ASC, m.due_date IS NULL, m.due_date ASC, m.id ASC`).forEach((m) => {
       msRows.push([m.project_code, m.project_title, m.name, m.status, m.due_date || '—', m.owners || '—', m.instruments || '—', m.note || '']);
@@ -890,29 +1123,59 @@
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
     // computeBookingBOM in app.js at the time the booking was saved).
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    //
+    // R7: this sheet used to have no way to check the Subtotal -> Before Tax -> Total Cost
+    // arithmetic for a given row — the two percentages that bridge those columns weren't exported
+    // anywhere. Adding "Overhead %" and "Effective Tax %" closes that without touching the meaning
+    // of any existing column (Subtotal/Before Tax/Total Cost are exactly what they always were):
+    //   - Overhead % is the tier percent SNAPSHOTTED onto the booking at save time
+    //     (meetings.tier_overhead_pct) — the actual number applied, not today's tier setting. It
+    //     reads blank for a booking priced via the legacy Internal+External fallback (no tier
+    //     assigned), because that resolved percent was never itself snapshotted onto the row — see
+    //     resolveOverheadForOrg in db.js — so it cannot be reconstructed after the fact; this gap is
+    //     disclosed via the Notes-equivalent comment inline below rather than guessed at.
+    //   - Effective Tax % is DERIVED from the two already-stored totals (total_cost / before_tax),
+    //     not read from today's Settings tax rate — so it stays correct even if the facility's tax
+    //     rate has since changed. It reads blank when Before Tax is 0 (nothing to divide by) or the
+    //     booking's charge was waived (counts=false below) — a waived Total Cost is deliberately 0
+    //     by policy, not a tax outcome, so a percentage there would be meaningless.
+    // R8/verifier gap: on a waived-cancelled row, Subtotal/Before Tax are the unchanged
+    // priced-at-booking-time snapshot (same rule the per-project Meetings sheet's Subtotal/Before
+    // Tax columns already follow — see the R4 test) while the final money column zeroes to what
+    // the facility actually bills. Left labelled "Total Cost" that reads as a broken row (146.67 →
+    // 164.12 → 0, tax blank); naming it "Charged Total" instead — no different value, no
+    // Subtotal/Before Tax change — makes plain that this column, unlike the two before it, answers
+    // "what got billed", so a 0 next to an untouched Subtotal is expected, not an arithmetic gap.
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Charged Total']];
+    // One tier-name lookup for the whole sheet (see DB.buildTierLabelMap) instead of a SELECT per
+    // booking row — this sheet is every booking the facility has ever logged, so at scale that was
+    // the single largest source of repeated queries in this export.
+    const bcTierMap = DB.buildTierLabelMap();
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = mt.id) as staff
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = mt.id) as staff
       FROM meetings mt
       LEFT JOIN projects p ON p.id = mt.project_id
       LEFT JOIN grants g ON g.id = mt.grant_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      // A waived cancellation contributes 0 to the Total Cost column so the column sums to what
+      // A waived cancellation contributes 0 to the Charged Total column so the column sums to what
       // the facility actually bills; the Status column says why.
       const counts = !(m.is_cancelled && !m.billing_retained);
+      const beforeTax = m.total_before_tax || 0;
+      const overheadPct = m.tier_overhead_pct == null ? '' : round2(m.tier_overhead_pct);
+      const effectiveTaxPct = (counts && beforeTax > 0) ? round2((((m.total_cost || 0) / beforeTax) - 1) * 100) : '';
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id),
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, bcTierMap),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
-        m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0
+        overheadPct, beforeTax, effectiveTaxPct, counts ? (m.total_cost || 0) : 0
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     // Sheet 7: Service Entries (roadmap 2.3) — standalone billable work outside any booking,
@@ -960,6 +1223,27 @@
     wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
 
+    // Final sheet: Notes — mirrors the Reports & Utilization export's own Notes sheet (a plain,
+    // one-column explanation) so the figures above can be read without this code open alongside
+    // them. Appended LAST rather than first: every sheet above is read positionally by row-builder
+    // logic other packages may be editing concurrently, and appending here can never shift an
+    // existing sheet's index or column layout.
+    const allNotes = [
+      ['FACILITY-WIDE EXPORT — NOTES'],
+      [''],
+      ['Legacy pricing ("Bookings & Costs" Overhead % column is blank)'],
+      ['A booking priced before any pricing tier existed, or never assigned one (Tier column shows "—"), was actually charged the facility-wide legacy overhead percentage in effect at the time, not a tier\'s own rate — that resolved percentage was never itself stored on the booking, so it cannot be reconstructed after the fact. Overhead % is left blank for that row rather than showing a misleading 0%.'],
+      [''],
+      ['Cancelled bookings and service entries'],
+      ['The Status column marks a cancellation as either "Cancelled (charged)" (the charge was retained) or "Cancelled (waived)" (the charge was dropped). A waived row\'s final money column (Charged Total on Bookings & Costs, Total Cost on Service Entries) is zeroed even though its stored Subtotal/Before Tax figures are not — so the columns can look inconsistent for that row on purpose: the money columns show what was actually billed, not what the booking would have cost if it had run.'],
+      [''],
+      ['"(Retired)" suffix'],
+      ['A retired person or instrument, or a discontinued instrument shown elsewhere as "Retired", is never deleted or renamed — deleting it would erase real history (who attended, which instrument ran a session). This export marks it with a trailing "(Retired)" wherever its name appears, so historical rows stay attributed correctly without pretending the person or instrument is still active.']
+    ];
+    const wsAllNotes = XLSX.utils.aoa_to_sheet(allNotes);
+    wsAllNotes['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, wsAllNotes, 'Notes');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
   }
@@ -987,16 +1271,21 @@
     const Reports = global.Reports;
     if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
 
-    const instr = Reports.computeInstrumentRows(from, to);
-    const staff = Reports.computeStaffRows(from, to);
-    const matrix = Reports.computeStaffInstrumentMatrix(from, to);
-    const proj = Reports.computeProjectRows(from, to);
-    const stewardship = Reports.computeStewardshipRows(from, to);
-    const consult = Reports.computeConsultRows(from, to);
-    const svc = Reports.computeServiceEntryRows(from, to);
-    const breadth = Reports.computeBreadthRows(from, to);
-    const mix = Reports.computeActivityMixRows(from, to);
-    const funnel = Reports.computeFunnelRows(from, to);
+    // One facts bundle shared across every compute* call below (same pattern as Reports.render())
+    // — each of these used to run its own loadMeetingsInRange/loadInstrumentLines/etc query even
+    // though every card is reading the exact same (from,to); this way each runs at most once, and
+    // computeStewardshipRows reuses the instrument/consult rows computed on the lines just above it.
+    const facts = Reports.makeFacts(from, to);
+    const instr = Reports.computeInstrumentRows(from, to, facts);
+    const staff = Reports.computeStaffRows(from, to, facts);
+    const matrix = Reports.computeStaffInstrumentMatrix(from, to, facts);
+    const proj = Reports.computeProjectRows(from, to, facts);
+    const stewardship = Reports.computeStewardshipRows(from, to, facts);
+    const consult = Reports.computeConsultRows(from, to, facts);
+    const svc = Reports.computeServiceEntryRows(from, to, facts);
+    const breadth = Reports.computeBreadthRows(from, to, facts);
+    const mix = Reports.computeActivityMixRows(from, to, facts);
+    const funnel = Reports.computeFunnelRows(from, to, facts);
     const labConsultsOn = Reports.getLabConsultsEnabled(); // mirror the on-screen opt-in toggle exactly
 
     const wb = XLSX.utils.book_new();
@@ -1016,8 +1305,11 @@
       ['Money rule (Revenue / Total Cost columns)'],
       ["A booking's charge still counts unless it was BOTH cancelled AND the charge was waived. So a cancelled-but-charged booking still contributes revenue even though it contributes zero occupied hours — the facility got paid for a slot nobody used."],
       [''],
+      ['"Line Charges" columns (Instrument Utilisation / Facility Staff Time sheets)'],
+      ['Line Charges is the sum of each booking\'s raw instrument- or staff-time line, BEFORE that booking\'s group/manual discount, overhead, or tax is applied (those are computed once per whole booking, not per line). It will not match a project\'s Total Cost on the Projects & Groups sheet, which is after all three — the two numbers are answering different questions ("what did this line cost before anything was applied to it" vs. "what did the facility actually bill for the booking").'],
+      [''],
       ['Staff x Instrument attribution'],
-      ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total.'],
+      ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total. A booking with no instrument line at all (a pure consult/sync) still has real staff hours, so those are grouped under a "No Instrument" row rather than dropped from this sheet.'],
       [''],
       ['Instrument stewardship scorecard'],
       ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. Omitted on purpose (need data this app does not track yet): trained-user pool trend and downtime share.'],
@@ -1046,7 +1338,7 @@
     XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
 
     // Sheet 2: Instrument utilization
-    const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Billed Revenue', 'Share of Total Hours %']];
+    const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Line Charges', 'Share of Total Hours %']];
     instr.rows.forEach((r) => {
       instrRows.push([UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), round2(r.sharePct)]);
     });
@@ -1059,7 +1351,7 @@
     XLSX.utils.book_append_sheet(wb, wsInstr, 'Instrument Utilisation');
 
     // Sheet 3: Facility staff time
-    const staffRows = [['Staff Member', 'Sessions', 'Raw Hours', 'Billed Hours', 'Staff Revenue']];
+    const staffRows = [['Staff Member', 'Sessions', 'Raw Hours', 'Billed Hours', 'Line Charges']];
     staff.rows.forEach((r) => {
       staffRows.push([UI.retiredName(r.name, r.retired), r.sessions, round2(r.rawHours), round2(r.billHours), round2(r.revenue)]);
     });
@@ -1093,7 +1385,7 @@
     // supervisor count). Fed from the exact same Reports.computeStewardshipRows the screen
     // renders from. A shared instrument repeats under every supervisor it's linked to — see the
     // Notes sheet for why that's intentional.
-    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Revenue', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
+    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Line Charges', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
     stewardship.groups.forEach((g) => {
       const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
       g.rows.forEach((r) => {
@@ -1196,7 +1488,7 @@
     if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
 
     const from = spec.from || '', to = spec.to || '';
-    const result = Reports.computeCustomRows(spec, from, to);
+    const result = Reports.computeCustomRows(spec, from, to, Reports.makeFacts(from, to));
     if (!result.columns.length) { UI.toast('Select at least one column', 'error'); return; }
 
     const wb = XLSX.utils.book_new();
@@ -1246,6 +1538,11 @@
     UI.toast('Exported custom report to XLSX');
   }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx };
+  global.Exports = {
+    exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx,
+    // Exposed for test/unit/exports.test.js only (the RTL bidi helper and the lazy font loader) —
+    // no other file in the app reads these directly.
+    _pdfBidiReverse: pdfBidiReverse, _preparePdfFont: preparePdfFont,
+  };
 
 })(window);

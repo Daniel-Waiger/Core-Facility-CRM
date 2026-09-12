@@ -500,21 +500,68 @@
 
     // One-time migration of the legacy overhead_internal/overhead_external app_config pair into
     // two default tiers, so an existing facility sees its old rates as named, editable tiers
-    // instead of losing them. Only runs once (pricing_tiers starts empty) and only when there was
-    // actually a legacy rate configured — a brand-new database with no app_config rows yet gets no
-    // tiers either, same as it would get no group_discounts rows. LEGACY FALLBACK STAYS IN FORCE
-    // regardless: any org with no group_tiers row keeps pricing at the (unedited-from-here-on)
-    // overhead_internal + overhead_external sum — see resolveOverheadForOrg — so an untouched
-    // facility (or a group nobody ever assigns a tier to) behaves exactly as before this feature.
+    // instead of losing them. Guarded by 'pricing_tiers_seeded' rather than just "pricing_tiers is
+    // empty": migrate() runs on EVERY boot of an existing database, and without the flag, a
+    // facility that deletes both default tiers (a real zero-ref Delete is offered once nothing
+    // references them) got them right back on the next reload, because the legacy config values
+    // are never cleared. The flag makes this genuinely one-time — set the moment this block is
+    // evaluated at all, whether or not it actually had anything to seed — so a re-empty table never
+    // re-triggers it. LEGACY FALLBACK STAYS IN FORCE regardless: any org with no group_tiers row
+    // keeps pricing at the (unedited-from-here-on) overhead_internal + overhead_external sum — see
+    // resolveOverheadForOrg — so an untouched facility (or a group nobody ever assigns a tier to)
+    // behaves exactly as before this feature, and a first upgrade behaves exactly as it did before
+    // this flag existed.
+    // Deferred item (1.11.0 "Known and deferred" #3): the flag above only protects a database
+    // that already has it — a real 1.10.2 install upgrading straight to this version has NEVER
+    // written 'pricing_tiers_seeded' (the flag itself is new here), so if that facility had
+    // already used the zero-ref Delete on both default tiers before upgrading, `already.c` reads
+    // 0 exactly like a database that never had tiers at all, and the block above would reseed them
+    // once more on this very first migrate() pass — the gap CHANGELOG.md records. There is no
+    // boolean to read (a database that legitimately never had tiers looks identical to one that had
+    // them deleted), so this checks for *evidence* that pricing_tiers rows existed and were removed,
+    // rather than trusting the row count alone:
+    //   - sqlite_sequence.seq for 'pricing_tiers' — AUTOINCREMENT (see the CREATE TABLE above) means
+    //     the counter is never reused or reset by a plain DELETE, so seq > 0 proves a row was once
+    //     inserted even though none remain now.
+    //   - group_tiers / instrument_tier_rates rows — a lab or instrument override can only exist if
+    //     a real tier was assigned at some point; pricing_tiers.id carries no REFERENCES to either
+    //     (tiers retire, never delete while referenced — see setTierRetired's comment), so these can
+    //     dangle after a tier row is gone and still prove one existed.
+    //   - meetings.tier_id — a booking's price snapshot column; any non-null value was copied from a
+    //     real pricing_tiers row at save time.
+    // Any one of these means "had and deleted", so the legacy reseed is skipped even though
+    // pricing_tiers itself is empty and the flag is unset.
     try {
-      const already = row('SELECT COUNT(*) as c FROM pricing_tiers') || { c: 0 };
-      if (!already.c) {
-        const hasInternal = getConfig('overhead_internal', null);
-        const hasExternal = getConfig('overhead_external', null);
-        if (hasInternal != null || hasExternal != null) {
-          run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['Internal', getConfigNum('overhead_internal', 0)]);
-          run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['External', getConfigNum('overhead_external', 0)]);
+      if (getConfig('pricing_tiers_seeded', null) == null) {
+        const already = row('SELECT COUNT(*) as c FROM pricing_tiers') || { c: 0 };
+        let hadTiersBefore = false;
+        if (!already.c) {
+          try {
+            const seqRow = row("SELECT seq FROM sqlite_sequence WHERE name='pricing_tiers'");
+            if (seqRow && Number(seqRow.seq) > 0) hadTiersBefore = true;
+          } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new database */ }
+          if (!hadTiersBefore) {
+            const gt = row('SELECT COUNT(*) as c FROM group_tiers') || { c: 0 };
+            if (gt.c) hadTiersBefore = true;
+          }
+          if (!hadTiersBefore) {
+            const itr = row('SELECT COUNT(*) as c FROM instrument_tier_rates') || { c: 0 };
+            if (itr.c) hadTiersBefore = true;
+          }
+          if (!hadTiersBefore) {
+            const mt = row('SELECT COUNT(*) as c FROM meetings WHERE tier_id IS NOT NULL') || { c: 0 };
+            if (mt.c) hadTiersBefore = true;
+          }
         }
+        if (!already.c && !hadTiersBefore) {
+          const hasInternal = getConfig('overhead_internal', null);
+          const hasExternal = getConfig('overhead_external', null);
+          if (hasInternal != null || hasExternal != null) {
+            run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['Internal', getConfigNum('overhead_internal', 0)]);
+            run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['External', getConfigNum('overhead_external', 0)]);
+          }
+        }
+        setConfig('pricing_tiers_seeded', 1);
       }
     } catch (_) {}
 
@@ -656,7 +703,18 @@
       // table), but the category-policy defaults still need seeding here — see
       // seedDefaultCategoryPolicies's comment for why this can't just live inside migrate().
       seedDefaultCategoryPolicies();
+      // M5 fix: migrate()'s pricing-tier seed guard (see its comment) is only ever reached by an
+      // EXISTING database going through migrate() — a brand-new database never runs migrate() at
+      // all, so 'pricing_tiers_seeded' was never written here, and the very first migrate() this
+      // fresh database eventually goes through (its next reload) would find the flag unset and
+      // reseed Internal/External from whatever overhead_internal/overhead_external happen to be
+      // set — even if a facility had deliberately deleted both tiers in the meantime (the only way
+      // to delete a tier is the zero-ref path, so a deleted tier really was meant to stay gone).
+      // Setting the flag here, the moment this fresh database is created, makes "no tiers seeded
+      // yet" a one-time-only decision exactly as migrate() intends, on a fresh DB too.
+      setConfig('pricing_tiers_seeded', 1);
     }
+    if (!memoryMode) multiTabGuard = startMultiTabGuard();
     return { persistent: !memoryMode };
   }
 
@@ -728,16 +786,41 @@
       req.onerror = () => reject(req.error);
     });
   }
+  // Resolve only once the TRANSACTION commits (tx.oncomplete), not once the individual request
+  // succeeds (req.onsuccess) — a request can succeed and still have its transaction abort/fail to
+  // commit (e.g. a quota error surfacing at commit time), and a caller awaiting idbSet/idbDelete
+  // needs "durably written", not "queued". req.onsuccess/req.onerror are NOT wired to resolve/
+  // reject here on purpose: a Promise settles on its first resolve/reject call, so if req.onsuccess
+  // also called resolve() it would win the race and the promise would settle before tx.oncomplete
+  // ever fires, making the tx handlers below dead code (this is exactly the bug being fixed).
+  // req.onerror is still surfaced via tx.onerror/tx.onabort, which fire for the same failure.
   async function idbSet(key, val) {
     if (memoryMode) { memoryStore.set(key, val); return; }
     const s = await idbOpen();
     return new Promise((resolve, reject) => {
       const tx = s.transaction('kv', 'readwrite');
-      const req = tx.objectStore('kv').put({ k: key, v: val });
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      tx.objectStore('kv').put({ k: key, v: val });
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      // Item 4 follow-up (found while browser-testing item 4's fix): tx.error can be null/undefined
+      // for a transaction that failed WITHOUT an underlying request error (e.g. an explicit
+      // transaction.abort() call, as a real IndexedDB failure can look like) — rejecting with that
+      // bare null used to reach a caller's `catch (e) { ...e.message... }` and throw a SECOND,
+      // unrelated TypeError ("Cannot read properties of null") instead of the failure the caller
+      // was trying to report. Fall back to a real Error the same way onabort already does below.
+      tx.onerror = () => reject(tx.error || new Error('idbSet transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('idbSet transaction aborted'));
+    });
+  }
+  async function idbDelete(key) {
+    if (memoryMode) { memoryStore.delete(key); return; }
+    const s = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = s.transaction('kv', 'readwrite');
+      tx.objectStore('kv').delete(key);
+      tx.oncomplete = () => resolve();
+      // Same null-error fallback as idbSet's tx.onerror above.
+      tx.onerror = () => reject(tx.error || new Error('idbDelete transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('idbDelete transaction aborted'));
     });
   }
   async function idbGetAllWithPrefix(prefix) {
@@ -801,26 +884,657 @@
     return bytes;
   }
 
-  /* Debounced autosave: every mutation calls markDirty() */
+  /* ---------------- Multi-tab guard ----------------
+     Two tabs on the SAME database (same IDB_NAME — a demo tab and the real app never share one)
+     each ran their own independent 400ms autosave with no idea the other existed, so whichever
+     tab's timer fired last silently overwrote the other's edits with no toast, no conflict, no
+     trace (H2). There is no real multi-writer support here — no merge, no locking on the actual
+     writes — so the fix is to guarantee only ONE tab ever persists at a time: every tab announces
+     itself over a BroadcastChannel scoped to this IDB_NAME; each tab independently computes the
+     same leader (the tab with the oldest announced timestamp, ties broken by id) from the set of
+     announcements it has seen, so every tab converges on the same answer without a central
+     coordinator, and two tabs opened in the same instant still pick exactly one leader between
+     them (the tie-break on id is total, so both sides of the race agree). The newer tab(s) go
+     read-only rather than the reverse, so the tab that was already there (and whose data is
+     authoritative) keeps writing.
+     A read-only tab is READ-ONLY, not just non-persisting: assertWritable() (called from run() and
+     clearAllData(), the two ways this file ever mutates rows on a user's behalf) throws and toasts
+     instead of letting the edit happen at all — so a form submitted in a read-only tab never
+     touches even this tab's own in-memory copy, and the very next line in whatever saver called it
+     (closing its modal, refreshing the view) never runs either. onMultiTabState surfaces the state
+     so the UI can show a persistent banner (reusing temp-session-banner) rather than let this fail
+     silently or as a wall of uncaught-exception noise.
+     Promotion (a read-only tab becomes the leader, e.g. because the leader tab closed) is the
+     dangerous direction, not the safe one: this tab's in-memory `db` was never written to (it was
+     read-only) but it IS possibly stale — the outgoing leader kept autosaving while this tab did
+     nothing, so resuming this tab's own autosave loop as-is would flush a stale image right over
+     the leader's last, newer save. So promotion reloads `db` from IndexedDB FIRST — discarding
+     this tab's in-memory image entirely, which is safe precisely because it was read-only and so
+     never diverged from what it last loaded/saw broadcast — re-renders the current screen from
+     that fresh copy, and only THEN flips readOnly to false and lets normal autosave resume.
+     Writes stay blocked for the whole async gap the reload takes (see `promoting` below), so a
+     click landing in that narrow window is refused exactly like any other read-only write.
+     Falls back to doing nothing (every tab stays a writer, i.e. today's pre-existing behavior) if
+     BroadcastChannel doesn't exist — any pre-2021 browser — rather than fail boot over a guard
+     that is an improvement, not a requirement.
+     Started lazily from boot(), only once memoryMode is known and false: Node itself ships a real
+     global BroadcastChannel (v15.4+), and one left open with a live listener keeps the process's
+     event loop alive — under `node --test`, which never has a real IndexedDB to guard in the
+     first place, that hung the whole run rather than exiting. There is also nothing worth
+     guarding in memoryMode (no shared IndexedDB another tab could race for). */
+  // Item 2 (second review): how long a tab waits, after hearing a `bye` whose sender says a save
+  // was still pending/in flight, before giving up on a follow-up `saved` message and promoting
+  // anyway. Bounded the same way SAVE_IDLE_TIMEOUT_MS bounds restoreBackup's own wait — a `saved`
+  // that never arrives (the outgoing tab was actually killed, not just closed cleanly) must not
+  // leave every OTHER tab stuck read-only forever.
+  const BYE_GRACE_MS = 1500;
+
+  // C5-rejoin: how long a bfcache-restored tab (see rejoinAsNewTab below) waits, after
+  // announcing itself with a fresh `hello`, before it is allowed to run the election that could
+  // promote it to writer. rejoinAsNewTab() clears `peers` and resets this tab's own timestamp to
+  // now, so right after that reset `peers` legitimately reflects "nobody heard from yet", not
+  // "nobody else is here" — and the surviving leader's `hello-ack` proving otherwise can still be
+  // in flight. Without this wait, a fast IndexedDB reload (reloadFromDiskAndPromote) can finish
+  // and promote this tab to a real writer before that ack arrives, giving two tabs write access
+  // for one round-trip: an edit made in that window is accepted, the late ack then demotes this
+  // tab correctly, but the edit was never persisted (persist bails on isReadOnly) and simply
+  // vanishes. Bounded the same way BYE_GRACE_MS bounds the outgoing side, so a genuinely-alone
+  // tab (no ack ever coming) isn't stuck read-only forever.
+  const REJOIN_GRACE_MS = 300;
+
+  let multiTabGuard = { isReadOnly: () => false };
+  function startMultiTabGuard() {
+    if (typeof BroadcastChannel === 'undefined') return { isReadOnly: () => false };
+    let bc;
+    try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return { isReadOnly: () => false }; }
+    const selfId = Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
+    let selfTs = Date.now();
+    const peers = new Map(); // id -> ts, other known tabs (never includes selfId)
+    // Item 2: a peer whose `bye` said its final flush was still pending is held HERE (id -> the
+    // setTimeout that will eventually force its departure) instead of being deleted from `peers`
+    // immediately — see the `bye` handler below for why immediate deletion is the actual bug this
+    // closes, and BYE_GRACE_MS above for the bound.
+    const pendingDepartures = new Map();
+    let readOnly = false;
+    let promoting = false; // true only during the async reload-from-disk gap on promotion
+    // Counts consecutive failed promotion attempts (reset to 0 on a successful one) — mirrors
+    // db.js's own autosave `failureStreak` pattern. Each retry re-runs reloadFromDiskAndPromote,
+    // so without this a stuck promotion would toast BOTH its own message and app.js's generic
+    // read-only toast every 3 seconds forever; toasting only on the first failure of a streak
+    // keeps a genuinely stuck tab quiet after the first warning instead of spamming one every retry.
+    let promoteFailStreak = 0;
+    // Non-null only while a bfcache-rejoined tab is waiting out REJOIN_GRACE_MS for the
+    // surviving leader's `hello-ack` — see REJOIN_GRACE_MS above and rejoinAsNewTab() below.
+    // recompute()'s promotion branch refuses to run while this is set; the timer itself (or an
+    // ack arriving first) clears it and re-runs recompute() for real.
+    let rejoinGraceTimer = null;
+    // C5-rejoin: true once this tab has actually completed a real promotion (reloadFromDiskAndPromote
+    // reaching its success path below) at least once. Distinguishes the two ways a tab can be
+    // demoted while `dirty`: a brand-new tab defaults to `readOnly = false` optimistically and can
+    // be demoted the first time it learns of an older tab — expected, and nothing was ever
+    // wrongly accepted, since this tab was never anything but a normal, always-was-going-to-be-a-
+    // reader tab finding out where it stands. Only a tab that has been through a genuine promotion
+    // can have taken writes DURING a window that a later message proves shouldn't have been
+    // possible (the grace-window race REJOIN_GRACE_MS guards, or a straggler ack arriving after the
+    // grace period itself already elapsed) — that is the only case recompute()'s demotion branch
+    // below should treat as data to warn about and discard, not silently keep as if nothing
+    // happened.
+    let hasBeenPromoted = false;
+    // C6-guard: true only while this tab is CURRENTLY the (possibly-wrongly) promoted writer and a
+    // flush of its own has actually landed in IndexedDB during that window — reset to false every
+    // time a fresh promotion completes (reloadFromDiskAndPromote's success path) so it only ever
+    // reflects the current promoted spell, never a previous one. Distinguishes, on a later
+    // demotion, "this tab never got as far as writing anything" from "this tab's phantom edit
+    // already autosaved before the real leader's late ack arrived" (see recompute()'s demotion
+    // branch below) — the latter needs the same discard warning even though `dirty` is already
+    // false by the time the ack lands, since the row that autosaved is no longer what's on disk
+    // once the real leader's own next save overwrites it with a copy that never had it.
+    let persistedWhilePromoted = false;
+
+    // Promotion: reload the in-memory database from IndexedDB before this tab is allowed to write
+    // or autosave again — see the big comment above. Never throws outward: a failed reload leaves
+    // this tab's existing (still merely stale, never divergent) copy in place, keeps the tab
+    // READ-ONLY (it never falls through to the success path below, so `readOnly` stays true), and
+    // retries the reload every 3 seconds until one succeeds — it does NOT let the tab become a
+    // writer with a possibly-stale copy just because a reload attempt failed.
+    async function reloadFromDiskAndPromote() {
+      try {
+        const SQL = await initSqljs();
+        const blob = await idbGet(DB_KEY);
+        if (blob) {
+          db = new SQL.Database(blob);
+          db.exec('PRAGMA foreign_keys = ON;');
+        }
+      } catch (e) {
+        // The reload failed, so this tab's in-memory `db` might still be the stale copy it had
+        // as a reader — promoting it to writer anyway would risk autosaving that stale image
+        // right over whatever the outgoing leader last wrote. Stay read-only (never fall through
+        // to the success path below), tell the UI so it can keep showing the read-only banner,
+        // and retry the reload after a short delay rather than leaving this tab stuck read-only
+        // forever with no way back in short of a manual reload.
+        console.error('multi-tab promotion: reload from IndexedDB failed — staying read-only and retrying', e);
+        promoting = false; // allow a retry to actually run reloadFromDiskAndPromote() again
+        promoteFailStreak++;
+        if (promoteFailStreak === 1 && global.UI && global.UI.toast) {
+          global.UI.toast('Could not switch this tab to the active database copy. Retrying…', 'error');
+        }
+        // `promoteFailed` tells app.js's onMultiTabState this is still the SAME read-only tab
+        // failing to catch up, not a fresh "database opened in another tab" transition — the two
+        // read very differently and only one of them is true right now.
+        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true, { promoteFailed: true, repeat: promoteFailStreak > 1 });
+        setTimeout(() => {
+          if (readOnly && !promoting) { promoting = true; reloadFromDiskAndPromote(); }
+        }, 3000);
+        return;
+      }
+      // This tab was read-only, so nothing here should be unsaved — but clear any leftover autosave
+      // state anyway rather than trust that invariant blindly (belt-and-suspenders, same reasoning
+      // as the explicit child-row deletes CLAUDE.md documents alongside cascade).
+      dirty = false;
+      pendingDuringSave = false;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      promoting = false;
+      // C4-followups #1: `peers` is not frozen while the reload above was awaiting the IndexedDB
+      // read — if the surviving (older) leader's `hello-ack` arrived during that gap, `onBcMessage`
+      // already called `recompute()` with the updated `peers`, but that call saw `readOnly` still
+      // true (this function hadn't reached the line below yet) so `next === readOnly` and it
+      // silently did nothing. Unconditionally clearing `readOnly` here, as this function used to,
+      // would then make BOTH tabs writers. Decide again, now, with whatever `peers` holds at this
+      // exact moment — not the snapshot true when reloadFromDiskAndPromote() was kicked off — and
+      // only clear `readOnly` if this tab is still actually the elected leader.
+      if (!isLeaderNow()) {
+        readOnly = true;
+        promoteFailStreak = 0;
+        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true);
+        return;
+      }
+      readOnly = false;
+      promoteFailStreak = 0;
+      hasBeenPromoted = true;
+      persistedWhilePromoted = false; // fresh promotion spell — nothing written under it yet
+      if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(false, { promoted: true });
+    }
+
+    // Shared by recompute() (before starting/skipping a promotion) and reloadFromDiskAndPromote()'s
+    // success path (after one finishes) — both need the SAME "am I the leader, given peers right
+    // now" answer, computed fresh each time rather than trusted from whenever it was last asked.
+    function isLeaderNow() {
+      let leaderId = selfId, leaderTs = selfTs;
+      for (const [id, ts] of peers) {
+        if (ts < leaderTs || (ts === leaderTs && id < leaderId)) { leaderId = id; leaderTs = ts; }
+      }
+      return leaderId === selfId;
+    }
+
+    function recompute() {
+      const next = !isLeaderNow();
+      if (next === readOnly) return; // no change
+      if (readOnly && !next) {
+        // C5-rejoin: a rejoining tab must not promote off an empty `peers` that just hasn't
+        // heard back yet — see REJOIN_GRACE_MS. Stay read-only; the grace timer (or an ack
+        // arriving early, in onBcMessage) re-runs recompute() once the round-trip has had its
+        // chance.
+        if (rejoinGraceTimer) return;
+        // Promotion. Block writes for the duration (isReadOnly() below checks `promoting` too) and
+        // do the disk reload before anything is allowed to touch `db` again.
+        if (promoting) return; // already in flight
+        promoting = true;
+        reloadFromDiskAndPromote();
+        return;
+      }
+      // Demotion (another, older tab showed up). Normally this needs no reload — a read-only tab
+      // never diverges from what it last legitimately saw, so its in-memory copy just stays what
+      // it was, which is exactly the case for a brand-new tab (never promoted) losing the very
+      // first election it hears about. But a tab that HAS been through a real promotion
+      // (`hasBeenPromoted`) can be demoted again while `dirty` — C5-rejoin's promotion race (see
+      // REJOIN_GRACE_MS) or a straggler ack arriving after the grace period already elapsed — in
+      // which case it was briefly and wrongly a writer, accepted an edit that never persisted
+      // (persist bails on isReadOnly), and is only now finding out an older tab survived. That edit
+      // cannot be kept — this tab has no way to merge it into the real leader's now-diverged copy —
+      // so discard it loudly instead of letting the next promotion's disk reload discard it silently.
+      // C6-guard (item 1): `dirty` alone is not a reliable signal here. The 400ms autosave debounce
+      // can flush a phantom edit to IndexedDB before the real leader's late `hello-ack` arrives —
+      // `dirty` is already false by then, but the row that landed on disk is not what's there once
+      // the real leader's own next save overwrites it with a copy that never had it, so this tab's
+      // in-memory `db` (still showing that row) is now stale relative to disk either way. So: on
+      // ANY demotion of a tab that has genuinely been promoted, always reload the leader's actual
+      // bytes and refresh the screen from them — never just leave the stale in-memory copy standing
+      // because `dirty` happened to already be false. Only the toast is conditional: warn when
+      // there was something to actually lose — either still-unsaved edits (`dirty`) or an edit that
+      // this tab itself persisted while it was (wrongly) the writer (`persistedWhilePromoted`) —
+      // not on every ordinary demotion, which would otherwise fire for a tab that took no edits at
+      // all during its promoted spell.
+      readOnly = next;
+      if (hasBeenPromoted) {
+        discardDirtyAndReload(dirty || persistedWhilePromoted);
+        return;
+      }
+      if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
+    }
+
+    // C5-rejoin, extended by C6-guard (item 1): this tab believed (wrongly, per the promotion
+    // race above) that it was the writer, and either has an edit sitting only in memory (never
+    // persisted) or already autosaved one before finding out an older tab survived. Either way it
+    // cannot be reconciled with the real leader's copy, so always drop this tab's in-memory image
+    // and reload the leader's actual saved bytes — `warn` (dirty edits discarded, or something
+    // this tab itself persisted while wrongly promoted) decides only whether the user is told
+    // about it; the reload and refresh happen regardless, since the in-memory copy is stale either
+    // way and must never be left standing as if it still matched disk.
+    async function discardDirtyAndReload(warn) {
+      dirty = false;
+      pendingDuringSave = false;
+      persistedWhilePromoted = false;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      try {
+        const SQL = await initSqljs();
+        const blob = await idbGet(DB_KEY);
+        if (blob) {
+          db = new SQL.Database(blob);
+          db.exec('PRAGMA foreign_keys = ON;');
+        }
+      } catch (e) {
+        console.error('multi-tab demotion: could not reload the other tab\'s saved copy after discarding this tab\'s unsaved edits', e);
+      }
+      if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true);
+      if (warn && global.UI && global.UI.toast) {
+        global.UI.toast('Unsaved changes in this tab were discarded because another tab is saving.', 'error');
+      }
+      if (global.App && global.App.refresh) global.App.refresh();
+    }
+
+    // Cancels a held departure timer (a later message from the same tab proves it's still here,
+    // or has now genuinely finished leaving) without necessarily deleting the peer — callers decide
+    // that themselves right after calling this.
+    function clearPendingDeparture(id) {
+      const timer = pendingDepartures.get(id);
+      if (timer != null) { clearTimeout(timer); pendingDepartures.delete(id); }
+    }
+
+    function onBcMessage(ev) {
+      const msg = ev.data || {};
+      if (!msg || msg.id === selfId) return;
+      if (msg.type === 'hello') {
+        // A hello from a tab whose departure we were waiting out means it's clearly still here
+        // (or came straight back) — cancel the wait rather than let a stale timer later delete a
+        // peer that has since re-announced itself.
+        clearPendingDeparture(msg.id);
+        peers.set(msg.id, msg.ts);
+        recompute();
+        try { bc.postMessage({ type: 'hello-ack', id: selfId, ts: selfTs }); } catch (_) {}
+      } else if (msg.type === 'hello-ack') {
+        peers.set(msg.id, msg.ts);
+        // C5-rejoin: an ack proves the round-trip REJOIN_GRACE_MS exists to wait out has actually
+        // happened — no reason to keep waiting once we have one.
+        // C6-guard (item 3): but only when that ack is from a peer that can actually outrank this
+        // tab (`ts < selfTs`). rejoinAsNewTab() gives this tab a fresh, newer timestamp than
+        // anything already running, so a brand-new THIRD tab booting during the grace window has
+        // a newer timestamp still and its ack proves nothing about whether the real (older)
+        // leader is out there — ending the grace on it lets recompute() promote this tab off an
+        // incomplete `peers` set that simply hasn't heard from the actual leader yet. An ack from
+        // an older peer, by contrast, either IS the real leader (settling the election for real)
+        // or at least proves this tab cannot win regardless of who else answers, so it's always
+        // safe to stop waiting on that one early. A newer peer's ack still updates `peers` above
+        // and still re-runs recompute() below — recompute()'s own `if (rejoinGraceTimer) return;`
+        // check simply keeps this tab read-only until the grace period actually elapses or an
+        // older ack arrives.
+        if (rejoinGraceTimer && msg.ts < selfTs) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
+        recompute();
+      } else if (msg.type === 'bye') {
+        // Item 2 (second review): a `bye` sent right as its tab is torn down used to delete the
+        // peer and recompute immediately — but that tab's OWN teardown (below) broadcasts `bye`
+        // and used to close its channel right away while its final autosave flush was still async
+        // and in flight. A surviving tab could promote on this `bye` alone, reload from
+        // IndexedDB BEFORE that flush's write ever landed, and capture stale bytes — then, once
+        // promoted, autosave right over the outgoing tab's actual last write once it does land a
+        // moment later. So: a `bye` that says a save was still pending does NOT promote anyone by
+        // itself. It waits for either a follow-up `saved` from the same tab (sent once its final
+        // flush genuinely settles, if the tab lives long enough to send it) or BYE_GRACE_MS,
+        // whichever comes first, before treating the peer as actually gone.
+        if (msg.pending) {
+          if (!pendingDepartures.has(msg.id)) {
+            const timer = setTimeout(() => {
+              pendingDepartures.delete(msg.id);
+              peers.delete(msg.id);
+              recompute();
+            }, BYE_GRACE_MS);
+            pendingDepartures.set(msg.id, timer);
+          }
+        } else {
+          clearPendingDeparture(msg.id);
+          peers.delete(msg.id);
+          recompute();
+        }
+      } else if (msg.type === 'saved') {
+        // The outgoing tab's final flush landed — safe to treat it as gone right away instead of
+        // waiting out the rest of the grace period.
+        clearPendingDeparture(msg.id);
+        peers.delete(msg.id);
+        recompute();
+      }
+    }
+    bc.onmessage = onBcMessage;
+    try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
+
+    // Item 2: the outgoing tab's own side of the fix above. Broadcasts `bye` immediately (so
+    // peers learn this tab is leaving with as little delay as possible either way) carrying
+    // whether a save is still dirty/in flight; if so, waits for flushNow() — which by this point
+    // also covers item 3's fix (awaits any save already in flight, then flushes whatever landed
+    // during it) — to actually settle before announcing `saved` and only THEN closing the
+    // channel. If the page is torn down before that wait resolves, the `saved` message simply
+    // never goes out and peers fall back to the bounded grace period above — never worse than
+    // before this fix, and correct whenever the tab lives long enough to finish.
+    async function teardown() {
+      const pending = dirty || saving || pendingDuringSave;
+      try { bc.postMessage({ type: 'bye', id: selfId, pending }); } catch (_) {}
+      if (pending) {
+        // Flush FIRST, while this tab can still legitimately write — flush() itself refuses to
+        // persist once `readOnly` is true (see its own isReadOnly() check), so forcing read-only
+        // before this await would silently turn the leader's own last, still-in-flight edit into
+        // a no-op instead of letting it land. Only once this settles is it safe to lock the tab
+        // down for good below.
+        try { await flushNow(); } catch (_) {}
+        // Only claim `saved` if the flush actually left nothing dirty — a permanently failing
+        // save (this tab closing right as autosave itself is broken) must not tell peers it's
+        // safe to promote; they fall back to the grace period instead of trusting a false "saved".
+        if (!dirty) {
+          try { bc.postMessage({ type: 'saved', id: selfId }); } catch (_) {}
+        }
+      }
+      // C6-guard (item 2): a pagehide landing inside REJOIN_GRACE_MS (this tab having just
+      // rejoined from the bfcache) used to leave `rejoinGraceTimer` armed with nothing to stop
+      // it — the timer has no idea this tab is tearing down, so it fires on schedule, runs
+      // recompute() against a channel this tab is about to close, and can promote a tab that
+      // will never broadcast its presence to anyone again. Clear it here, and force `readOnly`
+      // true unconditionally so this tab can never resume autosave after teardown even if some
+      // other stray path still reaches recompute()/reloadFromDiskAndPromote() later — a torn-down
+      // tab must never become, or stay, a writer.
+      if (rejoinGraceTimer) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
+      readOnly = true;
+      try { bc.close(); } catch (_) {}
+    }
+    if (typeof global.addEventListener === 'function') global.addEventListener('pagehide', teardown);
+
+    // Item 2 (suppressed finding): `pagehide` also fires when a page merely enters the
+    // back-forward cache (bfcache) rather than being genuinely closed — teardown() above still
+    // runs, announcing `bye` and closing `bc`, exactly as if the tab were gone, while the page's
+    // JS (this whole closure, `readOnly` included) is FROZEN, not reloaded. If the browser later
+    // restores it FROM bfcache, resuming with whatever `readOnly` happened to hold when it was
+    // frozen would let it resume as a writer with no re-election and a `bc` that teardown() already
+    // closed — every other tab already believes it left. `pageshow` with `event.persisted` is the
+    // signal a bfcache restore actually happened; treat it as rejoining as a brand-new tab: forced
+    // read-only until the election says otherwise, a fresh BroadcastChannel, a fresh timestamp (so
+    // it re-enters the tie-break as the newest tab, not whatever it was before being frozen), and a
+    // fresh `hello` so every other tab learns about it again.
+    function rejoinAsNewTab() {
+      readOnly = true;
+      promoting = false;
+      peers.clear();
+      for (const timer of pendingDepartures.values()) clearTimeout(timer);
+      pendingDepartures.clear();
+      if (rejoinGraceTimer) { clearTimeout(rejoinGraceTimer); rejoinGraceTimer = null; }
+      try { bc.close(); } catch (_) {}
+      try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return; }
+      bc.onmessage = onBcMessage;
+      selfTs = Date.now();
+      // Route the "am I actually alone, or is an older tab out there" decision through the SAME
+      // recompute()/reloadFromDiskAndPromote() machinery every other state change already uses,
+      // rather than duplicating its onMultiTabState call here — but not yet: `peers` was just
+      // cleared, so recompute() right now can only see "nobody heard from", which is not the same
+      // fact as "nobody else is here" — the surviving leader's `hello-ack` may simply not have
+      // arrived yet (C5-rejoin; see REJOIN_GRACE_MS). Hold the election open for one round-trip
+      // instead of deciding on an empty `peers`: start the grace timer first, THEN announce
+      // `hello`, so recompute() (via the `rejoinGraceTimer` check in its promotion branch) refuses
+      // to promote until either an ack actually arrives (onBcMessage's `hello-ack` handler clears
+      // the timer and calls recompute() again) or the grace period elapses on its own — at which
+      // point recompute() below runs for real, taking the promotion branch if this tab really is
+      // alone, or demoting straight back to read-only if an older tab's `hello`/`hello-ack` did
+      // arrive during the wait.
+      rejoinGraceTimer = setTimeout(() => {
+        rejoinGraceTimer = null;
+        recompute();
+      }, REJOIN_GRACE_MS);
+      try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
+      // teardown() is already registered as a 'pagehide' listener (below) — since it's the same
+      // function reference, addEventListener would just be a no-op duplicate if called again here,
+      // so it isn't; the ORIGINAL registration covers every future pagehide, this bfcache-restored
+      // tab included.
+    }
+    if (typeof global.addEventListener === 'function') {
+      global.addEventListener('pageshow', (ev) => { if (ev && ev.persisted) rejoinAsNewTab(); });
+    }
+
+    return {
+      isReadOnly: () => readOnly || promoting,
+      // C6-guard (item 1): called by flush() right after its own idbSet actually lands, so this
+      // guard can tell a later demotion whether a phantom edit made it to disk during THIS
+      // promoted spell — see `persistedWhilePromoted` above. Only meaningful while this tab is
+      // both promoted and currently the writer; a call from any other state is a no-op.
+      notifyPersisted: () => { if (hasBeenPromoted && !readOnly && !promoting) persistedWhilePromoted = true; },
+    };
+  }
+
+  // Every user-facing write funnels through here (run()'s single call site for every parameterized
+  // INSERT/UPDATE/DELETE, and clearAllData()'s raw multi-statement DELETE) — see the multi-tab
+  // guard comment above for why a read-only tab must refuse the write itself, not merely skip
+  // persisting it afterwards. Throws so the caller's remaining statements (e.g. a saver's join-row
+  // inserts, its closeDim/toast/refresh) never run either; the toast fires here so every caller
+  // gets the same message without each of the ~24 save functions having to catch this individually.
+  function assertWritable() {
+    if (!multiTabGuard.isReadOnly()) return;
+    if (global.UI && global.UI.toast) {
+      global.UI.toast('This tab is read-only because the database is open in another tab.', 'error');
+    }
+    const err = new Error('This tab is read-only because the database is open in another tab.');
+    err.dbReadOnly = true;
+    throw err;
+  }
+
+  /* Debounced autosave: every mutation calls markDirty().
+     H3 fix: previously cleared `dirty` before the idbSet await settled, so a rejected save was
+     silently swallowed (nothing retried, nothing told the user) and a 400ms setTimeout with no
+     flush-on-close meant an edit made right before the tab closed was simply never written.
+     Now: `dirty` stays true until idbSet actually resolves, a rejection notifies onSaveFailed and
+     leaves dirty=true so the very next markDirty()'s timer retries, and pagehide/visibilitychange
+     force an immediate flush instead of waiting out the debounce. */
   let saveTimer = null;
   let dirty = false;
+  let saving = false;
+  let pendingDuringSave = false;
+  // Bumped by restoreBackup() in the SAME synchronous block where it swaps the live `db` handle
+  // (no `await` in between the two — see restoreBackup itself). What this guards: flush() reads
+  // `dbGeneration` into a local `myGen` before it does anything async, then checks `myGen !==
+  // dbGeneration` both before and after its own `idbSet` write; if either check trips, flush()
+  // drops its snapshot instead of persisting it. Because the bump and the swap happen together,
+  // any flush() that read `myGen` before the bump is guaranteed to have captured bytes from the
+  // database `db` still pointed at when it read them — so a flush already past that read, even one
+  // that started and is still in flight when restoreBackup runs, can never write OLD bytes labeled
+  // with the NEW generation number. restoreBackup also waits (waitForSaveIdle, itself bounded — see
+  // below) for any flush already in flight to finish before it ever swaps `db`, so this counter is
+  // the belt to that suspenders for the narrower window in between; it is not a substitute for it,
+  // since a flush that is only SCHEDULED (not yet started) when restoreBackup runs is caught
+  // entirely by this generation check, with nothing to wait for.
+  let dbGeneration = 0;
+  // How long restoreBackup() will wait for an in-flight autosave to finish before giving up and
+  // proceeding anyway (see waitForSaveIdle and restoreBackup below). A save can be stuck rather
+  // than merely slow — a blocked/full IndexedDB, a browser storage bug — and waiting on it forever
+  // would hang the whole restore (and the UI showing it) with nothing the user can do about it.
+  // The generation guard above is what makes proceeding safe enough: a stuck save that eventually
+  // completes has already ISSUED its write, so the guard cannot un-write those pre-swap bytes — it
+  // refuses to acknowledge them as saved, leaves the live database dirty, and reschedules a flush
+  // (settleStaleGeneration) that rewrites the restored bytes moments later. A tab closed inside
+  // that brief window could lose the restore; that needs storage that hangs and then recovers.
+  const SAVE_IDLE_TIMEOUT_MS = 5000;
+  function waitForSaveIdle() {
+    if (!saving) return Promise.resolve();
+    const startedAt = Date.now();
+    return new Promise((resolve) => {
+      (function check() {
+        if (!saving || Date.now() - startedAt >= SAVE_IDLE_TIMEOUT_MS) return resolve();
+        setTimeout(check, 15);
+      })();
+    });
+  }
+  // Races `promise` against a `ms` timer; on timeout, rejects with `err` instead of waiting any
+  // longer. The real work behind `promise` (e.g. an in-flight idbSet's actual IndexedDB write) is
+  // NOT cancelled — there is no way to cancel it — this only stops AWAITING it, so a caller can
+  // report failure and move on instead of hanging forever on something that may never settle.
+  function withDeadline(promise, ms, err) {
+    let timer;
+    const timeout = new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(err), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+  // Red-team D: a failed save used to leave `dirty` true with nothing armed to retry it until the
+  // NEXT edit happened to call markDirty() again — a facility that stops typing right after a
+  // failure (the exact moment it's most likely to notice something's wrong) would sit unsaved
+  // indefinitely. And onSaveFailed toasted on every single failed attempt, which — once retries
+  // exist — would mean one toast every retry forever. failureStreak counts consecutive failures so
+  // the toast fires once per streak (see flush()'s catch) rather than once per attempt, and a
+  // RETRY_BACKOFF_MS timer is armed after a failure so the save keeps retrying on its own.
+  let failureStreak = 0;
+  const RETRY_BACKOFF_MS = 5000;
+
+  function scheduleFlush(delayMs) {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { saveTimer = null; flush(); }, delayMs == null ? 400 : delayMs);
+  }
+
   function markDirty() {
     dirty = true;
+    if (saving) pendingDuringSave = true;
     if (global.App && global.App.onSaving) global.App.onSaving();
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      if (!dirty) return;
-      dirty = false;
-      try {
-        await idbSet(DB_KEY, currentBytes());
-        if (global.App && global.App.onSaved) global.App.onSaved();
-      } catch (e) {
-        console.error('autosave failed', e);
+    scheduleFlush();
+  }
+
+  // A stale-generation return (see the two call sites below) means THIS flush's snapshot is
+  // worthless — restoreBackup() has since swapped in a different database — but that must not
+  // leave `dirty` stuck true with nothing scheduled to clear it: markDirty() already called
+  // onSaving() for whatever edit armed this flush, and with no timer left running and `dirty` never
+  // reset, the saved-indicator would sit on "unsaved" forever even after restoreBackup's own write
+  // succeeds. `dirty` is a single flag shared across generations (not per-generation), so if it is
+  // still true here that means the CURRENT (live, post-restore) database has something worth
+  // flushing too — schedule that. If it somehow isn't, there is nothing left pending, so report
+  // saved now instead of leaving the indicator stuck on whatever markDirty() last set it to.
+  function settleStaleGeneration() {
+    pendingDuringSave = false;
+    if (dirty) {
+      scheduleFlush();
+    } else if (global.App && global.App.onSaved) {
+      global.App.onSaved();
+    }
+  }
+
+  // Item 3 (second review): flushNow() used to just call flush(), which returns immediately (a
+  // no-op) whenever a save is already `saving` — so an edit made WHILE that save is in flight
+  // (pendingDuringSave) had nothing to make it go out during a lifecycle event; it waited for the
+  // 400ms timer scheduleFlush() re-armed, which pagehide/beforeunload may not give time to fire.
+  // `currentFlushPromise` exposes the in-flight call's own promise (set right as `saving` flips
+  // true, cleared once that call's own await settles) so flushNow() can await it and then call
+  // flush() again for whatever landed during it — see flushNow() below.
+  let currentFlushPromise = null;
+  async function flush() {
+    if (!dirty) return;
+    if (saving) return; // a save is already in flight; markDirty() already flagged pendingDuringSave
+    if (multiTabGuard.isReadOnly()) return; // this tab lost the leader race — never persist over it
+    const myGen = dbGeneration;
+    saving = true;
+    const thisFlush = (async () => {
+    try {
+      if (myGen !== dbGeneration) {
+        // A restore superseded this database between markDirty() scheduling us and us actually
+        // starting — writing this snapshot now would stomp the just-restored database. Drop it;
+        // restoreBackup() persists the new database itself.
+        settleStaleGeneration();
+        return;
       }
-    }, 400);
+      const bytes = currentBytes(); // snapshot taken now; pendingDuringSave catches anything later
+      await idbSet(DB_KEY, bytes);
+      // C6-guard: this write actually landed — if this tab is currently a promoted writer, record
+      // that a real disk write happened during this promoted spell (see `persistedWhilePromoted`),
+      // regardless of the stale-generation check just below (which only concerns a *different*,
+      // superseding restore, not the multi-tab guard's own later demotion path).
+      if (multiTabGuard.notifyPersisted) multiTabGuard.notifyPersisted();
+      if (myGen !== dbGeneration) {
+        // Same race, caught after the write went out: a restore happened while this idbSet was
+        // in flight. The bytes we just wrote are stale (the old database); don't clear `dirty` or
+        // report success for them — restoreBackup()'s own write is what actually matters now.
+        settleStaleGeneration();
+        return;
+      }
+      if (pendingDuringSave) {
+        // More edits landed while this save was writing — those aren't in `bytes`, so stay dirty.
+        // Normally the timer markDirty() (re)armed while `saving` was true covers this — but a
+        // lifecycle flush (pagehide/beforeunload/visibilitychange, via flushNow()) clears that
+        // timer to jump the debounce queue, and if THIS save was the one already in flight when
+        // that happened, the timer it relied on is gone with nothing left to fire. Schedule one
+        // explicitly here so a save that raced a tab-close flush is never left dirty forever.
+        pendingDuringSave = false;
+        scheduleFlush();
+      } else {
+        dirty = false;
+        if (global.App && global.App.onSaved) global.App.onSaved();
+      }
+      failureStreak = 0;
+    } catch (e) {
+      console.error('autosave failed', e);
+      pendingDuringSave = false;
+      failureStreak++;
+      // Toast once per failure streak, not once per retry — onSaveFailed still updates the
+      // persistent saved-dot every time (cheap, and it's supposed to stay visible), but a repeated
+      // toast for the same ongoing failure would just be noise.
+      if (global.App && global.App.onSaveFailed) global.App.onSaveFailed(e, { repeat: failureStreak > 1 });
+      // dirty is left true on purpose, AND a backoff retry is armed here explicitly — the next
+      // markDirty() (if any) would re-arm it too, but nothing guarantees another edit ever
+      // happens, so this save must be able to retry itself with no further user action.
+      scheduleFlush(RETRY_BACKOFF_MS);
+    } finally {
+      saving = false;
+    }
+    })();
+    currentFlushPromise = thisFlush;
+    try {
+      await thisFlush;
+    } finally {
+      if (currentFlushPromise === thisFlush) currentFlushPromise = null;
+    }
+  }
+
+  // Flush immediately, skipping the remainder of the debounce — used when the tab is about to
+  // disappear (pagehide) or go to the background (visibilitychange → hidden), so an edit made
+  // just before close isn't lost waiting out the 400ms window. Also wired to `beforeunload`,
+  // which — unlike pagehide — fires BEFORE the browser starts actually tearing the page down, so
+  // it gives the async idbSet inside flush() strictly more real time to land before the tab is
+  // gone; nothing here calls preventDefault or returns a value, so it never shows a "leave site?"
+  // prompt, it only gets a head start on the same save pagehide would otherwise trigger alone.
+  function flushNow() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (saving && currentFlushPromise) {
+      // A save is already in flight (its snapshot was taken before this edit landed) — flush()
+      // itself would just return immediately here. Await the in-flight save, then call flush()
+      // again so whatever markDirty() flagged as pendingDuringSave goes out now, during this same
+      // lifecycle event, instead of waiting on a debounce timer the event may not allow to fire.
+      // Not awaited by callers that don't need to (the event handlers below fire-and-forget this),
+      // but the returned promise lets a caller/test wait for the real end-to-end completion.
+      return currentFlushPromise.then(() => flush(), () => flush());
+    }
+    return flush();
+  }
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('beforeunload', flushNow);
+    global.addEventListener('pagehide', flushNow);
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flushNow();
+    });
   }
 
   /* ---------------- Backup (single self-contained file) ---------------- */
+  // Every table a restored database must have before the app can even route to Dashboard/
+  // Projects/People/Instruments/Settings without throwing "no such table" — see H1 below.
+  const CORE_TABLES = ['projects', 'people', 'instruments', 'meetings', 'milestones'];
+
   async function buildBackup() {
     const uploadEntries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
     const uploads = {};
@@ -833,29 +1547,264 @@
       kind: 'core-facility-backup',
       version: 2,
       created: new Date().toISOString(),
+      // Lets a restore in the real app refuse a demo sandbox's data outright (doRestore in
+      // app.js) while the sandbox itself is free to accept either kind of file for testing.
+      demo: !!global.IS_DEMO,
       db: Array.from(currentBytes()),
       uploads,
     };
   }
 
-  async function restoreBackup(data) {
-    if (data.kind !== 'core-facility-backup' || !data.db) throw new Error('Not a valid backup file.');
+  /* Row counts + a headline fact per core table, read from whichever sql.js Database instance is
+     passed in — the live `db` for the "what you have now" side of a restore preview, or a scratch
+     database opened over an uploaded file for the "what you're about to load" side. Never assumes
+     a table exists: a missing one just contributes 0, since the caller (inspectBackupCandidate)
+     has already required every CORE_TABLES entry to exist before this runs on untrusted bytes. */
+  function summarizeCoreTables(handle) {
+    const counts = {};
+    for (const t of CORE_TABLES) {
+      const res = handle.exec(`SELECT COUNT(*) AS c FROM ${t}`);
+      counts[t] = (res && res[0] && res[0].values && res[0].values[0]) ? Number(res[0].values[0][0]) || 0 : 0;
+    }
+    let newestBooking = '';
+    try {
+      const res = handle.exec("SELECT MAX(date) AS d FROM meetings WHERE date IS NOT NULL AND TRIM(date) != ''");
+      newestBooking = (res && res[0] && res[0].values && res[0].values[0] && res[0].values[0][0]) || '';
+    } catch (_) { /* meetings.date not present yet on a very old backup — leave blank */ }
+    return { counts, newestBooking };
+  }
+
+  // What's actually in the live, currently-open database — the "before" half of a restore
+  // preview (doRestore in app.js shows this next to inspectBackupCandidate's "after").
+  function liveSummary() {
+    return summarizeCoreTables(db);
+  }
+
+  /* H1 fix. Before: restoreBackup checked only `kind` and `!data.db`, so `db: []`/`db: {}` (or
+     any bytes sql.js could open but that never had this app's schema) passed straight through —
+     `new SQL.Database(rawBytes)` succeeds on an empty/foreign image, migrate() only ever adds
+     columns to tables that already exist (see migrate() above) and never recreates
+     projects/people/instruments/meetings/milestones from scratch, and the bad image was written
+     to IndexedDB before a single query ever proved it usable. Every route then threw "no such
+     table" on reload, including Settings, so Restore itself became unreachable — the app was
+     bricked with no in-app recovery. Fix: open the candidate bytes in a throwaway SQL.Database,
+     require every core table to exist and be queryable, and hand back a preview (row counts,
+     newest booking date, the backup's own version/created/demo fields) — all BEFORE
+     restoreBackup below ever touches the live `db` or IndexedDB. Throws (never returns) on
+     anything that fails the check, with a message meant to be shown to the user as-is. */
+  async function inspectBackupCandidate(data) {
+    if (!data || typeof data !== 'object' || data.kind !== 'core-facility-backup') {
+      throw new Error('Not a valid backup file — it does not look like a Core Facility Tracker backup.');
+    }
+    if (!data.db || (Array.isArray(data.db) && data.db.length === 0)) {
+      throw new Error('Not a valid backup file — no database was found inside it.');
+    }
+    let rawBytes;
+    try {
+      rawBytes = Array.isArray(data.db) ? new Uint8Array(data.db) : data.db;
+      if (!rawBytes || !rawBytes.length) throw new Error('empty');
+    } catch (e) {
+      throw new Error('Not a valid backup file — its database could not be read.');
+    }
     const SQL = await initSqljs();
-    const rawBytes = Array.isArray(data.db) ? new Uint8Array(data.db) : data.db;
-    db = new SQL.Database(rawBytes);
-    db.exec('PRAGMA foreign_keys = ON;');
-    migrate();
-    await idbSet(DB_KEY, currentBytes());
-    for (const [name, entry] of Object.entries(data.uploads || {})) {
-      if (entry && typeof entry === 'object' && typeof entry.data === 'string') {
-        await idbSet(UPLOAD_KEY + ':' + name, base64ToBlob(entry));
+    let scratch;
+    try {
+      scratch = new SQL.Database(rawBytes);
+    } catch (e) {
+      throw new Error('Not a valid backup file — its database could not be opened.');
+    }
+    try {
+      for (const t of CORE_TABLES) {
+        try {
+          scratch.exec(`SELECT COUNT(*) FROM ${t}`);
+        } catch (e) {
+          throw new Error(`Not a valid backup file — it is missing required data (no "${t}" table).`);
+        }
       }
+      const { counts, newestBooking } = summarizeCoreTables(scratch);
+      return {
+        counts,
+        newestBooking,
+        version: data.version != null ? data.version : null,
+        created: data.created || null,
+        // Old backups (pre this fix) never wrote `demo` at all — treat that as "not a demo
+        // backup" so they keep restoring exactly as before, per the package brief.
+        demo: data.demo === true,
+      };
+    } finally {
+      try { scratch.close(); } catch (_) {}
     }
   }
 
-  /* ---------------- Uploads (IndexedDB) ---------------- */
+  async function restoreBackup(data) {
+    // G1 fix: F1 (multi-tab read-only) guarded every write path through run()/clearAllData()'s
+    // assertWritable() call, but restoreBackup() replaces the whole `db` handle directly and
+    // never goes through run() — so a read-only second tab could still restore over the tab
+    // that's actually saving, exactly the silent-overwrite H2 was written to stop. Same guard,
+    // same toast, checked first so a read-only tab never even opens the scratch database below.
+    assertWritable();
+    // Validates BEFORE anything below touches the live `db` or IndexedDB — see
+    // inspectBackupCandidate's comment. A throw here leaves the live handle exactly as it was.
+    const preview = await inspectBackupCandidate(data);
+
+    // Second-review item 1: this used to validate each upload entry (`typeof entry.data ===
+    // 'string'`) INSIDE the apply loop below, which ran AFTER old uploads had already been
+    // deleted and the SQL database already swapped in and persisted — so a malformed entry
+    // (`{}`, or a `data` string that isn't valid base64) left the restore half-applied: new
+    // database, old uploads gone, new uploads short by whatever failed to decode. Decode every
+    // entry into a Blob here, before the db swap or any IndexedDB delete — a malformed entry now
+    // rejects the WHOLE restore, with the live database and upload set untouched.
+    const uploadBlobs = new Map();
+    for (const [name, entry] of Object.entries(data.uploads || {})) {
+      if (!entry || typeof entry !== 'object' || typeof entry.data !== 'string') {
+        throw new Error(`Not a valid backup file — the attached file "${name}" is malformed.`);
+      }
+      let blob;
+      try {
+        blob = base64ToBlob(entry);
+      } catch (e) {
+        throw new Error(`Not a valid backup file — the attached file "${name}" could not be decoded.`);
+      }
+      uploadBlobs.set(name, blob);
+    }
+
+    // All async prep — engine init and parsing the incoming bytes into a standalone Database —
+    // happens BEFORE waitForSaveIdle() is even called, specifically so that once that wait
+    // resolves, the generation bump and the `db` swap below run with NOTHING async in between.
+    // Doing this the other way around (as an earlier version of this fix did) reopens the exact
+    // gap item 2 exists to close: an `await initSqljs()` sitting between waitForSaveIdle() and the
+    // bump would let a brand-new flush() start during it, read the still-OLD dbGeneration while
+    // `db` is still the OLD database, and only be caught (if at all) by the post-write generation
+    // check below — by which point its write may already have reached IndexedDB.
+    const SQL = await initSqljs();
+    const rawBytes = Array.isArray(data.db) ? new Uint8Array(data.db) : data.db;
+    const newDb = new SQL.Database(rawBytes);
+    newDb.exec('PRAGMA foreign_keys = ON;');
+    // 4c: let any autosave already in flight finish writing the OLD database first. Without this,
+    // that flush's idbSet (bytes captured from the pre-restore `db`) could still be pending when
+    // we swap `db` and write below, and land in IndexedDB AFTER our write — silently putting the
+    // old database back. Bounded (SAVE_IDLE_TIMEOUT_MS): a save that is stuck rather than merely
+    // slow must not hang this restore (and the UI showing it) forever — see waitForSaveIdle and the
+    // comment above dbGeneration for why proceeding after the bound is still safe. This is the LAST
+    // await before the generation bump and the swap immediately below it — see the comment above.
+    await waitForSaveIdle();
+    // Bump the generation and swap `db` in the SAME synchronous block — no `await` between them —
+    // so no flush can ever read the bumped `dbGeneration` while `db` still points at the OLD
+    // database (see the comment above dbGeneration for exactly what this guarantees).
+    dbGeneration++;
+    const previousDb = db;
+    db = newDb;
+    try {
+      migrate();
+      // Bounded like the wait above: if this write itself stalls (the same stuck-IndexedDB
+      // scenario), reject rather than leave the restored database only ever in memory while the
+      // user stares at nothing — doRestore() in app.js surfaces this as a failed restore.
+      await withDeadline(
+        idbSet(DB_KEY, currentBytes()),
+        SAVE_IDLE_TIMEOUT_MS,
+        Object.assign(new Error('Restoring timed out while saving to this browser. Your browser storage may be unavailable; try again or reload and retry.'), { dbSaveTimedOut: true })
+      );
+    } catch (e) {
+      // Never leave the live handle dead on a throw: put the working database back so the app
+      // keeps running on what it had before this restore attempt, and surface the real error.
+      db = previousDb;
+      try { newDb.close(); } catch (_) {}
+      throw e;
+    }
+    // previousDb is kept OPEN (not closed yet) past this point — if the upload apply below fails,
+    // the rollback branch needs it live to re-export and re-persist as the working database again.
+    // 4b: restore must REPLACE the upload set, not merge into it — an attachment removed from the
+    // facility's data before this backup was taken (or never present in it) must not survive the
+    // restore just because some earlier database left its blob sitting in IndexedDB. Delete every
+    // uploads:* entry the incoming backup doesn't carry before writing the ones it does. Every
+    // entry was already decoded and validated above, so nothing here can fail on malformed input —
+    // only a genuine IndexedDB error (a full/blocked store) reaches the catch below.
+    try {
+      const backupUploadNames = new Set(uploadBlobs.keys());
+      const existingUploads = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+      const existingNames = new Set();
+      // C4-followups #2: the database rollback below (on a failure IN THIS BLOCK) only ever put
+      // `db` back — it never undid whatever upload deletes/writes had already landed by the time
+      // the failure hit, so a delete or overwrite from earlier in this same loop stood permanently
+      // even though the restore it belonged to was reported as failed. Hold every blob this apply
+      // phase is about to delete or overwrite BEFORE touching any of them, so a failure partway
+      // through can put the upload set back exactly as it was, not just the SQL database.
+      const heldBlobs = new Map(); // name -> original blob, for every name this phase deletes or overwrites
+      for (const { key } of existingUploads) {
+        const name = key.slice((UPLOAD_KEY + ':').length);
+        existingNames.add(name);
+        if (!backupUploadNames.has(name) || uploadBlobs.has(name)) heldBlobs.set(name, await idbGet(key));
+      }
+      const writtenSoFar = []; // names this phase has successfully idbSet, in order
+      try {
+        for (const name of existingNames) {
+          if (!backupUploadNames.has(name)) await idbDelete(UPLOAD_KEY + ':' + name);
+        }
+        for (const [name, blob] of uploadBlobs) {
+          await idbSet(UPLOAD_KEY + ':' + name, blob);
+          writtenSoFar.push(name);
+        }
+      } catch (uploadErr) {
+        // Put back every blob this phase touched (whether deleted or overwritten) — best effort,
+        // same reasoning as the db re-persist below: the ORIGINAL error is what the caller sees
+        // either way, so a failure restoring one held blob must not stop the rest from being tried.
+        for (const [name, blob] of heldBlobs) {
+          try { await idbSet(UPLOAD_KEY + ':' + name, blob); } catch (_) {}
+        }
+        // A name that did NOT exist before this restore but got written before the failure (a
+        // brand-new upload the backup introduced) has no "old" blob to restore — delete it instead
+        // so the upload set ends up with exactly its pre-restore membership.
+        for (const name of writtenSoFar) {
+          if (!existingNames.has(name)) { try { await idbDelete(UPLOAD_KEY + ':' + name); } catch (_) {} }
+        }
+        throw uploadErr;
+      }
+    } catch (e) {
+      // Roll back rather than leave the SQL database restored with the upload set only half
+      // applied: put previousDb back as the live database, re-persist IT (bumping the generation
+      // again so any lingering flush targeting the now-abandoned newDb is dropped, same guard as
+      // the swap above), and rethrow so doRestore reports the failure honestly instead of the
+      // toast in app.js claiming "Database restored successfully" over a half-done restore.
+      db = previousDb;
+      dbGeneration++;
+      try { await withDeadline(idbSet(DB_KEY, currentBytes()), SAVE_IDLE_TIMEOUT_MS, e); } catch (_) { /* best effort re-persist; the original error is what we throw */ }
+      try { newDb.close(); } catch (_) {}
+      throw e;
+    }
+    try { previousDb.close(); } catch (_) {}
+    return preview;
+  }
+
+  /* ---------------- Uploads (IndexedDB) ----------------
+     Attachment blobs (`uploads:<storageKey>`) used to have no delete path at all: removing an
+     attachment (deleteFile), deleting a project with no history to protect (archiveProject's
+     zero-ref branch), and Clear All Data every deleted the `files` row that pointed at a blob but
+     never the blob itself — it lingered forever in IndexedDB and kept shipping inside every
+     future backup (M9). deleteUpload/deleteUploads close that gap; callers pass the same
+     storageKey `files.path` already holds for kind='upload' rows. */
   async function saveUpload(name, blob) { await idbSet(UPLOAD_KEY + ':' + name, blob); }
   async function getUpload(name) { return idbGet(UPLOAD_KEY + ':' + name); }
+  // Propagates a failure instead of swallowing it (previously: caught, logged, and silently
+  // returned success) — a caller that awaits this and reports "removed"/"deleted" while the blob
+  // is still sitting in IndexedDB is lying to the user. Every caller now awaits this AFTER its own
+  // row-delete transaction commits and catches the rejection to toast rather than assume success.
+  async function deleteUpload(name) {
+    if (!name) return;
+    await idbDelete(UPLOAD_KEY + ':' + name);
+  }
+  async function deleteUploads(names) {
+    for (const name of names || []) await deleteUpload(name);
+  }
+  // Every uploaded blob, regardless of which project or file row it belonged to — used by Clear
+  // All Data, which wipes every table and so must also wipe every attachment.
+  // Item 4 (second review): this used to catch-and-log a failure here and resolve successfully
+  // anyway, so clearAllData() (which awaits this) reported "cleared" while blobs were still
+  // sitting in IndexedDB. Let a rejection propagate — callers now decide how to report it rather
+  // than being lied to about the outcome.
+  async function deleteAllUploads() {
+    const entries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+    for (const { key } of entries) await idbDelete(key);
+  }
 
   /* ---------------- Silent auto-backup folder handle (IndexedDB) ---------------- */
   const AUTO_BACKUP_DIR_KEY = 'auto-backup-dir-handle';
@@ -895,6 +1844,7 @@
 
   // Parameterized mutation helper
   function run(sql, params = []) {
+    assertWritable();
     if (!params || params.length === 0) {
       db.exec(sql);
     } else {
@@ -904,6 +1854,58 @@
       stmt.free();
     }
     markDirty();
+  }
+
+  /* ---------------- Transactions (G1) ----------------
+     Every "rebuild the join rows" save (a booking's attendees/instruments/staff, a milestone's
+     owners, a project's team, …) is really several DELETE/INSERT statements in a row, each its
+     own run() call. Before this, a throw partway through — an FK violation, a stubbed failure, a
+     genuine bug — left whatever ran so far committed and the rest missing: a real half-written
+     record with no rollback, exactly the "Known and deferred" gap this closes. DB.transaction(fn)
+     wraps such a save's statements in one SQLite transaction: BEGIN before fn() runs, COMMIT if it
+     returns normally, ROLLBACK-then-rethrow if it throws — so a half-finished multi-step save
+     leaves the row set exactly as it was before the save was attempted, not half of it.
+
+     fn MUST be synchronous and must never span an `await` — see below for why that matters, and
+     every caller in app.js (bookingSave, msSave, etc.) only wraps the plain run()/exec() calls
+     that come after all of a save's own awaits (file uploads, confirm dialogs, …) resolve.
+
+     Nesting: REJECTED, not handled via SAVEPOINT. A second DB.transaction() call while one is
+     already open throws immediately rather than silently starting a nested BEGIN (SQLite itself
+     would just error on a literal nested BEGIN, but a savepoint-based scheme would swallow that
+     confusion invisibly). None of this codebase's save paths call into another wrapped save
+     function today; if one ever needs to, the right fix is one shared transaction() call around
+     both, not making transaction() itself re-entrant.
+
+     Is db.export() (called by every autosave, via currentBytes()) safe to run WHILE a transaction
+     is open? Investigated and answered: it can never happen, by construction, not because export()
+     itself is transaction-aware. markDirty() (called by run() inside fn()) only calls
+     scheduleFlush(), which arms a 400ms setTimeout — it never calls flush()/currentBytes()
+     synchronously. Because transaction() requires fn to be fully synchronous (no `await` inside
+     it), JavaScript's single-threaded run-to-completion means BEGIN, every statement fn() runs,
+     and COMMIT/ROLLBACK all execute back-to-back with no yield to the event loop in between — so
+     the setTimeout callback that would eventually call flush() cannot fire until AFTER the
+     transaction has already resolved one way or the other. There is therefore no instant at which
+     an autosave could observe a half-open transaction; enforcing "fn is synchronous" is what makes
+     that guarantee hold, so a caller must never turn fn into (or call from) an async function. */
+  let inTransaction = false;
+  function transaction(fn) {
+    assertWritable();
+    if (inTransaction) {
+      throw new Error('DB.transaction() calls cannot be nested — wrap the whole multi-step save in one transaction instead.');
+    }
+    inTransaction = true;
+    db.exec('BEGIN');
+    try {
+      const result = fn();
+      db.exec('COMMIT');
+      return result;
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* nothing to roll back if BEGIN itself never completed */ }
+      throw e;
+    } finally {
+      inTransaction = false;
+    }
   }
 
   /* ---------------- Compute: progress + flags ---------------- */
@@ -982,7 +1984,8 @@
   }
   function setGroupDiscount(org, percent) {
     if (!org) return;
-    run('INSERT INTO group_discounts (org, percent) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET percent=excluded.percent', [org, Number(percent) || 0]);
+    const clamped = Math.min(100, Math.max(0, Number(percent) || 0));
+    run('INSERT INTO group_discounts (org, percent) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET percent=excluded.percent', [org, clamped]);
   }
   function listGroupDiscounts() {
     return rows('SELECT org, percent FROM group_discounts ORDER BY org');
@@ -1068,11 +2071,25 @@
      has the bare tier_id (a booking snapshot column, not a joined row), so there's no separate
      is_retired flag for a caller to wrap with UI.retiredName itself. '—' covers both a genuinely
      legacy booking (tier_id NULL) and an orphaned id. */
-  function tierLabel(tierId) {
+  function tierLabel(tierId, map) {
     if (tierId == null) return '—';
+    // `map` (from buildTierLabelMap below) skips the per-call SELECT — an export loop over every
+    // booking in the facility used to issue one `row()` query per row just to resolve its tier
+    // name; the exact same answer comes from one query read into a Map once, then a lookup here.
+    if (map) return map.has(tierId) ? map.get(tierId) : '—';
     const t = row('SELECT name, is_retired FROM pricing_tiers WHERE id=?', [tierId]);
     if (!t) return '—';
     return global.UI.retiredName(t.name, t.is_retired);
+  }
+  // One query, reused by any export loop that would otherwise call tierLabel(id) once per row
+  // (js/exports.js's Meetings/Bookings & Costs sheets, DOCX, PDF). Built once per export, not
+  // cached across calls, so a tier renamed mid-session is never read stale.
+  function buildTierLabelMap() {
+    const map = new Map();
+    rows('SELECT id, name, is_retired FROM pricing_tiers').forEach((t) => {
+      map.set(t.id, global.UI.retiredName(t.name, t.is_retired));
+    });
+    return map;
   }
 
   /* ---------------- Per-tier instrument rate overrides ----------------
@@ -1151,6 +2168,10 @@
     parts.total = parts.projects + parts.milestones + parts.bookings + parts.entries;
     return parts;
   }
+  // `billed` follows the same Project Costs rule as views.js/reports.js (CLAUDE.md: "a row counts
+  // unless is_cancelled && !billing_retained") — a cancelled-and-waived booking or service entry
+  // bills 0 on that screen, so the Archive dialog quoting a different (raw) figure here would be
+  // telling the admin a project "carries" money that Project Costs itself shows as zero.
   function countProjectRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_people WHERE project_id=?) AS team,
@@ -1161,8 +2182,8 @@
       (SELECT COUNT(*) FROM files WHERE project_id=?) AS files,
       (SELECT COUNT(*) FROM kv WHERE project_id=?) AS fields,
       (SELECT COUNT(*) FROM project_outputs WHERE project_id=?) AS outputs,
-      (SELECT COALESCE(SUM(total_cost),0) FROM meetings WHERE project_id=?) AS billed,
-      (SELECT COALESCE(SUM(total_cost),0) FROM service_entries WHERE project_id=?) AS entriesBilled`,
+      (SELECT COALESCE(SUM(CASE WHEN is_cancelled=1 AND billing_retained=0 THEN 0 ELSE total_cost END),0) FROM meetings WHERE project_id=?) AS billed,
+      (SELECT COALESCE(SUM(CASE WHEN is_cancelled=1 AND billing_retained=0 THEN 0 ELSE total_cost END),0) FROM service_entries WHERE project_id=?) AS entriesBilled`,
       [id, id, id, id, id, id, id, id, id, id]) || {};
     const parts = {
       team: r.team || 0, instruments: r.instruments || 0, milestones: r.milestones || 0,
@@ -1191,6 +2212,27 @@
     parts.any = parts.lines + parts.attendees + (parts.total > 0 ? 1 : 0);
     return parts;
   }
+
+  /* Rebuilds ONE meeting's denormalized `attendees` display string from meeting_people — the
+     single source of truth for who was actually there. Exists so every writer of `people.name`
+     (today, just pEditSave) can keep the two in sync per CLAUDE.md's "denormalized display string
+     + join table must both be written on every save", the same way bookingSave/bookingEditSave
+     already do for a booking's own attendee edits. */
+  function refreshAttendeesForMeeting(meetingId) {
+    const names = rows(
+      `SELECT p.name AS name FROM meeting_people mp JOIN people p ON p.id = mp.person_id WHERE mp.meeting_id=?`,
+      [meetingId]
+    ).map((r) => r.name).join(', ');
+    run('UPDATE meetings SET attendees=? WHERE id=?', [names, meetingId]);
+  }
+  // Every meeting a person is on, recomputed — call this after ANY write to people.name so a
+  // rename can never leave meetings.attendees stale (it drifted silently until this existed:
+  // pEditSave updated people.name only, and every export/list kept showing the old name).
+  function refreshAttendeesForPerson(personId) {
+    rows('SELECT DISTINCT meeting_id FROM meeting_people WHERE person_id=?', [personId])
+      .forEach((r) => refreshAttendeesForMeeting(r.meeting_id));
+  }
+
   /* How much of the app a grant touches: projects billed against it and bookings billed against
      it (both via a nullable, REFERENCES-less grant_id column — see the migrate() comment for why).
      Zero references means there's nothing to preserve, so retireGrant offers a real delete instead
@@ -1309,42 +2351,68 @@
     const oldTier = row('SELECT tier_id FROM group_tiers WHERE org=?', [oldName]);
     const targetHadTier = !!row('SELECT 1 as x FROM group_tiers WHERE org=?', [newName]);
     const tierMerged = !!(oldTier && targetHadTier);
+    // The ORG vocab table (facility-registered "+ Add New" lab names, listed by orgNames()) is
+    // ANOTHER place this name lives, independent of people/discounts/tiers — a lab entered via
+    // vocab but not yet assigned to anyone would otherwise still show the old name in every
+    // Lab/Group/Company picker after a rename. category/value carries a UNIQUE constraint, so a
+    // rename that collides with an existing vocab entry for newName is a merge (drop the old row)
+    // exactly like group_discounts/group_tiers above, not a raced UPDATE.
+    const oldVocab = !!row("SELECT 1 as x FROM vocab WHERE category='ORG' AND value=?", [oldName]);
+    const targetHadVocab = !!row("SELECT 1 as x FROM vocab WHERE category='ORG' AND value=?", [newName]);
+    const vocabMerged = !!(oldVocab && targetHadVocab);
 
-    if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
-    if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
+    // G1: a rename touches up to four tables (people, meetings, group_discounts/group_tiers,
+    // vocab) — wrapped so a throw partway through can never leave some of them renamed to newName
+    // and others still reading oldName.
+    return transaction(() => {
+      if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
+      if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
 
-    let discountMoved = false;
-    if (oldDiscount) {
-      if (targetHadDiscount) {
-        // Merge: the destination's own standing rate wins; drop the source row rather than
-        // fight it for the org primary key.
-        run('DELETE FROM group_discounts WHERE org=?', [oldName]);
-      } else {
-        run('UPDATE group_discounts SET org=? WHERE org=?', [newName, oldName]);
-        discountMoved = true;
+      let discountMoved = false;
+      if (oldDiscount) {
+        if (targetHadDiscount) {
+          // Merge: the destination's own standing rate wins; drop the source row rather than
+          // fight it for the org primary key.
+          run('DELETE FROM group_discounts WHERE org=?', [oldName]);
+        } else {
+          run('UPDATE group_discounts SET org=? WHERE org=?', [newName, oldName]);
+          discountMoved = true;
+        }
       }
-    }
 
-    let tierMoved = false;
-    if (oldTier) {
-      if (targetHadTier) {
-        // Merge: the destination's own tier assignment wins; drop the source row rather than
-        // fight it for the org primary key.
-        run('DELETE FROM group_tiers WHERE org=?', [oldName]);
-      } else {
-        run('UPDATE group_tiers SET org=? WHERE org=?', [newName, oldName]);
-        tierMoved = true;
+      let tierMoved = false;
+      if (oldTier) {
+        if (targetHadTier) {
+          // Merge: the destination's own tier assignment wins; drop the source row rather than
+          // fight it for the org primary key.
+          run('DELETE FROM group_tiers WHERE org=?', [oldName]);
+        } else {
+          run('UPDATE group_tiers SET org=? WHERE org=?', [newName, oldName]);
+          tierMoved = true;
+        }
       }
-    }
 
-    return {
-      peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount,
-      tierMoved, tierMerged, hadTier: !!oldTier
-    };
+      let vocabMoved = false;
+      if (oldVocab) {
+        if (targetHadVocab) {
+          run("DELETE FROM vocab WHERE category='ORG' AND value=?", [oldName]);
+        } else {
+          run("UPDATE vocab SET value=? WHERE category='ORG' AND value=?", [newName, oldName]);
+          vocabMoved = true;
+        }
+      }
+
+      return {
+        peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount,
+        tierMoved, tierMerged, hadTier: !!oldTier,
+        vocabMoved, vocabMerged, hadVocab: oldVocab
+      };
+    });
   }
 
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
-  function clearAllData() {
+  async function clearAllData() {
+    assertWritable();
     db.exec(`
       DELETE FROM project_people;
       DELETE FROM project_instruments;
@@ -1373,6 +2441,12 @@
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
       db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries','project_outputs')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
+    // M9: every attachment blob this database ever held is now orphaned (its `files` row is
+    // gone above) — without this they lingered in IndexedDB forever and kept shipping inside
+    // every future backup. clearAllData() is now async specifically so callers CAN await this —
+    // a caller that reports "cleared" before the blobs actually finish deleting would let a user
+    // re-seed/reload while stale uploads are still being wiped underneath them.
+    await deleteAllUploads();
     markDirty();
   }
 
@@ -1464,7 +2538,7 @@
     return mid;
   }
 
-  function seedSampleData({ force = false } = {}) {
+  async function seedSampleData({ force = false } = {}) {
     // Hard refusal, deliberately placed as the first statement of the destructive function itself
     // rather than left to whatever calls it. A check at the call site only makes the call
     // *currently unused* outside the sandbox; a guard here makes the destructive path itself
@@ -1484,7 +2558,7 @@
     // demo database, never a real facility's.
     if (!force && hasAnyDataLocal()) return true;
 
-    clearAllData();
+    await clearAllData();
 
     // Demo dates are relative to the day the sample data is loaded, so the dataset never reads as
     // stale history and always lands inside the Reports screen's default range (the current year).
@@ -1693,6 +2767,13 @@
     setConfig('overhead_external', '5');
     setConfig('tax_pct', '8');
     setConfig('currency', '$');
+    // M5: the demo database goes through boot()'s fresh-DB branch too (see the comment there),
+    // which already sets this — but seedSampleData can also run via Settings > Load Sample Data
+    // (force reset) against a demo DB restored from an older backup made before that fresh-DB
+    // fix existed. Setting it again here, right where the legacy overhead values it guards
+    // against re-seeding from are (re)written, keeps a later migrate() from recreating tiers a
+    // facility deliberately deleted, on every path that writes these two config values.
+    setConfig('pricing_tiers_seeded', 1);
     setGroupDiscount('Bio-Photonics Lab', 5); // only lab with a standing discount, on purpose —
     // Neural Dynamics Institute and Therapeutics & Onco-Therapy deliberately have none, so
     // Reports' By Lab/Group table shows a real contrast, not three identical discounted rows.
@@ -1975,7 +3056,11 @@
   // so app.js's helper isn't available here to call. Used only to decide whether an unforced
   // seedSampleData() call should skip re-seeding a sandbox that already has rows.
   function hasAnyDataLocal() {
-    const r = row('SELECT (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) as c');
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) +
+      (SELECT COUNT(*) FROM meetings) + (SELECT COUNT(*) FROM milestones) + (SELECT COUNT(*) FROM grants) +
+      (SELECT COUNT(*) FROM service_entries) + (SELECT COUNT(*) FROM project_outputs) + (SELECT COUNT(*) FROM files)
+      as c`);
     return !!(r && r.c);
   }
 
@@ -2005,10 +3090,16 @@
     get isDemo() { return !!global.IS_DEMO; },
     currentBytes,
     markDirty,
+    flushNow,
+    get isReadOnly() { return multiTabGuard.isReadOnly(); },
     buildBackup,
     restoreBackup,
+    inspectBackupCandidate,
+    liveSummary,
     saveUpload,
     getUpload,
+    deleteUpload,
+    deleteUploads,
     saveAutoBackupDirHandle,
     getAutoBackupDirHandle,
     clearAutoBackupDirHandle,
@@ -2018,6 +3109,7 @@
     q,
     q1,
     run,
+    transaction,
     projectProgress,
     projectFlags,
     vocabList,
@@ -2036,6 +3128,7 @@
     upsertPricingTierByName,
     countTierRefs,
     tierLabel,
+    buildTierLabelMap,
     getInstrumentTierRate,
     resolveInstrumentCost,
     setInstrumentTierRate,
@@ -2051,6 +3144,8 @@
     grantLabel,
     setProjectArchived,
     countBookingRefs,
+    refreshAttendeesForMeeting,
+    refreshAttendeesForPerson,
     setBookingCancelled,
     setServiceEntryCancelled,
     setRetired,

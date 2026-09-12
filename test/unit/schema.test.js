@@ -155,11 +155,15 @@ describe('schema: projects.pi_id has no REFERENCES clause', () => {
       'pi_id has no REFERENCES clause, so cascade cannot and does not null it — CLAUDE.md calls this out ' +
       'explicitly as something the explicit delete code in app.js (not cascade) has to handle');
 
-    // The person-deletion / pi_id-nulling logic itself lives in js/app.js (retirePerson's
-    // zero-ref delete branch), which is not exported on DB or reachable from these tests per
-    // CLAUDE.md's module layout (app.js is the last file loaded and exposes only a routing/CRUD
-    // surface on `global.App`, not this internal helper) — so that half of the behavior is
-    // documented here as a known gap in test coverage, not asserted.
+    // NOTE (corrected after this comment's first pass — see delete-paths.test.js, which now
+    // reaches js/app.js's real retirePerson via helpers/app-harness.js): retirePerson's zero-ref
+    // delete branch contains no `UPDATE projects SET pi_id=NULL` at all (grep js/app.js — there is
+    // no such statement anywhere). That is not a live gap through the app's own UI: retirePerson's
+    // real-delete offer is gated on `DB.countPersonRefs(id).total === 0`, and that total already
+    // includes `pi` (see the ref-counter tests above), so the branch that deletes a person never
+    // runs while they are still a PI on anything, even an archived project. The dangling-pi_id
+    // scenario this test constructs above is real only for a hypothetical direct-SQL delete that
+    // bypasses retirePerson — see delete-paths.test.js's dedicated test for the full argument.
   });
 });
 
@@ -358,7 +362,7 @@ describe('schema: the denormalized meetings.attendees string vs. the relational 
     // attendees end-to-end. It refuses to run unless window.IS_DEMO is true, so this test boots
     // with `?demo=1` (see js/consts.js) specifically to reach it.
     const { DB } = await freshDb({ search: '?demo=1' });
-    const ok = DB.seedSampleData();
+    const ok = await DB.seedSampleData();
     assert.equal(ok, true);
 
     const meetings = DB.rows("SELECT id, attendees FROM meetings WHERE TRIM(COALESCE(attendees,'')) != ''");
