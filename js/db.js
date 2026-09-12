@@ -922,14 +922,26 @@
      event loop alive — under `node --test`, which never has a real IndexedDB to guard in the
      first place, that hung the whole run rather than exiting. There is also nothing worth
      guarding in memoryMode (no shared IndexedDB another tab could race for). */
+  // Item 2 (second review): how long a tab waits, after hearing a `bye` whose sender says a save
+  // was still pending/in flight, before giving up on a follow-up `saved` message and promoting
+  // anyway. Bounded the same way SAVE_IDLE_TIMEOUT_MS bounds restoreBackup's own wait — a `saved`
+  // that never arrives (the outgoing tab was actually killed, not just closed cleanly) must not
+  // leave every OTHER tab stuck read-only forever.
+  const BYE_GRACE_MS = 1500;
+
   let multiTabGuard = { isReadOnly: () => false };
   function startMultiTabGuard() {
     if (typeof BroadcastChannel === 'undefined') return { isReadOnly: () => false };
     let bc;
     try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return { isReadOnly: () => false }; }
     const selfId = Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
-    const selfTs = Date.now();
+    let selfTs = Date.now();
     const peers = new Map(); // id -> ts, other known tabs (never includes selfId)
+    // Item 2: a peer whose `bye` said its final flush was still pending is held HERE (id -> the
+    // setTimeout that will eventually force its departure) instead of being deleted from `peers`
+    // immediately — see the `bye` handler below for why immediate deletion is the actual bug this
+    // closes, and BYE_GRACE_MS above for the bound.
+    const pendingDepartures = new Map();
     let readOnly = false;
     let promoting = false; // true only during the async reload-from-disk gap on promotion
     // Counts consecutive failed promotion attempts (reset to 0 on a successful one) — mirrors
@@ -1009,10 +1021,22 @@
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
     }
 
-    bc.onmessage = (ev) => {
+    // Cancels a held departure timer (a later message from the same tab proves it's still here,
+    // or has now genuinely finished leaving) without necessarily deleting the peer — callers decide
+    // that themselves right after calling this.
+    function clearPendingDeparture(id) {
+      const timer = pendingDepartures.get(id);
+      if (timer != null) { clearTimeout(timer); pendingDepartures.delete(id); }
+    }
+
+    function onBcMessage(ev) {
       const msg = ev.data || {};
       if (!msg || msg.id === selfId) return;
       if (msg.type === 'hello') {
+        // A hello from a tab whose departure we were waiting out means it's clearly still here
+        // (or came straight back) — cancel the wait rather than let a stale timer later delete a
+        // peer that has since re-announced itself.
+        clearPendingDeparture(msg.id);
         peers.set(msg.id, msg.ts);
         recompute();
         try { bc.postMessage({ type: 'hello-ack', id: selfId, ts: selfTs }); } catch (_) {}
@@ -1020,17 +1044,103 @@
         peers.set(msg.id, msg.ts);
         recompute();
       } else if (msg.type === 'bye') {
+        // Item 2 (second review): a `bye` sent right as its tab is torn down used to delete the
+        // peer and recompute immediately — but that tab's OWN teardown (below) broadcasts `bye`
+        // and used to close its channel right away while its final autosave flush was still async
+        // and in flight. A surviving tab could promote on this `bye` alone, reload from
+        // IndexedDB BEFORE that flush's write ever landed, and capture stale bytes — then, once
+        // promoted, autosave right over the outgoing tab's actual last write once it does land a
+        // moment later. So: a `bye` that says a save was still pending does NOT promote anyone by
+        // itself. It waits for either a follow-up `saved` from the same tab (sent once its final
+        // flush genuinely settles, if the tab lives long enough to send it) or BYE_GRACE_MS,
+        // whichever comes first, before treating the peer as actually gone.
+        if (msg.pending) {
+          if (!pendingDepartures.has(msg.id)) {
+            const timer = setTimeout(() => {
+              pendingDepartures.delete(msg.id);
+              peers.delete(msg.id);
+              recompute();
+            }, BYE_GRACE_MS);
+            pendingDepartures.set(msg.id, timer);
+          }
+        } else {
+          clearPendingDeparture(msg.id);
+          peers.delete(msg.id);
+          recompute();
+        }
+      } else if (msg.type === 'saved') {
+        // The outgoing tab's final flush landed — safe to treat it as gone right away instead of
+        // waiting out the rest of the grace period.
+        clearPendingDeparture(msg.id);
         peers.delete(msg.id);
         recompute();
       }
-    };
+    }
+    bc.onmessage = onBcMessage;
     try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
 
-    function teardown() {
-      try { bc.postMessage({ type: 'bye', id: selfId }); } catch (_) {}
+    // Item 2: the outgoing tab's own side of the fix above. Broadcasts `bye` immediately (so
+    // peers learn this tab is leaving with as little delay as possible either way) carrying
+    // whether a save is still dirty/in flight; if so, waits for flushNow() — which by this point
+    // also covers item 3's fix (awaits any save already in flight, then flushes whatever landed
+    // during it) — to actually settle before announcing `saved` and only THEN closing the
+    // channel. If the page is torn down before that wait resolves, the `saved` message simply
+    // never goes out and peers fall back to the bounded grace period above — never worse than
+    // before this fix, and correct whenever the tab lives long enough to finish.
+    async function teardown() {
+      const pending = dirty || saving || pendingDuringSave;
+      try { bc.postMessage({ type: 'bye', id: selfId, pending }); } catch (_) {}
+      if (pending) {
+        try { await flushNow(); } catch (_) {}
+        // Only claim `saved` if the flush actually left nothing dirty — a permanently failing
+        // save (this tab closing right as autosave itself is broken) must not tell peers it's
+        // safe to promote; they fall back to the grace period instead of trusting a false "saved".
+        if (!dirty) {
+          try { bc.postMessage({ type: 'saved', id: selfId }); } catch (_) {}
+        }
+      }
       try { bc.close(); } catch (_) {}
     }
     if (typeof global.addEventListener === 'function') global.addEventListener('pagehide', teardown);
+
+    // Item 2 (suppressed finding): `pagehide` also fires when a page merely enters the
+    // back-forward cache (bfcache) rather than being genuinely closed — teardown() above still
+    // runs, announcing `bye` and closing `bc`, exactly as if the tab were gone, while the page's
+    // JS (this whole closure, `readOnly` included) is FROZEN, not reloaded. If the browser later
+    // restores it FROM bfcache, resuming with whatever `readOnly` happened to hold when it was
+    // frozen would let it resume as a writer with no re-election and a `bc` that teardown() already
+    // closed — every other tab already believes it left. `pageshow` with `event.persisted` is the
+    // signal a bfcache restore actually happened; treat it as rejoining as a brand-new tab: forced
+    // read-only until the election says otherwise, a fresh BroadcastChannel, a fresh timestamp (so
+    // it re-enters the tie-break as the newest tab, not whatever it was before being frozen), and a
+    // fresh `hello` so every other tab learns about it again.
+    function rejoinAsNewTab() {
+      readOnly = true;
+      promoting = false;
+      peers.clear();
+      for (const timer of pendingDepartures.values()) clearTimeout(timer);
+      pendingDepartures.clear();
+      try { bc.close(); } catch (_) {}
+      try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return; }
+      bc.onmessage = onBcMessage;
+      selfTs = Date.now();
+      // Route the "am I actually alone, or is an older tab out there" decision through the SAME
+      // recompute()/reloadFromDiskAndPromote() machinery every other state change already uses,
+      // rather than duplicating its onMultiTabState call here: with `peers` empty and `readOnly`
+      // forced true above, recompute() immediately takes the promotion branch — reloading `db`
+      // fresh from IndexedDB before this tab is trusted to write again, exactly as safe as any
+      // other promotion — and demotes back to read-only on its own if an older tab's `hello-ack`
+      // arrives afterward.
+      recompute();
+      try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
+      // teardown() is already registered as a 'pagehide' listener (below) — since it's the same
+      // function reference, addEventListener would just be a no-op duplicate if called again here,
+      // so it isn't; the ORIGINAL registration covers every future pagehide, this bfcache-restored
+      // tab included.
+    }
+    if (typeof global.addEventListener === 'function') {
+      global.addEventListener('pageshow', (ev) => { if (ev && ev.persisted) rejoinAsNewTab(); });
+    }
 
     return { isReadOnly: () => readOnly || promoting };
   }
