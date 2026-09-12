@@ -362,7 +362,7 @@ describe('schema: the denormalized meetings.attendees string vs. the relational 
     // attendees end-to-end. It refuses to run unless window.IS_DEMO is true, so this test boots
     // with `?demo=1` (see js/consts.js) specifically to reach it.
     const { DB } = await freshDb({ search: '?demo=1' });
-    const ok = DB.seedSampleData();
+    const ok = await DB.seedSampleData();
     assert.equal(ok, true);
 
     const meetings = DB.rows("SELECT id, attendees FROM meetings WHERE TRIM(COALESCE(attendees,'')) != ''");

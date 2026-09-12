@@ -908,20 +908,38 @@
   // opts.compactable marks a chip whose box can end up too narrow for its full label to read (the
   // Resource Timeline's per-instrument lanes, where a short booking's width is a few percent of a
   // day column) — see the Timeline call site. Rather than guess a width in pixels here (the actual
-  // column width is a grid `1fr` unknown until layout), the chip carries the start time it would
-  // fall back to in a `data-tl-time` attribute, and a post-render pass in app.js's renderView
-  // (after the DOM is inserted, so nothing flashes) swaps in that short label wherever the full one
-  // actually overflows its box (`scrollWidth > clientWidth`) — a measurement, not an estimate, so
-  // it holds at any column width. Untimed events have no time to fall back to, so they stay full.
+  // column width is a grid `1fr` unknown until layout), the chip renders all three label tiers at
+  // once (.ev-label-full/-compact/-icon), and a post-render pass in app.js's renderView (after the
+  // DOM is inserted, so nothing flashes) adds `lbl-compact`/`lbl-icon` to pick whichever tier
+  // actually fits (`scrollWidth > clientWidth`) — a measurement, not an estimate, so it holds at
+  // any column width, and never needs to widen the box itself (CSS shows the full tier again, and
+  // grows the box, on :hover/:focus-visible instead).
   function calEvChipHtml(e, styleAttr, opts) {
-    const compact = !!(opts && opts.compactable && e.start_time);
+    const compactable = !!(opts && opts.compactable);
+    const icon = e.kind === 'mt' ? '📅' : '🎯';
+    const cls = `ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}`;
+    const dataAttrs = `data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"`;
+    const title = `title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}"`;
+    if (!compactable) {
+      return `
+      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title}>
+        ${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+      </div>`;
+    }
+    // Resource Timeline chips: a short booking's box (a few percent of a day column) can be too
+    // narrow even for "📅 09:00", let alone the full name. Rather than widen the box (which used
+    // to overlap the neighbouring booking — see the CSS `min-width` this replaces), the chip
+    // carries all three label tiers at once (full / compact-time / icon-only), and a post-render
+    // measuring pass in app.js's renderView adds `lbl-compact`/`lbl-icon` to pick whichever one
+    // actually fits its real, unwidened box — CSS shows only one tier at a time by default, but
+    // reveals the full label again (and grows the box, via :hover/:focus-visible) so it's always
+    // readable without relying solely on the title tooltip's hover delay. tabindex makes that
+    // keyboard-reachable too, not just mouse-hover.
     return `
-      <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
-           style="${styleAttr || ''}"
-           data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
-           ${compact ? `data-tl-time="${esc(e.start_time)}"` : ''}
-           title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
-        ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title} tabindex="0">
+        <span class="ev-label-full">${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}</span>
+        <span class="ev-label-compact">${icon} <span class="mono" style="font-size:10px">${esc(e.start_time || '')}</span></span>
+        <span class="ev-label-icon">${icon}</span>
       </div>`;
   }
 
@@ -1211,22 +1229,37 @@
       const dayCells = days.map((d) => {
         const ds = global.UI.ymd(d);
         const evs = byInstDay[inst.id + '|' + ds] || [];
-        const blocksHtml = evs.map((e) => {
+        // Untimed bookings (saved without a start_time) used to ALL render the exact same
+        // full-height strip (left:2px;right:2px;top:2px;bottom:2px) — a second one silently sat
+        // on top of and hid the first, so a lane with more than one untimed booking on the same
+        // day only ever showed one of them. Collected separately here and stacked into thin
+        // horizontal slices of the cell (one per booking) instead, so every untimed booking stays
+        // its own visible, clickable chip.
+        const timedEvs = [], untimedEvs = [];
+        evs.forEach((e) => {
+          (calTimeToPx(e.start_time, CAL_TL_HOUR_PCT) == null ? untimedEvs : timedEvs).push(e);
+        });
+        const timedHtml = timedEvs.map((e) => {
           // Reuses calTimeToPx (the same time→position math the Week grid uses) at a % scale —
           // see CAL_TL_HOUR_PCT. calEventBlockLayout's own MIN_H clamp assumes px, so its 20px
           // floor isn't reused verbatim here: at a % width, a 20% minimum would make short
           // bookings look hours long, so a small % floor (MIN_W) is applied directly instead.
           const leftPct = calTimeToPx(e.start_time, CAL_TL_HOUR_PCT);
-          if (leftPct == null) {
-            // Untimed booking (saved without a start_time) — still shown, as a full-width strip,
-            // rather than silently vanishing from the lane.
-            return calEvChipHtml(e, 'position:absolute;left:2px;right:2px;top:2px;bottom:2px', { compactable: true });
-          }
           const endPct = calTimeToPx(e.end_time, CAL_TL_HOUR_PCT);
           const MIN_W = 4;
           const widthPct = (endPct != null && endPct > leftPct) ? Math.max(MIN_W, endPct - leftPct) : MIN_W;
           return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px`, { compactable: true });
         }).join('');
+        // CAL_TL_CELL_H must match .cal-tl-daycell's CSS height (css/app.css); the 2px top/bottom
+        // inset matches the single-untimed-booking case this replaces.
+        const CAL_TL_CELL_H = 34;
+        const availH = CAL_TL_CELL_H - 4;
+        const slotH = untimedEvs.length ? availH / untimedEvs.length : availH;
+        const untimedHtml = untimedEvs.map((e, i) => {
+          const top = 2 + i * slotH;
+          return calEvChipHtml(e, `position:absolute;left:2px;right:2px;top:${top}px;height:${Math.max(slotH - 1, 4)}px`, { compactable: true });
+        }).join('');
+        const blocksHtml = timedHtml + untimedHtml;
         // A retired instrument's lane still shows its history, but an empty slot in it should not
         // pre-lock a brand-new booking to a resource that's no longer available for new work —
         // omit data-inst there so the click still opens New Booking (date/time prefilled) without

@@ -94,10 +94,10 @@ describe('demo sandbox isolation', { skip }, () => {
     // Now the sandbox, doing everything destructive available to it.
     const demo = await openApp(ctx, '?demo=1');
     await demo.waitForTimeout(1500);
-    await demo.evaluate(() => {
+    await demo.evaluate(async () => {
       DB.run("INSERT INTO projects (title, code, status) VALUES ('Demo scratch','DEMO-X','Active')");
       DB.run('DELETE FROM meetings');
-      DB.seedSampleData({ force: true });   // full clear + reseed: the sharpest edge there is
+      await DB.seedSampleData({ force: true });   // full clear + reseed: the sharpest edge there is
     });
     await demo.waitForTimeout(1500);
 

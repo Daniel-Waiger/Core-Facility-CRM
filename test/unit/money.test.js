@@ -237,3 +237,48 @@ describe('money: the regression triple', () => {
     assert.equal(bom.total, 589.95, 'documented regression figure #3: grand total including tax');
   });
 });
+
+describe('money: subtotal must equal the sum of the rounded per-line amounts', () => {
+  // Item 13 (adversarial review of PR #44): instrTime/instrAmount/staffTotal used to accumulate
+  // the UNROUNDED per-line value while each line's own displayed/stored `.line` was round2()'d
+  // individually — so the subtotal these totals feed into could differ from the sum of the lines
+  // a facility would actually see and add up by hand. Three lines that each round the same
+  // direction (0.333... -> 0.33) make that drift land on a real cent, not just a float artifact.
+  test('three instrument lines of $0.333... each: subtotal is the sum of the ROUNDED lines (0.99), not 3 * 0.333... rounded once (1.00)', () => {
+    const bom = UI.computeBookingBOM({
+      start: '10:00', end: '11:00', // 1 booking hour, so a 'time' line's amount is just its cost
+      instruments: [
+        { cost: 1 / 3, cost_unit: 'time' },
+        { cost: 1 / 3, cost_unit: 'time' },
+        { cost: 1 / 3, cost_unit: 'time' },
+      ],
+      staff: [],
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 0, taxPct: 0 },
+    });
+    const sumOfLines = bom.instrumentLines.reduce((s, it) => s + it.line, 0);
+    assert.equal(bom.instrumentLines.map((it) => it.line).join(','), '0.33,0.33,0.33', 'each line rounds to $0.33 individually');
+    assert.equal(sumOfLines, 0.99, 'sanity check on the fixture itself: 0.33 * 3 = 0.99');
+    assert.equal(bom.instrTime, 0.99, 'instrTime must equal the sum of the ROUNDED lines the user actually sees, not 3 * (1/3) rounded once');
+    assert.equal(bom.subtotal, sumOfLines, 'subtotal must reconcile exactly against the sum of the stored/displayed lines');
+  });
+
+  test('same drift, staff side: three staff lines of $0.333... each sum to $0.99, not $1.00', () => {
+    const bom = UI.computeBookingBOM({
+      start: '10:00', end: '11:00', // 1 booking hour -> billableStaffHours floors to 1
+      instruments: [],
+      staff: [
+        { rate: 1 / 3, start: '', end: '' },
+        { rate: 1 / 3, start: '', end: '' },
+        { rate: 1 / 3, start: '', end: '' },
+      ],
+      groupPct: 0, manualPct: 0,
+      rates: { overheadPct: 0, taxPct: 0 },
+      staffPctFactor: 1,
+    });
+    const sumOfLines = bom.staffLines.reduce((s, p) => s + p.line, 0);
+    assert.equal(bom.staffLines.map((p) => p.line).join(','), '0.33,0.33,0.33');
+    assert.equal(bom.staffTotal, 0.99, 'staffTotal must equal the sum of the rounded staff lines, not the unrounded raw total');
+    assert.equal(bom.subtotal, sumOfLines, 'subtotal must reconcile exactly against the sum of the stored/displayed staff lines');
+  });
+});

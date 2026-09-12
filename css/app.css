@@ -804,18 +804,39 @@ textarea.input { resize: vertical; min-height: 74px; }
 .cal-tl-hour-slot { height: 100%; flex: 0 0 auto; }
 .cal-tl-hour-slot:hover { background: var(--surface-2); }
 .cal-tl-daycell .ev {
-  /* A short booking's proportional width (e.g. 2h of 24 = ~8%) can render under 15px on a
-     typical lane column — too narrow to read even the emoji+name label. A 54px floor is wide
-     enough for the short "📅 09:00" fallback label (see app.js's renderView, which swaps to it
-     whenever the full label overflows) to read in full; the chip's title tooltip always carries
-     the complete name regardless of which label is showing. */
-  position: absolute; min-width: 54px; font-size: 9.5px; line-height: 1.2;
+  /* No min-width: a short booking's proportional width (e.g. 2h of 24 = ~8%) can render under
+     15px on a typical lane column — too narrow even for "📅 09:00", let alone the full name — and
+     a min-width here used to widen the chip PAST its actual time slot, overlapping whichever
+     booking sat next to it. The box now always matches its real geometric width; Views.calEvChipHtml
+     instead renders three label tiers (.ev-label-full/-compact/-icon) and app.js's renderView picks
+     the one that actually fits via `lbl-compact`/`lbl-icon` (see its comment) — only one tier is
+     shown at a time, below. */
+  position: absolute; font-size: 9.5px; line-height: 1.2;
   padding: 1px 4px; border-radius: 4px; background: var(--primary-soft); color: var(--primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; z-index: 1;
   box-shadow: 0 0 0 1px var(--surface);
 }
 .cal-tl-daycell .ev.mt { background: var(--success-soft); color: var(--success); }
 .cal-tl-daycell .ev.done { opacity: 0.6; text-decoration: line-through; background: var(--surface-2); color: var(--text-muted); }
+/* Label tiers: only one shown at a time in the chip's normal (unwidened) state — full by
+   default, compact/icon-only added by app.js's renderView once it measures the fuller tier
+   doesn't fit this chip's real box. */
+.cal-tl-daycell .ev .ev-label-compact, .cal-tl-daycell .ev .ev-label-icon { display: none; }
+.cal-tl-daycell .ev.lbl-compact .ev-label-full { display: none; }
+.cal-tl-daycell .ev.lbl-compact .ev-label-compact { display: inline; }
+.cal-tl-daycell .ev.lbl-icon .ev-label-compact { display: none; }
+.cal-tl-daycell .ev.lbl-icon .ev-label-icon { display: inline; }
+/* A compact/icon-only chip is still hard to read at its real width — expanding on hover/focus
+   (mouse OR keyboard, via tabindex="0" on the chip) shows the full label again and grows the box
+   just for that moment, so nothing stays permanently illegible. z-index lifts it above whatever
+   it now overlaps while expanded. */
+.cal-tl-daycell .ev:hover, .cal-tl-daycell .ev:focus-visible {
+  z-index: 5; min-width: max-content; overflow: visible; white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0,0,0,.3), 0 0 0 1px var(--surface);
+}
+.cal-tl-daycell .ev:hover .ev-label-full, .cal-tl-daycell .ev:focus-visible .ev-label-full { display: inline; }
+.cal-tl-daycell .ev:hover .ev-label-compact, .cal-tl-daycell .ev:focus-visible .ev-label-compact,
+.cal-tl-daycell .ev:hover .ev-label-icon, .cal-tl-daycell .ev:focus-visible .ev-label-icon { display: none; }
 
 /* ---------- Empty State ---------- */
 .empty { text-align: center; padding: 36px 0; color: var(--text-muted); width: 100%; }

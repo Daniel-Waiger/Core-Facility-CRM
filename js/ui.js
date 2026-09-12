@@ -159,12 +159,31 @@
     const first = focusableIn(m)[0];
     if (first) { try { first.focus(); } catch (_) {} }
   }
+  // role="dialog" alone gives assistive tech no name to announce for the dialog itself — every
+  // modal in this app renders its heading as `<span class="modal-title">...</span>` (the `newX`/
+  // `editX` convention) except confirmModal, whose own markup wraps its title in `.head`/`.t`
+  // instead. Prefer `.modal-title` (assigning it an id if it doesn't have one) via
+  // aria-labelledby; fall back to the `.head`/`.t` text (covers confirmModal) via aria-label so
+  // every dialog this app ever opens has SOME accessible name.
+  let modalTitleIdSeq = 0;
+  function labelModal(m) {
+    const titleEl = m.querySelector('.modal-title');
+    if (titleEl) {
+      if (!titleEl.id) titleEl.id = 'modal-title-' + (++modalTitleIdSeq);
+      m.setAttribute('aria-labelledby', titleEl.id);
+      return;
+    }
+    const head = m.querySelector('.head, .t');
+    const text = ((head && head.textContent) || m.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 200);
+    if (text) m.setAttribute('aria-label', text);
+  }
   function openModal(html, onMount, onOutsideClick) {
     const dim = document.createElement('div');
     dim.className = 'modal-dim';
     dim.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
     document.body.appendChild(dim);
     const m = dim.querySelector('.modal');
+    labelModal(m);
     // Stash the dismissal handler so Esc can reuse the exact outside-click semantics
     // (important for promise-based modals like confirmModal, which resolve on dismissal).
     dim._onDismiss = onOutsideClick || null;
@@ -692,23 +711,30 @@
     const safeGroupPct = clampPct(groupPct);
     const safeManualPct = clampPct(manualPct);
 
+    // Each line is rounded to 2 decimal places (round2) below because that rounded figure is what
+    // actually gets stored per-line and shown to the user — instrTime/instrAmount/staffTotal MUST
+    // accumulate those same rounded values, not the raw unrounded ones, or the subtotal these
+    // totals feed into can differ from the sum of the stored/displayed lines by a cent (three
+    // lines of $0.333... each round individually to $0.33, summing to $0.99 — accumulating the
+    // unrounded 0.333...*3 = $1.00 instead would silently disagree with what the user sees added
+    // up by hand).
     let instrTime = 0, instrAmount = 0;
     const instrumentLines = (instruments || []).map((it) => {
       const isTime = (it.cost_unit || 'time') === 'time';
       const cost = clampNonNeg(it.cost);
       const amount = clampNonNeg(it.amount);
-      const line = isTime ? cost * bookingHours : cost * amount;
+      const line = round2(isTime ? cost * bookingHours : cost * amount);
       if (isTime) instrTime += line; else instrAmount += line;
-      return Object.assign({}, it, { isTime, line: round2(line) });
+      return Object.assign({}, it, { isTime, line });
     });
 
     let staffTotal = 0;
     const staffLines = (staff || []).map((p) => {
       const rawHours = (p.start && p.end) ? hoursBetween(p.start, p.end) : bookingHours;
       const billHours = billableStaffHours(rawHours);
-      const line = clampNonNeg(p.rate) * billHours * pctFactor;
+      const line = round2(clampNonNeg(p.rate) * billHours * pctFactor);
       staffTotal += line;
-      return Object.assign({}, p, { rawHours, billHours, line: round2(line) });
+      return Object.assign({}, p, { rawHours, billHours, line });
     });
 
     const subtotal = instrTime + instrAmount + staffTotal;

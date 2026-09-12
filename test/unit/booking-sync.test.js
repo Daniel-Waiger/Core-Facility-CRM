@@ -49,7 +49,7 @@ describe('bookingSave: attendees string and meeting_people are written together'
     });
     mountModal(app, modal);
 
-    app.internals.bookingSave();
+    await app.internals.bookingSave();
 
     const meeting = app.DB.row("SELECT id FROM meetings WHERE title='New Session'");
     assert.ok(meeting, 'bookingSave must have inserted a meetings row');
@@ -69,7 +69,7 @@ describe('bookingSave: attendees string and meeting_people are written together'
     });
     mountModal(app, modal);
 
-    app.internals.bookingSave();
+    await app.internals.bookingSave();
 
     const meeting = app.DB.row("SELECT id, attendees FROM meetings WHERE title='No Owners'");
     assert.ok(meeting);
@@ -100,7 +100,7 @@ describe('bookingEditSave: the delete-then-reinsert rebuild keeps attendees and 
     });
     mountModal(app, modal);
 
-    app.internals.bookingEditSave(id);
+    await app.internals.bookingEditSave(id);
 
     const { joinNames, stringNames } = attendeeState(app.DB, id);
     assert.deepEqual(joinNames, ['Alice', 'Sam']);
@@ -127,7 +127,7 @@ describe('bookingEditSave: the delete-then-reinsert rebuild keeps attendees and 
     });
     mountModal(app, modal);
 
-    app.internals.bookingEditSave(id);
+    await app.internals.bookingEditSave(id);
 
     const { joinNames, stringNames } = attendeeState(app.DB, id);
     assert.deepEqual(joinNames, ['Alice'], 'meeting_people must drop Sam');
@@ -145,7 +145,7 @@ describe('bookingEditSave: the delete-then-reinsert rebuild keeps attendees and 
     });
     mountModal(app, modal);
 
-    app.internals.bookingEditSave(id);
+    await app.internals.bookingEditSave(id);
 
     const m = app.DB.row('SELECT attendees FROM meetings WHERE id=?', [id]);
     assert.equal(m.attendees, '');
