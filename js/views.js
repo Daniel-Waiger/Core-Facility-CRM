@@ -1239,7 +1239,14 @@
         evs.forEach((e) => {
           (calTimeToPx(e.start_time, CAL_TL_HOUR_PCT) == null ? untimedEvs : timedEvs).push(e);
         });
-        const timedHtml = timedEvs.map((e) => {
+        // Sorted by start so each chip's MIN_W floor can be checked against the NEXT chip's own
+        // left edge — a floor that would push past a neighbour's slot is exactly the ~3px overlap
+        // two back-to-back 1-hour bookings used to show (MIN_W is a generous floor for an
+        // isolated short booking with room to spare; it must never win against an actual
+        // neighbour). Ties (identical leftPct) can't be reordered away, so a neighbour distance of
+        // 0 simply drops the floor entirely for that chip rather than overlapping regardless.
+        const sortedTimed = timedEvs.slice().sort((a, b) => (calTimeToPx(a.start_time, CAL_TL_HOUR_PCT) || 0) - (calTimeToPx(b.start_time, CAL_TL_HOUR_PCT) || 0));
+        const timedHtml = sortedTimed.map((e, i) => {
           // Reuses calTimeToPx (the same time→position math the Week grid uses) at a % scale —
           // see CAL_TL_HOUR_PCT. calEventBlockLayout's own MIN_H clamp assumes px, so its 20px
           // floor isn't reused verbatim here: at a % width, a 20% minimum would make short
@@ -1247,8 +1254,17 @@
           const leftPct = calTimeToPx(e.start_time, CAL_TL_HOUR_PCT);
           const endPct = calTimeToPx(e.end_time, CAL_TL_HOUR_PCT);
           const MIN_W = 4;
-          const widthPct = (endPct != null && endPct > leftPct) ? Math.max(MIN_W, endPct - leftPct) : MIN_W;
-          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px`, { compactable: true });
+          const natural = (endPct != null && endPct > leftPct) ? endPct - leftPct : 0;
+          // How far this chip could stretch before it would overlap the NEXT one — the rest of
+          // the day column (100% - leftPct) when this is the last chip of the day. Two bookings
+          // starting at the exact same instant (a rare tie: normally only possible when one of
+          // them is cancelled, since findBookingConflicts blocks real overlaps) leave zero room —
+          // there is no width that avoids overlapping there, so this floors out at (near) 0
+          // rather than reintroduce the ~3px overlap MIN_W used to cause for the common case.
+          const next = sortedTimed[i + 1];
+          const roomPct = next ? Math.max(0, calTimeToPx(next.start_time, CAL_TL_HOUR_PCT) - leftPct) : Math.max(0, 100 - leftPct);
+          const widthPct = Math.min(Math.max(MIN_W, natural), roomPct);
+          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px;z-index:2`, { compactable: true });
         }).join('');
         // CAL_TL_CELL_H must match .cal-tl-daycell's CSS height (css/app.css); the 2px top/bottom
         // inset matches the single-untimed-booking case this replaces.
@@ -1259,7 +1275,11 @@
           const top = 2 + i * slotH;
           return calEvChipHtml(e, `position:absolute;left:2px;right:2px;top:${top}px;height:${Math.max(slotH - 1, 4)}px`, { compactable: true });
         }).join('');
-        const blocksHtml = timedHtml + untimedHtml;
+        // Untimed chips are full-width strips (left:2px;right:2px) that would otherwise sit on top
+        // of and swallow any timed chip sharing the same cell, since later DOM order paints last —
+        // emit them FIRST so a timed chip (also lifted with its own z-index above) stays clickable
+        // rather than being hit-tested as whichever untimed strip happens to cover it.
+        const blocksHtml = untimedHtml + timedHtml;
         // A retired instrument's lane still shows its history, but an empty slot in it should not
         // pre-lock a brand-new booking to a resource that's no longer available for new work —
         // omit data-inst there so the click still opens New Booking (date/time prefilled) without

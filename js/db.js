@@ -925,11 +925,19 @@
     const peers = new Map(); // id -> ts, other known tabs (never includes selfId)
     let readOnly = false;
     let promoting = false; // true only during the async reload-from-disk gap on promotion
+    // Counts consecutive failed promotion attempts (reset to 0 on a successful one) — mirrors
+    // db.js's own autosave `failureStreak` pattern. Each retry re-runs reloadFromDiskAndPromote,
+    // so without this a stuck promotion would toast BOTH its own message and app.js's generic
+    // read-only toast every 3 seconds forever; toasting only on the first failure of a streak
+    // keeps a genuinely stuck tab quiet after the first warning instead of spamming one every retry.
+    let promoteFailStreak = 0;
 
     // Promotion: reload the in-memory database from IndexedDB before this tab is allowed to write
-    // or autosave again — see the big comment above. Never throws outward; a failed reload leaves
-    // this tab's existing (still merely stale, never divergent) copy in place rather than bricking
-    // it, and simply proceeds to let it become the writer with what it already had.
+    // or autosave again — see the big comment above. Never throws outward: a failed reload leaves
+    // this tab's existing (still merely stale, never divergent) copy in place, keeps the tab
+    // READ-ONLY (it never falls through to the success path below, so `readOnly` stays true), and
+    // retries the reload every 3 seconds until one succeeds — it does NOT let the tab become a
+    // writer with a possibly-stale copy just because a reload attempt failed.
     async function reloadFromDiskAndPromote() {
       try {
         const SQL = await initSqljs();
@@ -947,10 +955,14 @@
         // forever with no way back in short of a manual reload.
         console.error('multi-tab promotion: reload from IndexedDB failed — staying read-only and retrying', e);
         promoting = false; // allow a retry to actually run reloadFromDiskAndPromote() again
-        if (global.UI && global.UI.toast) {
+        promoteFailStreak++;
+        if (promoteFailStreak === 1 && global.UI && global.UI.toast) {
           global.UI.toast('Could not switch this tab to the active database copy. Retrying…', 'error');
         }
-        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true, { promoteFailed: true });
+        // `promoteFailed` tells app.js's onMultiTabState this is still the SAME read-only tab
+        // failing to catch up, not a fresh "database opened in another tab" transition — the two
+        // read very differently and only one of them is true right now.
+        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true, { promoteFailed: true, repeat: promoteFailStreak > 1 });
         setTimeout(() => {
           if (readOnly && !promoting) { promoting = true; reloadFromDiskAndPromote(); }
         }, 3000);
@@ -964,6 +976,7 @@
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       readOnly = false;
       promoting = false;
+      promoteFailStreak = 0;
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(false, { promoted: true });
     }
 
@@ -1042,22 +1055,47 @@
   let dirty = false;
   let saving = false;
   let pendingDuringSave = false;
-  // Bumped by restoreBackup() right before it swaps the live `db` handle. A flush() that started
-  // against the OLD database (its `bytes` snapshot taken via currentBytes() before the swap) must
-  // never persist after the swap — if its idbSet(DB_KEY, ...) lands after restore's own write, the
-  // old database would silently overwrite the just-restored one in IndexedDB. flush() captures the
-  // generation it started with and refuses to write if it has since changed; restoreBackup also
-  // waits for any flush already in flight to finish before it ever swaps `db`, so this counter is
-  // the belt to that suspenders for the narrower window in between.
+  // Bumped by restoreBackup() in the SAME synchronous block where it swaps the live `db` handle
+  // (no `await` in between the two — see restoreBackup itself). What this guards: flush() reads
+  // `dbGeneration` into a local `myGen` before it does anything async, then checks `myGen !==
+  // dbGeneration` both before and after its own `idbSet` write; if either check trips, flush()
+  // drops its snapshot instead of persisting it. Because the bump and the swap happen together,
+  // any flush() that read `myGen` before the bump is guaranteed to have captured bytes from the
+  // database `db` still pointed at when it read them — so a flush already past that read, even one
+  // that started and is still in flight when restoreBackup runs, can never write OLD bytes labeled
+  // with the NEW generation number. restoreBackup also waits (waitForSaveIdle, itself bounded — see
+  // below) for any flush already in flight to finish before it ever swaps `db`, so this counter is
+  // the belt to that suspenders for the narrower window in between; it is not a substitute for it,
+  // since a flush that is only SCHEDULED (not yet started) when restoreBackup runs is caught
+  // entirely by this generation check, with nothing to wait for.
   let dbGeneration = 0;
+  // How long restoreBackup() will wait for an in-flight autosave to finish before giving up and
+  // proceeding anyway (see waitForSaveIdle and restoreBackup below). A save can be stuck rather
+  // than merely slow — a blocked/full IndexedDB, a browser storage bug — and waiting on it forever
+  // would hang the whole restore (and the UI showing it) with nothing the user can do about it.
+  // The generation guard above is what makes proceeding safe: even if the stuck save eventually
+  // does complete, its bytes are captured from before the swap and it will refuse to persist them.
+  const SAVE_IDLE_TIMEOUT_MS = 5000;
   function waitForSaveIdle() {
     if (!saving) return Promise.resolve();
+    const startedAt = Date.now();
     return new Promise((resolve) => {
       (function check() {
-        if (!saving) return resolve();
+        if (!saving || Date.now() - startedAt >= SAVE_IDLE_TIMEOUT_MS) return resolve();
         setTimeout(check, 15);
       })();
     });
+  }
+  // Races `promise` against a `ms` timer; on timeout, rejects with `err` instead of waiting any
+  // longer. The real work behind `promise` (e.g. an in-flight idbSet's actual IndexedDB write) is
+  // NOT cancelled — there is no way to cancel it — this only stops AWAITING it, so a caller can
+  // report failure and move on instead of hanging forever on something that may never settle.
+  function withDeadline(promise, ms, err) {
+    let timer;
+    const timeout = new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(err), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
   // Red-team D: a failed save used to leave `dirty` true with nothing armed to retry it until the
   // NEXT edit happened to call markDirty() again — a facility that stops typing right after a
@@ -1081,6 +1119,24 @@
     scheduleFlush();
   }
 
+  // A stale-generation return (see the two call sites below) means THIS flush's snapshot is
+  // worthless — restoreBackup() has since swapped in a different database — but that must not
+  // leave `dirty` stuck true with nothing scheduled to clear it: markDirty() already called
+  // onSaving() for whatever edit armed this flush, and with no timer left running and `dirty` never
+  // reset, the saved-indicator would sit on "unsaved" forever even after restoreBackup's own write
+  // succeeds. `dirty` is a single flag shared across generations (not per-generation), so if it is
+  // still true here that means the CURRENT (live, post-restore) database has something worth
+  // flushing too — schedule that. If it somehow isn't, there is nothing left pending, so report
+  // saved now instead of leaving the indicator stuck on whatever markDirty() last set it to.
+  function settleStaleGeneration() {
+    pendingDuringSave = false;
+    if (dirty) {
+      scheduleFlush();
+    } else if (global.App && global.App.onSaved) {
+      global.App.onSaved();
+    }
+  }
+
   async function flush() {
     if (!dirty) return;
     if (saving) return; // a save is already in flight; markDirty() already flagged pendingDuringSave
@@ -1092,7 +1148,7 @@
         // A restore superseded this database between markDirty() scheduling us and us actually
         // starting — writing this snapshot now would stomp the just-restored database. Drop it;
         // restoreBackup() persists the new database itself.
-        pendingDuringSave = false;
+        settleStaleGeneration();
         return;
       }
       const bytes = currentBytes(); // snapshot taken now; pendingDuringSave catches anything later
@@ -1101,7 +1157,7 @@
         // Same race, caught after the write went out: a restore happened while this idbSet was
         // in flight. The bytes we just wrote are stale (the old database); don't clear `dirty` or
         // report success for them — restoreBackup()'s own write is what actually matters now.
-        pendingDuringSave = false;
+        settleStaleGeneration();
         return;
       }
       if (pendingDuringSave) {
@@ -1272,22 +1328,42 @@
     // Validates BEFORE anything below touches the live `db` or IndexedDB — see
     // inspectBackupCandidate's comment. A throw here leaves the live handle exactly as it was.
     const preview = await inspectBackupCandidate(data);
-    // 4c: let any autosave already in flight finish writing the OLD database first. Without this,
-    // that flush's idbSet (bytes captured from the pre-restore `db`) could still be pending when
-    // we swap `db` and write below, and land in IndexedDB AFTER our write — silently putting the
-    // old database back. dbGeneration (bumped just below, before we ever touch `db`) is the
-    // remaining backstop for the narrower gap between this wait and the swap.
-    await waitForSaveIdle();
-    dbGeneration++;
+    // All async prep — engine init and parsing the incoming bytes into a standalone Database —
+    // happens BEFORE waitForSaveIdle() is even called, specifically so that once that wait
+    // resolves, the generation bump and the `db` swap below run with NOTHING async in between.
+    // Doing this the other way around (as an earlier version of this fix did) reopens the exact
+    // gap item 2 exists to close: an `await initSqljs()` sitting between waitForSaveIdle() and the
+    // bump would let a brand-new flush() start during it, read the still-OLD dbGeneration while
+    // `db` is still the OLD database, and only be caught (if at all) by the post-write generation
+    // check below — by which point its write may already have reached IndexedDB.
     const SQL = await initSqljs();
     const rawBytes = Array.isArray(data.db) ? new Uint8Array(data.db) : data.db;
     const newDb = new SQL.Database(rawBytes);
     newDb.exec('PRAGMA foreign_keys = ON;');
+    // 4c: let any autosave already in flight finish writing the OLD database first. Without this,
+    // that flush's idbSet (bytes captured from the pre-restore `db`) could still be pending when
+    // we swap `db` and write below, and land in IndexedDB AFTER our write — silently putting the
+    // old database back. Bounded (SAVE_IDLE_TIMEOUT_MS): a save that is stuck rather than merely
+    // slow must not hang this restore (and the UI showing it) forever — see waitForSaveIdle and the
+    // comment above dbGeneration for why proceeding after the bound is still safe. This is the LAST
+    // await before the generation bump and the swap immediately below it — see the comment above.
+    await waitForSaveIdle();
+    // Bump the generation and swap `db` in the SAME synchronous block — no `await` between them —
+    // so no flush can ever read the bumped `dbGeneration` while `db` still points at the OLD
+    // database (see the comment above dbGeneration for exactly what this guarantees).
+    dbGeneration++;
     const previousDb = db;
     db = newDb;
     try {
       migrate();
-      await idbSet(DB_KEY, currentBytes());
+      // Bounded like the wait above: if this write itself stalls (the same stuck-IndexedDB
+      // scenario), reject rather than leave the restored database only ever in memory while the
+      // user stares at nothing — doRestore() in app.js surfaces this as a failed restore.
+      await withDeadline(
+        idbSet(DB_KEY, currentBytes()),
+        SAVE_IDLE_TIMEOUT_MS,
+        Object.assign(new Error('Restoring timed out while saving to this browser. Your browser storage may be unavailable; try again or reload and retry.'), { dbSaveTimedOut: true })
+      );
     } catch (e) {
       // Never leave the live handle dead on a throw: put the working database back so the app
       // keeps running on what it had before this restore attempt, and surface the real error.
