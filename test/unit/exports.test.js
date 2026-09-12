@@ -261,6 +261,50 @@ describe('PDF font (G3): a Hebrew name is bidi-reversed for jsPDF, and the multi
     assert.equal(out, line, 'a base-LTR line must come back byte-for-byte identical');
   });
 
+  test('_pdfBidiReverse (C4-followups #3) mirrors paired brackets after reversing a base-RTL line, so a parenthesised name reads correctly', () => {
+    // A plain character-by-character reversal flips the ORDER of a "(" ... ")" pair but not which
+    // glyph each position draws, so "(דנה)" (open, name, close) would reverse into the glyph
+    // sequence ")…(" — a close-paren glyph on the left, an open-paren glyph on the right, i.e.
+    // backwards-looking brackets around a correctly-reordered name. Verified against a real PDF's
+    // glyph x-origins (PyMuPDF get_texttrace, per docs/cma-lessons.md): the fix must make this
+    // exact string draw, left to right, as "יפוס (הנד) חוד" — see scratchpad/c4/gen_pdf.js.
+    const app = loadApp(['consts', 'db', 'ui', 'views', 'reports', 'exports']);
+    const Exports = app.Exports;
+    const input = 'דוח (דנה) סופי'; // "Report (Dana) final"
+    const out = Exports._pdfBidiReverse(input);
+    assert.equal(out, 'יפוס (הנד) חוד', `mirrored brackets must read as an opening paren then the reversed name then a closing paren, got: "${out}"`);
+    // Sanity: every character of the reversed name/word run must still be present, just with the
+    // bracket glyphs swapped relative to what plain per-character reversal alone would produce.
+    const plainReverse = input.split('').reverse().join('');
+    assert.notEqual(out, plainReverse, 'a plain per-character reversal alone (no bracket mirroring) is not the fix — brackets must be swapped too');
+
+    // Every other mirrored pair the app might plausibly draw in an RTL line.
+    assert.equal(Exports._pdfBidiReverse('א[ב]ג'), 'ג[ב]א', 'square brackets must mirror the same way as parens');
+    assert.equal(Exports._pdfBidiReverse('א{ב}ג'), 'ג{ב}א', 'curly braces must mirror');
+    assert.equal(Exports._pdfBidiReverse('א<ב>ג'), 'ג<ב>א', 'angle brackets must mirror');
+  });
+
+  test('PDF_STRONG_LTR_RE / pdfBaseIsRtl (C4-followups #4): × and ÷ are not strong-LTR, so a line starting with either then Hebrew is base-RTL', () => {
+    const app = loadApp(['consts', 'db', 'ui', 'views', 'reports', 'exports']);
+    const Exports = app.Exports;
+
+    // Before the fix, × (U+00D7) and ÷ (U+00F7) fell inside the old À-ʯ range and counted as
+    // strong LTR — so a line like "× שלום עולם" (all Hebrew apart from the leading math symbol)
+    // misclassified as base-LTR and pdfBidiReverse left it untouched, drawing backwards.
+    const timesFirst = '× שלום עולם'; // "× שלום עולם"
+    const outTimes = Exports._pdfBidiReverse(timesFirst);
+    assert.equal(outTimes, timesFirst.split('').reverse().join(''), 'a line starting with × then Hebrew must be treated as base-RTL and reversed, not left untouched as base-LTR');
+    assert.notEqual(outTimes, timesFirst, '× must not have made pdfBidiReverse treat this as a no-op base-LTR line');
+
+    const divFirst = '÷ שלום עולם'; // "÷ שלום עולם"
+    const outDiv = Exports._pdfBidiReverse(divFirst);
+    assert.equal(outDiv, divFirst.split('').reverse().join(''), 'a line starting with ÷ then Hebrew must likewise be base-RTL');
+
+    // A genuine Latin letter still counts as strong LTR immediately, same as before.
+    const latinFirst = `M ${'שלום עולם'}`;
+    assert.equal(Exports._pdfBidiReverse(latinFirst), latinFirst, 'a line starting with an actual Latin letter must still be treated as base-LTR, untouched');
+  });
+
   test('exportPdf registers the custom font on the jsPDF document once the (stubbed) font fetch resolves', async () => {
     const app = await freshApp();
     const { Exports } = app;

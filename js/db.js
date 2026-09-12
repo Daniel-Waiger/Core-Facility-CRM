@@ -993,18 +993,39 @@
       dirty = false;
       pendingDuringSave = false;
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-      readOnly = false;
       promoting = false;
+      // C4-followups #1: `peers` is not frozen while the reload above was awaiting the IndexedDB
+      // read — if the surviving (older) leader's `hello-ack` arrived during that gap, `onBcMessage`
+      // already called `recompute()` with the updated `peers`, but that call saw `readOnly` still
+      // true (this function hadn't reached the line below yet) so `next === readOnly` and it
+      // silently did nothing. Unconditionally clearing `readOnly` here, as this function used to,
+      // would then make BOTH tabs writers. Decide again, now, with whatever `peers` holds at this
+      // exact moment — not the snapshot true when reloadFromDiskAndPromote() was kicked off — and
+      // only clear `readOnly` if this tab is still actually the elected leader.
+      if (!isLeaderNow()) {
+        readOnly = true;
+        promoteFailStreak = 0;
+        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true);
+        return;
+      }
+      readOnly = false;
       promoteFailStreak = 0;
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(false, { promoted: true });
     }
 
-    function recompute() {
+    // Shared by recompute() (before starting/skipping a promotion) and reloadFromDiskAndPromote()'s
+    // success path (after one finishes) — both need the SAME "am I the leader, given peers right
+    // now" answer, computed fresh each time rather than trusted from whenever it was last asked.
+    function isLeaderNow() {
       let leaderId = selfId, leaderTs = selfTs;
       for (const [id, ts] of peers) {
         if (ts < leaderTs || (ts === leaderTs && id < leaderId)) { leaderId = id; leaderTs = ts; }
       }
-      const next = leaderId !== selfId;
+      return leaderId === selfId;
+    }
+
+    function recompute() {
+      const next = !isLeaderNow();
       if (next === readOnly) return; // no change
       if (readOnly && !next) {
         // Promotion. Block writes for the duration (isReadOnly() below checks `promoting` too) and
@@ -1549,12 +1570,42 @@
     try {
       const backupUploadNames = new Set(uploadBlobs.keys());
       const existingUploads = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+      const existingNames = new Set();
+      // C4-followups #2: the database rollback below (on a failure IN THIS BLOCK) only ever put
+      // `db` back — it never undid whatever upload deletes/writes had already landed by the time
+      // the failure hit, so a delete or overwrite from earlier in this same loop stood permanently
+      // even though the restore it belonged to was reported as failed. Hold every blob this apply
+      // phase is about to delete or overwrite BEFORE touching any of them, so a failure partway
+      // through can put the upload set back exactly as it was, not just the SQL database.
+      const heldBlobs = new Map(); // name -> original blob, for every name this phase deletes or overwrites
       for (const { key } of existingUploads) {
         const name = key.slice((UPLOAD_KEY + ':').length);
-        if (!backupUploadNames.has(name)) await idbDelete(key);
+        existingNames.add(name);
+        if (!backupUploadNames.has(name) || uploadBlobs.has(name)) heldBlobs.set(name, await idbGet(key));
       }
-      for (const [name, blob] of uploadBlobs) {
-        await idbSet(UPLOAD_KEY + ':' + name, blob);
+      const writtenSoFar = []; // names this phase has successfully idbSet, in order
+      try {
+        for (const name of existingNames) {
+          if (!backupUploadNames.has(name)) await idbDelete(UPLOAD_KEY + ':' + name);
+        }
+        for (const [name, blob] of uploadBlobs) {
+          await idbSet(UPLOAD_KEY + ':' + name, blob);
+          writtenSoFar.push(name);
+        }
+      } catch (uploadErr) {
+        // Put back every blob this phase touched (whether deleted or overwritten) — best effort,
+        // same reasoning as the db re-persist below: the ORIGINAL error is what the caller sees
+        // either way, so a failure restoring one held blob must not stop the rest from being tried.
+        for (const [name, blob] of heldBlobs) {
+          try { await idbSet(UPLOAD_KEY + ':' + name, blob); } catch (_) {}
+        }
+        // A name that did NOT exist before this restore but got written before the failure (a
+        // brand-new upload the backup introduced) has no "old" blob to restore — delete it instead
+        // so the upload set ends up with exactly its pre-restore membership.
+        for (const name of writtenSoFar) {
+          if (!existingNames.has(name)) { try { await idbDelete(UPLOAD_KEY + ':' + name); } catch (_) {} }
+        }
+        throw uploadErr;
       }
     } catch (e) {
       // Roll back rather than leave the SQL database restored with the upload set only half

@@ -308,9 +308,16 @@
   // later Hebrew/Arabic character, and the WHOLE line got reversed wholesale — scrambling the very
   // Latin/Greek/Cyrillic name that should have stayed in reading order at the front of the line.
   // Widened to cover exactly the scripts this app's own bundled font (preparePdfFont, above) can
-  // draw and that read left-to-right: Latin (ASCII + Latin-1 Supplement + Latin Extended-A/B),
-  // Greek, and Cyrillic.
-  const PDF_STRONG_LTR_RE = /[A-Za-zÀ-ʯͰ-ϿЀ-ӿ]/;
+  // draw and that read left-to-right: Latin (ASCII + Latin-1 Supplement + Latin Extended-A/B,
+  // plus Latin Extended Additional), Greek, and Cyrillic (plus Cyrillic Supplement).
+  // C4-followups #4: the Latin-1 Supplement range À-ʯ this used to span whole is not ALL letters —
+  // × (U+00D7, multiplication sign) and ÷ (U+00F7, division sign) sit inside it but are ordinary
+  // neutral punctuation, not strong LTR characters. Counting them as strong LTR made a line that is
+  // otherwise all Hebrew/Arabic (e.g. "× שלום עולם") misclassify as base-LTR on nothing but a math
+  // symbol, so pdfBaseIsRtl() never reversed it and the whole line drew in logical (backwards)
+  // order. Split the range around both so neither counts, and reach a strong-LTR verdict from the
+  // FIRST real letter that follows instead.
+  const PDF_STRONG_LTR_RE = /[A-Za-zÀ-Öø-ʯͰ-ϿЀ-ӿԀ-ԯḀ-ỿ]/;
   function pdfBaseIsRtl(s) {
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
@@ -326,6 +333,16 @@
   // each other and the name comes out scrambled. Verified on glyph x-origins in the content
   // stream, not on a rendered image (a viewer re-applies bidi and would hide the error).
   //
+  // C4-followups #3: a plain character-by-character reversal flips the ORDER of a pair of mirrored
+  // brackets but not which glyph each position draws — so "(דנה)" (open, name, close) reverses to
+  // "(", then the name, then ")" in REVERSE character order, i.e. the glyph sequence ")…(", which
+  // draws as a close-paren on the left and an open-paren on the right: backwards-looking brackets
+  // around a now-correctly-ordered name. A real bidi renderer mirrors paired characters (U+0028
+  // "(" draws as ")" and vice versa) precisely to counteract this. jsPDF's own engine does this for
+  // an embedded LTR run it re-reverses, but never sees these brackets at all when they sit in an
+  // otherwise-RTL string with no embedded LTR run for it to touch — which is exactly this function's
+  // job. Map each paired bracket to its mirror once the reversal has already put it in visual order.
+  const PDF_BIDI_MIRROR_MAP = { '(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '<': '>', '>': '<' };
   // A plain whole-string character reversal is ALL a base-RTL line needs here — see the item 6
   // comment above PDF_RTL_RUN_RE for why an additional manual pass to "restore" an embedded LTR/
   // digit run's reading order is not just unnecessary but actively wrong: jsPDF's own engine
@@ -334,7 +351,7 @@
   function pdfBidiReverse(s) {
     if (!PDF_RTL_RE.test(s)) return s;
     if (!pdfBaseIsRtl(s)) return s;
-    return s.split('').reverse().join('');
+    return s.split('').reverse().map((c) => PDF_BIDI_MIRROR_MAP[c] || c).join('');
   }
 
   // Runs fn() with the doc's font temporarily switched to the multi-script font when `text` needs

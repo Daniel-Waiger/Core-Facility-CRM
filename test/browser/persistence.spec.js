@@ -136,13 +136,31 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     await tab2.waitForTimeout(500);
     assert.equal(await tab2.evaluate(() => DB.isReadOnly), false, 'tab2 must become the writer — tab1 already announced it left');
 
+    // C4-followups #1: a real reload-from-disk here is fast enough (a few ms) that tab2's
+    // hello-ack usually arrives AFTER it, not during it — which would let this test pass whether
+    // or not the race (peers updating mid-reload gets silently discarded once the reload resolves)
+    // is actually fixed. Slow ONLY this reload, in-page, so tab2's hello-ack is guaranteed to land
+    // while tab1's promotion is still awaiting it — the same race the unit test's fake-timer
+    // harness reproduces deterministically, exercised here against the real IndexedDB/
+    // BroadcastChannel timing this app actually runs on.
+    await tab1.evaluate(() => {
+      const realInitSqlJs = window.initSqlJs;
+      window.initSqlJs = (...args) => new Promise((resolve) => {
+        setTimeout(() => resolve(realInitSqlJs(...args)), 250);
+      });
+    });
+
     // tab1 is restored from bfcache: `pageshow` fires with `persisted: true`.
     await tab1.evaluate(() => {
       const ev = new Event('pageshow');
       Object.defineProperty(ev, 'persisted', { value: true });
       window.dispatchEvent(ev);
     });
-    await tab1.waitForTimeout(500); // let the fresh hello/hello-ack handshake settle
+    await tab1.waitForTimeout(800); // outlast the slowed reload and let the election settle
+
+    // The invariant that actually matters, regardless of which tab ends up read-only: never both.
+    const bothWritable = (await tab1.evaluate(() => DB.isReadOnly)) === false && (await tab2.evaluate(() => DB.isReadOnly)) === false;
+    assert.equal(bothWritable, false, 'at most one tab may ever be writable — a hello-ack that arrives mid-reload must not be silently discarded once the reload resolves');
 
     assert.equal(await tab1.evaluate(() => DB.isReadOnly), true, 'tab1 must NOT resume as a blind writer after a bfcache restore — it must re-join the election and lose to tab2, the still-live rightful leader');
     assert.equal(await tab2.evaluate(() => DB.isReadOnly), false, 'tab2 must remain the writer throughout — tab1\'s bfcache restore must not have silently taken over');
