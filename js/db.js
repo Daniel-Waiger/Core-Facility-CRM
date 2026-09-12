@@ -511,10 +511,49 @@
     // resolveOverheadForOrg — so an untouched facility (or a group nobody ever assigns a tier to)
     // behaves exactly as before this feature, and a first upgrade behaves exactly as it did before
     // this flag existed.
+    // Deferred item (1.11.0 "Known and deferred" #3): the flag above only protects a database
+    // that already has it — a real 1.10.2 install upgrading straight to this version has NEVER
+    // written 'pricing_tiers_seeded' (the flag itself is new here), so if that facility had
+    // already used the zero-ref Delete on both default tiers before upgrading, `already.c` reads
+    // 0 exactly like a database that never had tiers at all, and the block above would reseed them
+    // once more on this very first migrate() pass — the gap CHANGELOG.md records. There is no
+    // boolean to read (a database that legitimately never had tiers looks identical to one that had
+    // them deleted), so this checks for *evidence* that pricing_tiers rows existed and were removed,
+    // rather than trusting the row count alone:
+    //   - sqlite_sequence.seq for 'pricing_tiers' — AUTOINCREMENT (see the CREATE TABLE above) means
+    //     the counter is never reused or reset by a plain DELETE, so seq > 0 proves a row was once
+    //     inserted even though none remain now.
+    //   - group_tiers / instrument_tier_rates rows — a lab or instrument override can only exist if
+    //     a real tier was assigned at some point; pricing_tiers.id carries no REFERENCES to either
+    //     (tiers retire, never delete while referenced — see setTierRetired's comment), so these can
+    //     dangle after a tier row is gone and still prove one existed.
+    //   - meetings.tier_id — a booking's price snapshot column; any non-null value was copied from a
+    //     real pricing_tiers row at save time.
+    // Any one of these means "had and deleted", so the legacy reseed is skipped even though
+    // pricing_tiers itself is empty and the flag is unset.
     try {
       if (getConfig('pricing_tiers_seeded', null) == null) {
         const already = row('SELECT COUNT(*) as c FROM pricing_tiers') || { c: 0 };
+        let hadTiersBefore = false;
         if (!already.c) {
+          try {
+            const seqRow = row("SELECT seq FROM sqlite_sequence WHERE name='pricing_tiers'");
+            if (seqRow && Number(seqRow.seq) > 0) hadTiersBefore = true;
+          } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new database */ }
+          if (!hadTiersBefore) {
+            const gt = row('SELECT COUNT(*) as c FROM group_tiers') || { c: 0 };
+            if (gt.c) hadTiersBefore = true;
+          }
+          if (!hadTiersBefore) {
+            const itr = row('SELECT COUNT(*) as c FROM instrument_tier_rates') || { c: 0 };
+            if (itr.c) hadTiersBefore = true;
+          }
+          if (!hadTiersBefore) {
+            const mt = row('SELECT COUNT(*) as c FROM meetings WHERE tier_id IS NOT NULL') || { c: 0 };
+            if (mt.c) hadTiersBefore = true;
+          }
+        }
+        if (!already.c && !hadTiersBefore) {
           const hasInternal = getConfig('overhead_internal', null);
           const hasExternal = getConfig('overhead_external', null);
           if (hasInternal != null || hasExternal != null) {
@@ -1166,6 +1205,12 @@
   }
 
   async function restoreBackup(data) {
+    // G1 fix: F1 (multi-tab read-only) guarded every write path through run()/clearAllData()'s
+    // assertWritable() call, but restoreBackup() replaces the whole `db` handle directly and
+    // never goes through run() — so a read-only second tab could still restore over the tab
+    // that's actually saving, exactly the silent-overwrite H2 was written to stop. Same guard,
+    // same toast, checked first so a read-only tab never even opens the scratch database below.
+    assertWritable();
     // Validates BEFORE anything below touches the live `db` or IndexedDB — see
     // inspectBackupCandidate's comment. A throw here leaves the live handle exactly as it was.
     const preview = await inspectBackupCandidate(data);
@@ -1267,6 +1312,58 @@
       stmt.free();
     }
     markDirty();
+  }
+
+  /* ---------------- Transactions (G1) ----------------
+     Every "rebuild the join rows" save (a booking's attendees/instruments/staff, a milestone's
+     owners, a project's team, …) is really several DELETE/INSERT statements in a row, each its
+     own run() call. Before this, a throw partway through — an FK violation, a stubbed failure, a
+     genuine bug — left whatever ran so far committed and the rest missing: a real half-written
+     record with no rollback, exactly the "Known and deferred" gap this closes. DB.transaction(fn)
+     wraps such a save's statements in one SQLite transaction: BEGIN before fn() runs, COMMIT if it
+     returns normally, ROLLBACK-then-rethrow if it throws — so a half-finished multi-step save
+     leaves the row set exactly as it was before the save was attempted, not half of it.
+
+     fn MUST be synchronous and must never span an `await` — see below for why that matters, and
+     every caller in app.js (bookingSave, msSave, etc.) only wraps the plain run()/exec() calls
+     that come after all of a save's own awaits (file uploads, confirm dialogs, …) resolve.
+
+     Nesting: REJECTED, not handled via SAVEPOINT. A second DB.transaction() call while one is
+     already open throws immediately rather than silently starting a nested BEGIN (SQLite itself
+     would just error on a literal nested BEGIN, but a savepoint-based scheme would swallow that
+     confusion invisibly). None of this codebase's save paths call into another wrapped save
+     function today; if one ever needs to, the right fix is one shared transaction() call around
+     both, not making transaction() itself re-entrant.
+
+     Is db.export() (called by every autosave, via currentBytes()) safe to run WHILE a transaction
+     is open? Investigated and answered: it can never happen, by construction, not because export()
+     itself is transaction-aware. markDirty() (called by run() inside fn()) only calls
+     scheduleFlush(), which arms a 400ms setTimeout — it never calls flush()/currentBytes()
+     synchronously. Because transaction() requires fn to be fully synchronous (no `await` inside
+     it), JavaScript's single-threaded run-to-completion means BEGIN, every statement fn() runs,
+     and COMMIT/ROLLBACK all execute back-to-back with no yield to the event loop in between — so
+     the setTimeout callback that would eventually call flush() cannot fire until AFTER the
+     transaction has already resolved one way or the other. There is therefore no instant at which
+     an autosave could observe a half-open transaction; enforcing "fn is synchronous" is what makes
+     that guarantee hold, so a caller must never turn fn into (or call from) an async function. */
+  let inTransaction = false;
+  function transaction(fn) {
+    assertWritable();
+    if (inTransaction) {
+      throw new Error('DB.transaction() calls cannot be nested — wrap the whole multi-step save in one transaction instead.');
+    }
+    inTransaction = true;
+    db.exec('BEGIN');
+    try {
+      const result = fn();
+      db.exec('COMMIT');
+      return result;
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* nothing to roll back if BEGIN itself never completed */ }
+      throw e;
+    } finally {
+      inTransaction = false;
+    }
   }
 
   /* ---------------- Compute: progress + flags ---------------- */
@@ -1708,48 +1805,53 @@
     const targetHadVocab = !!row("SELECT 1 as x FROM vocab WHERE category='ORG' AND value=?", [newName]);
     const vocabMerged = !!(oldVocab && targetHadVocab);
 
-    if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
-    if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
+    // G1: a rename touches up to four tables (people, meetings, group_discounts/group_tiers,
+    // vocab) — wrapped so a throw partway through can never leave some of them renamed to newName
+    // and others still reading oldName.
+    return transaction(() => {
+      if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
+      if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
 
-    let discountMoved = false;
-    if (oldDiscount) {
-      if (targetHadDiscount) {
-        // Merge: the destination's own standing rate wins; drop the source row rather than
-        // fight it for the org primary key.
-        run('DELETE FROM group_discounts WHERE org=?', [oldName]);
-      } else {
-        run('UPDATE group_discounts SET org=? WHERE org=?', [newName, oldName]);
-        discountMoved = true;
+      let discountMoved = false;
+      if (oldDiscount) {
+        if (targetHadDiscount) {
+          // Merge: the destination's own standing rate wins; drop the source row rather than
+          // fight it for the org primary key.
+          run('DELETE FROM group_discounts WHERE org=?', [oldName]);
+        } else {
+          run('UPDATE group_discounts SET org=? WHERE org=?', [newName, oldName]);
+          discountMoved = true;
+        }
       }
-    }
 
-    let tierMoved = false;
-    if (oldTier) {
-      if (targetHadTier) {
-        // Merge: the destination's own tier assignment wins; drop the source row rather than
-        // fight it for the org primary key.
-        run('DELETE FROM group_tiers WHERE org=?', [oldName]);
-      } else {
-        run('UPDATE group_tiers SET org=? WHERE org=?', [newName, oldName]);
-        tierMoved = true;
+      let tierMoved = false;
+      if (oldTier) {
+        if (targetHadTier) {
+          // Merge: the destination's own tier assignment wins; drop the source row rather than
+          // fight it for the org primary key.
+          run('DELETE FROM group_tiers WHERE org=?', [oldName]);
+        } else {
+          run('UPDATE group_tiers SET org=? WHERE org=?', [newName, oldName]);
+          tierMoved = true;
+        }
       }
-    }
 
-    let vocabMoved = false;
-    if (oldVocab) {
-      if (targetHadVocab) {
-        run("DELETE FROM vocab WHERE category='ORG' AND value=?", [oldName]);
-      } else {
-        run("UPDATE vocab SET value=? WHERE category='ORG' AND value=?", [newName, oldName]);
-        vocabMoved = true;
+      let vocabMoved = false;
+      if (oldVocab) {
+        if (targetHadVocab) {
+          run("DELETE FROM vocab WHERE category='ORG' AND value=?", [oldName]);
+        } else {
+          run("UPDATE vocab SET value=? WHERE category='ORG' AND value=?", [newName, oldName]);
+          vocabMoved = true;
+        }
       }
-    }
 
-    return {
-      peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount,
-      tierMoved, tierMerged, hadTier: !!oldTier,
-      vocabMoved, vocabMerged, hadVocab: oldVocab
-    };
+      return {
+        peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount,
+        tierMoved, tierMerged, hadTier: !!oldTier,
+        vocabMoved, vocabMerged, hadVocab: oldVocab
+      };
+    });
   }
 
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
@@ -2445,6 +2547,7 @@
     q,
     q1,
     run,
+    transaction,
     projectProgress,
     projectFlags,
     vocabList,

@@ -178,6 +178,52 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     await ctx.close();
   });
 
+  // G1 fix: DB.restoreBackup() replaces the whole `db` handle directly, bypassing run()'s
+  // assertWritable() call entirely — F1's read-only guard covered every write THROUGH run(), but
+  // missed this one path that never goes through it. A read-only tab restoring a backup would
+  // silently overwrite the leader tab's live database with no conflict, no toast, exactly the
+  // H2 class of bug the whole multi-tab guard exists to prevent.
+  test('restoring a backup in a read-only tab is refused with the same toast, and does not touch the database', async () => {
+    const ctx = await freshContext();
+    const tab1 = await openApp(ctx);
+    await tab1.waitForTimeout(300);
+
+    const tab2 = await openApp(ctx); // read-only — opened second
+    await tab2.waitForTimeout(500);
+    assert.equal(await tab2.evaluate(() => DB.isReadOnly), true, 'tab2 must be read-only before this test proceeds');
+
+    // A trivially valid backup — its content doesn't matter, since the read-only guard must
+    // refuse it before ever reaching validation/parsing.
+    const backup = await tab2.evaluate(() => DB.buildBackup());
+
+    const result = await tab2.evaluate(async (data) => {
+      try {
+        await DB.restoreBackup(data);
+        return { threw: false };
+      } catch (e) {
+        return { threw: true, message: e.message, dbReadOnly: !!e.dbReadOnly };
+      }
+    }, backup);
+    assert.equal(result.threw, true, 'DB.restoreBackup must refuse in a read-only tab');
+    assert.equal(result.dbReadOnly, true, 'the thrown error must carry dbReadOnly, same as every other refused write');
+    assert.match(result.message, /read-only/i);
+
+    // Exercise the actual Settings "Restore Backup" button too, through the real data-act
+    // dispatcher a person would click — doRestore() checks DB.isReadOnly before ever opening the
+    // file picker, so no <input type="file"> chooser should appear at all.
+    await tab2.evaluate(() => App.route('settings'));
+    await tab2.waitForTimeout(200);
+    let fileChooserSeen = false;
+    tab2.once('filechooser', () => { fileChooserSeen = true; });
+    const restoreBtn = await tab2.$('[data-act="restore"]');
+    assert.ok(restoreBtn, 'Settings must render the Restore Backup button');
+    await restoreBtn.click();
+    await tab2.waitForTimeout(200);
+    assert.equal(fileChooserSeen, false, 'a read-only tab must never even open the restore file picker');
+
+    await ctx.close();
+  });
+
   test('three tabs: closing the leader promotes exactly one of the remaining two', async () => {
     const ctx = await freshContext();
     const tabA = await openApp(ctx);

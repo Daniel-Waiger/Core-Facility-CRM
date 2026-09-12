@@ -186,6 +186,60 @@ describe('modal stacking: topmost-modal saves, focus, Enter, and hashchange clea
     await page.click('[data-act="no"]');
   });
 
+  // G1: handleActError (js/app.js) — a saver that throws for a reason that has nothing to do
+  // with the read-only-tab guard (an FK violation, a genuine bug, or here a monkeypatched DB.run)
+  // must be caught by the delegated click handler, logged, and reported with a toast — not left
+  // to escape as an uncaught exception. The modal must stay open (the visitor's input is not
+  // lost) and no `pageerror` may fire — this file's `before()` hook already turns any pageerror
+  // into a failing test via `page.on('pageerror', (e) => { throw e; })`, so this test doubles as
+  // proof the error never escaped uncaught.
+  test('G1: a saver that throws mid-save shows the "nothing was saved" toast, leaves the modal open, and never surfaces as a pageerror', async () => {
+    // iSave (Add Instrument) has no try/catch of its own around its DB.transaction() call — unlike
+    // npSave/epSave, which catch their own INSERT/UPDATE and show a specific message — so a throw
+    // here is exactly the "genuinely uncaught by the saver itself" case handleActError exists for.
+    await page.evaluate(() => App.route('instruments'));
+    await page.waitForTimeout(150);
+    await page.click('[data-act="add-instrument"]');
+    await page.waitForSelector('#i-name');
+    await page.fill('#i-name', 'Should Not Be Created');
+
+    // Monkeypatch DB.run for exactly one call — the instrument INSERT itself, inside iSave's
+    // DB.transaction() — so the save fails after validation has already passed.
+    await page.evaluate(() => {
+      const real = window.DB.run;
+      window.__cft_restoreRun = () => { window.DB.run = real; };
+      let armed = true;
+      window.DB.run = function (sql, params) {
+        if (armed && /INSERT INTO instruments/.test(sql)) {
+          armed = false;
+          throw new Error('simulated save failure');
+        }
+        return real.call(window.DB, sql, params);
+      };
+    });
+
+    await page.click('[data-act="i-save"]');
+    await page.waitForTimeout(300);
+
+    const toastText = await page.evaluate(() => {
+      const el = document.querySelector('#toasts .toast.error:last-child');
+      return el ? el.textContent : null;
+    });
+    assert.ok(toastText, 'expected an error toast after the thrown save');
+    assert.match(toastText, /Something went wrong and nothing was saved/);
+    assert.match(toastText, /simulated save failure/);
+
+    const dimsAfter = await page.evaluate(() => document.querySelectorAll('.modal-dim').length);
+    assert.equal(dimsAfter, 1, 'the Add Instrument modal must stay open after a thrown save, not be closed as if it had succeeded');
+
+    const created = await page.evaluate(() => !!DB.row("SELECT id FROM instruments WHERE name='Should Not Be Created'"));
+    assert.equal(created, false, 'the instrument row must not exist — DB.transaction must have rolled back the failed INSERT');
+
+    // Clean up: restore the real DB.run and close the modal so later tests start from a clean slate.
+    await page.evaluate(() => { window.__cft_restoreRun(); });
+    await page.evaluate(() => window.UI.closeAllModals());
+  });
+
   test('M8/U2: a hashchange closes every open modal, including a nested one', async () => {
     await page.evaluate(() => App.route('projects'));
     await page.waitForTimeout(150);
