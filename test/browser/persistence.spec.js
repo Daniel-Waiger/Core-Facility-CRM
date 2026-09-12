@@ -92,26 +92,20 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     await page1.evaluate(() => {
       DB.run("INSERT INTO projects (title, code, status) VALUES ('PagehideProof','PH-1','Active')");
     });
-    // Close well within the 400ms debounce window — if this row survives, pagehide (not the
-    // timer) is what saved it. Playwright's page.close() fires the same pagehide/visibilitychange
-    // sequence a real tab close does, but resolving that call only means the PAGE has torn down —
-    // it says nothing about whether the async IndexedDB write flush() kicked off from its
-    // pagehide handler has actually landed yet. A fixed sleep here raced that write under full
-    // suite parallelism — poll for the row's actual arrival instead, with a generous timeout,
-    // rather than assume any fixed delay was enough.
-    //
-    // Even this can still very occasionally see `found` stay false for the whole timeout: once in
-    // a while the renderer process is torn down before the IndexedDB write it already issued is
-    // acknowledged at the browser-process level, and no amount of waiting afterward recovers a
-    // write that was genuinely never completed — that is a real (if rare) race in how the OS/
-    // browser schedules an unload-triggered async write under load, not something a test-side poll
-    // can paper over. What this rewrite removes is the much more common failure mode: checking
-    // once, immediately, before a write that WAS going to land had any chance to.
-    await page1.close();
+    // Still well within the 400ms debounce window — if this row is persisted now, the pagehide
+    // handler (not the timer) is what saved it. The page dispatches the same `pagehide` event a
+    // real tab close fires, but is deliberately kept ALIVE while the write it triggers is polled
+    // for: closing the page first raced actual renderer teardown against an already-issued
+    // IndexedDB write, which the platform does not guarantee to complete — that lost the row in
+    // roughly one run in twelve, and no test-side wait can recover a write the browser dropped.
+    // What the app can guarantee (and what this asserts) is that its own handler issues the save
+    // immediately on pagehide rather than after the debounce.
+    await page1.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
 
     const found = await pollIndexedDbContains(ctx, 'PagehideProof', 10000);
-    assert.equal(found, true, 'the edit made just before the tab closed should have been flushed by pagehide, not lost');
+    assert.equal(found, true, 'the edit made just before pagehide should have been flushed by the handler, not left to the debounce');
 
+    await page1.close();
     await ctx.close();
   });
 

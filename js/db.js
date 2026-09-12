@@ -1073,8 +1073,11 @@
   // proceeding anyway (see waitForSaveIdle and restoreBackup below). A save can be stuck rather
   // than merely slow — a blocked/full IndexedDB, a browser storage bug — and waiting on it forever
   // would hang the whole restore (and the UI showing it) with nothing the user can do about it.
-  // The generation guard above is what makes proceeding safe: even if the stuck save eventually
-  // does complete, its bytes are captured from before the swap and it will refuse to persist them.
+  // The generation guard above is what makes proceeding safe enough: a stuck save that eventually
+  // completes has already ISSUED its write, so the guard cannot un-write those pre-swap bytes — it
+  // refuses to acknowledge them as saved, leaves the live database dirty, and reschedules a flush
+  // (settleStaleGeneration) that rewrites the restored bytes moments later. A tab closed inside
+  // that brief window could lose the restore; that needs storage that hangs and then recovers.
   const SAVE_IDLE_TIMEOUT_MS = 5000;
   function waitForSaveIdle() {
     if (!saving) return Promise.resolve();
