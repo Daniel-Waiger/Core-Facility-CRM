@@ -250,9 +250,14 @@ describe('M5: the legacy pricing-tier reseed runs at most once', () => {
   test('deleting both default tiers after the first upgrade does not resurrect them on the next migrate() pass', async () => {
     const { DB } = await freshDb();
     // Simulate a pre-1.7.0 install: legacy overhead config set, no pricing_tiers yet, and the
-    // seeded flag absent (a brand-new freshDb() never went through migrate() at all, so we drive
-    // the exact same migration path schema.test.js uses: buildBackup()/restoreBackup() re-runs
-    // migrate() against the reopened bytes).
+    // seeded flag absent. A brand-new freshDb() never runs migrate() at all — but per the verifier
+    // gap this test now also guards (see the fresh-DB-branch describe below), boot()'s fresh-DB
+    // path sets the flag itself, since IT is also a database that has (correctly) decided there is
+    // nothing to reseed. So driving the ACTUAL pre-1.7.0 scenario — a database that predates the
+    // flag existing at all — means clearing what boot() just set, then re-running the exact
+    // migration path schema.test.js uses: buildBackup()/restoreBackup() re-runs migrate() against
+    // the reopened bytes.
+    DB.run("DELETE FROM app_config WHERE key='pricing_tiers_seeded'");
     DB.setConfig('overhead_internal', 20);
     DB.setConfig('overhead_external', 50);
 
@@ -272,6 +277,33 @@ describe('M5: the legacy pricing-tier reseed runs at most once', () => {
 
     tiers = DB.rows('SELECT name FROM pricing_tiers');
     assert.equal(tiers.length, 0, 'a user who deleted both tiers must not get them back on the next reload');
+  });
+
+  test('verifier gap: a brand-new database (never through migrate()) sets the flag itself, so deleting seeded tiers on it also sticks', async () => {
+    const { DB } = await freshDb();
+    // Nothing seeded pricing_tiers on THIS fresh database (SCHEMA starts it empty and no legacy
+    // overhead config was ever set) — but boot()'s fresh-DB branch must still have written the
+    // flag, or the FIRST migrate() this database ever goes through (its very next reload) would
+    // treat "no tiers yet" as "never decided" and seed Internal/External from whatever
+    // overhead_internal/overhead_external happen to be set by then (e.g. via Settings), even if a
+    // facility had deliberately deleted both tiers in the meantime.
+    assert.equal(DB.getConfig('pricing_tiers_seeded', null), '1', 'boot()\'s fresh-DB branch must set the flag itself, not only migrate()');
+
+    // Facility sets its overhead rates (Settings > Billing Rates) and its own tiers, the ordinary
+    // way — through pricing_tiers directly, NOT the legacy migration path.
+    DB.setConfig('overhead_internal', 12);
+    DB.setConfig('overhead_external', 6);
+    DB.run("INSERT INTO pricing_tiers (name, overhead_pct) VALUES ('Internal', 12)");
+    DB.run("INSERT INTO pricing_tiers (name, overhead_pct) VALUES ('External', 6)");
+    DB.run('DELETE FROM pricing_tiers'); // the zero-ref Delete path a user could reach from Settings
+
+    // Simulate a reload: export bytes, reopen, run migrate() — exactly what schema.test.js and the
+    // test above use for "the next time this database is opened".
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup);
+
+    const tiers = DB.rows('SELECT name FROM pricing_tiers');
+    assert.equal(tiers.length, 0, 'a fresh database\'s own deleted tiers must stay deleted after a reload, same as an upgraded one');
   });
 });
 
