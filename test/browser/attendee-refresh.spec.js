@@ -7,8 +7,8 @@
  * every meeting a long-attending person has ever been on for no reason — real cost for zero
  * benefit when the name didn't change.
  *
- * This needs a real browser: pEditSave reads `document.querySelector('.modal')` and real <input>
- * elements, which the unit-test DOM stub deliberately does not provide (see stub-dom.js).
+ * This needs a real browser: pEditSave reads `UI.topModal()` and real <input> elements, neither
+ * of which the unit-test DOM stub provides (see stub-dom.js — querySelector always returns null).
  */
 'use strict';
 

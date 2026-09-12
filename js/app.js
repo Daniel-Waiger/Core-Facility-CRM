@@ -341,7 +341,7 @@
   // never be yanked away by a background route change) and a focus target renderView DID
   // successfully restore inside the freshly rendered view (nothing to fix in that case).
   function moveFocusToNewScreen() {
-    if (document.querySelector('.modal-dim')) return;
+    if (UI.topDim()) return;
     const view = document.getElementById('view');
     if (document.activeElement && view && view.contains(document.activeElement)) return;
     const heading = document.getElementById('page-title');
@@ -4339,8 +4339,9 @@
   // bookings only" framing as the card's own copy; no existing meetings row is ever touched here.
   function saveCategoryPolicies() {
     const rowEls = [...document.querySelectorAll('.cat-policy-row')];
-    // Validate every row BEFORE writing any of them: DB.setCategoryPolicy clamps a negative to 0
-    // as a defensive floor (a belt-and-suspenders guard against some other future caller), but a
+    // Validate every row BEFORE writing any of them, via the same rejectOutOfPercentRange helper
+    // every other percent field in this file uses: DB.setCategoryPolicy clamps a negative to 0 as
+    // a defensive floor (a belt-and-suspenders guard against some other future caller), but a
     // value the admin actually typed here — negative, or over 100% — is a mistake that should be
     // rejected with a toast naming the category, not silently clamped and saved without a word.
     // A whole-form validation (rather than skipping just the bad row) avoids half the categories
@@ -4350,12 +4351,7 @@
       if (!category) continue;
       const pctEl = rowEl.querySelector('.cat-staff-pct');
       if (!pctEl) continue;
-      const raw = pctEl.value.trim();
-      const pct = Number(raw);
-      if (raw !== '' && (!Number.isFinite(pct) || pct < 0 || pct > 100)) {
-        UI.toast(`"${category}" staff % must be between 0 and 100.`, 'error');
-        return;
-      }
+      if (rejectOutOfPercentRange(pctEl.value, `"${category}" staff %`)) return;
     }
     rowEls.forEach((rowEl) => {
       const category = rowEl.dataset.category;
