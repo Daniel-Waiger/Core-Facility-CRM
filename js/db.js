@@ -1432,11 +1432,25 @@
      has the bare tier_id (a booking snapshot column, not a joined row), so there's no separate
      is_retired flag for a caller to wrap with UI.retiredName itself. '—' covers both a genuinely
      legacy booking (tier_id NULL) and an orphaned id. */
-  function tierLabel(tierId) {
+  function tierLabel(tierId, map) {
     if (tierId == null) return '—';
+    // `map` (from buildTierLabelMap below) skips the per-call SELECT — an export loop over every
+    // booking in the facility used to issue one `row()` query per row just to resolve its tier
+    // name; the exact same answer comes from one query read into a Map once, then a lookup here.
+    if (map) return map.has(tierId) ? map.get(tierId) : '—';
     const t = row('SELECT name, is_retired FROM pricing_tiers WHERE id=?', [tierId]);
     if (!t) return '—';
     return global.UI.retiredName(t.name, t.is_retired);
+  }
+  // One query, reused by any export loop that would otherwise call tierLabel(id) once per row
+  // (js/exports.js's Meetings/Bookings & Costs sheets, DOCX, PDF). Built once per export, not
+  // cached across calls, so a tier renamed mid-session is never read stale.
+  function buildTierLabelMap() {
+    const map = new Map();
+    rows('SELECT id, name, is_retired FROM pricing_tiers').forEach((t) => {
+      map.set(t.id, global.UI.retiredName(t.name, t.is_retired));
+    });
+    return map;
   }
 
   /* ---------------- Per-tier instrument rate overrides ----------------
@@ -2463,6 +2477,7 @@
     upsertPricingTierByName,
     countTierRefs,
     tierLabel,
+    buildTierLabelMap,
     getInstrumentTierRate,
     resolveInstrumentCost,
     setInstrumentTierRate,

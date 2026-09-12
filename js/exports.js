@@ -322,13 +322,17 @@
     XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
 
     // Sheet 5: Meetings
+    // One tier-name lookup built up front rather than a SELECT per booking row (see
+    // DB.buildTierLabelMap) — a per-project export is usually small, but there's no reason to pay
+    // even that per row when the same one-time query answers every row.
+    const tierMap = DB.buildTierLabelMap();
     const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
     ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
@@ -384,6 +388,7 @@
     if (!docx) { UI.toast('DOCX library not loaded', 'error'); return; }
 
     const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle } = docx;
+    const tierMap = DB.buildTierLabelMap(); // one query instead of one per meeting below
 
     const children = [
       new Paragraph({ text: d.p.title, heading: HeadingLevel.TITLE }),
@@ -458,7 +463,7 @@
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
         if (m.total_cost) {
-          if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id)}`, italics: true }));
+          if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id, tierMap)}`, italics: true }));
           children.push(new Paragraph({ text: `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, bold: true }));
         }
       });
@@ -520,6 +525,7 @@
     if (!jsPDF) { UI.toast('jsPDF library not loaded', 'error'); return; }
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    const tierMap = DB.buildTierLabelMap(); // one query instead of one per meeting below
     const pageHeight = 280;
     const margin = 14;
     let y = 20;
@@ -708,7 +714,7 @@
             checkPage(5);
             pdf.setFontSize(8);
             pdf.setTextColor(100, 116, 139);
-            pdf.text(`Tier: ${DB.tierLabel(m.tier_id)}`, margin + 4, y);
+            pdf.text(`Tier: ${DB.tierLabel(m.tier_id, tierMap)}`, margin + 4, y);
             pdf.setTextColor(20, 20, 20);
             pdf.setFontSize(9);
             y += 4;
@@ -926,6 +932,10 @@
     // Subtotal/Before Tax change — makes plain that this column, unlike the two before it, answers
     // "what got billed", so a 0 next to an untouched Subtotal is expected, not an arithmetic gap.
     const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Charged Total']];
+    // One tier-name lookup for the whole sheet (see DB.buildTierLabelMap) instead of a SELECT per
+    // booking row — this sheet is every booking the facility has ever logged, so at scale that was
+    // the single largest source of repeated queries in this export.
+    const bcTierMap = DB.buildTierLabelMap();
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
@@ -942,7 +952,7 @@
       const overheadPct = m.tier_overhead_pct == null ? '' : round2(m.tier_overhead_pct);
       const effectiveTaxPct = (counts && beforeTax > 0) ? round2((((m.total_cost || 0) / beforeTax) - 1) * 100) : '';
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id),
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, bcTierMap),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
@@ -1046,16 +1056,21 @@
     const Reports = global.Reports;
     if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
 
-    const instr = Reports.computeInstrumentRows(from, to);
-    const staff = Reports.computeStaffRows(from, to);
-    const matrix = Reports.computeStaffInstrumentMatrix(from, to);
-    const proj = Reports.computeProjectRows(from, to);
-    const stewardship = Reports.computeStewardshipRows(from, to);
-    const consult = Reports.computeConsultRows(from, to);
-    const svc = Reports.computeServiceEntryRows(from, to);
-    const breadth = Reports.computeBreadthRows(from, to);
-    const mix = Reports.computeActivityMixRows(from, to);
-    const funnel = Reports.computeFunnelRows(from, to);
+    // One facts bundle shared across every compute* call below (same pattern as Reports.render())
+    // — each of these used to run its own loadMeetingsInRange/loadInstrumentLines/etc query even
+    // though every card is reading the exact same (from,to); this way each runs at most once, and
+    // computeStewardshipRows reuses the instrument/consult rows computed on the lines just above it.
+    const facts = Reports.makeFacts(from, to);
+    const instr = Reports.computeInstrumentRows(from, to, facts);
+    const staff = Reports.computeStaffRows(from, to, facts);
+    const matrix = Reports.computeStaffInstrumentMatrix(from, to, facts);
+    const proj = Reports.computeProjectRows(from, to, facts);
+    const stewardship = Reports.computeStewardshipRows(from, to, facts);
+    const consult = Reports.computeConsultRows(from, to, facts);
+    const svc = Reports.computeServiceEntryRows(from, to, facts);
+    const breadth = Reports.computeBreadthRows(from, to, facts);
+    const mix = Reports.computeActivityMixRows(from, to, facts);
+    const funnel = Reports.computeFunnelRows(from, to, facts);
     const labConsultsOn = Reports.getLabConsultsEnabled(); // mirror the on-screen opt-in toggle exactly
 
     const wb = XLSX.utils.book_new();
@@ -1258,7 +1273,7 @@
     if (!Reports) { UI.toast('Reports module not loaded', 'error'); return; }
 
     const from = spec.from || '', to = spec.to || '';
-    const result = Reports.computeCustomRows(spec, from, to);
+    const result = Reports.computeCustomRows(spec, from, to, Reports.makeFacts(from, to));
     if (!result.columns.length) { UI.toast('Select at least one column', 'error'); return; }
 
     const wb = XLSX.utils.book_new();

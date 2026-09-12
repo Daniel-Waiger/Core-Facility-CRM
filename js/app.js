@@ -453,10 +453,27 @@
     }
 
     if (name === 'reports') {
+      // Debounced ~250ms: recomputing all nine Reports cards is real work at facility scale (see
+      // js/reports.js's facts-bundle comment), and re-rendering the whole screen on every
+      // keystroke while a date is still being typed is both wasted work and a distraction — the
+      // field the user is typing into gets rebuilt out from under them mid-edit. Waiting for a
+      // short pause after the last keystroke (or a blur, which fires 'change' immediately below)
+      // means a full retype settles once, not once per digit, and nothing flashes while typing.
+      let repRangeTimer = null;
+      const scheduleRangeChange = (patch) => {
+        clearTimeout(repRangeTimer);
+        repRangeTimer = setTimeout(() => Reports.setRange(patch), 250);
+      };
       const fromInput = document.getElementById('rep-from');
-      if (fromInput) fromInput.onchange = (e) => Reports.setRange({ from: e.target.value });
+      if (fromInput) {
+        fromInput.oninput = (e) => scheduleRangeChange({ from: e.target.value });
+        fromInput.onchange = (e) => { clearTimeout(repRangeTimer); Reports.setRange({ from: e.target.value }); };
+      }
       const toInput = document.getElementById('rep-to');
-      if (toInput) toInput.onchange = (e) => Reports.setRange({ to: e.target.value });
+      if (toInput) {
+        toInput.oninput = (e) => scheduleRangeChange({ to: e.target.value });
+        toInput.onchange = (e) => { clearTimeout(repRangeTimer); Reports.setRange({ to: e.target.value }); };
+      }
     }
 
     if (focusRestore) {
