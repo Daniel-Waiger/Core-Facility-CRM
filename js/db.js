@@ -657,6 +657,7 @@
       // seedDefaultCategoryPolicies's comment for why this can't just live inside migrate().
       seedDefaultCategoryPolicies();
     }
+    if (!memoryMode) multiTabGuard = startMultiTabGuard();
     return { persistent: !memoryMode };
   }
 
@@ -740,6 +741,18 @@
       tx.onerror = () => reject(tx.error);
     });
   }
+  async function idbDelete(key) {
+    if (memoryMode) { memoryStore.delete(key); return; }
+    const s = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = s.transaction('kv', 'readwrite');
+      const req = tx.objectStore('kv').delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
   async function idbGetAllWithPrefix(prefix) {
     if (memoryMode) {
       const results = [];
@@ -801,26 +814,152 @@
     return bytes;
   }
 
-  /* Debounced autosave: every mutation calls markDirty() */
+  /* ---------------- Multi-tab guard ----------------
+     Two tabs on the SAME database (same IDB_NAME — a demo tab and the real app never share one)
+     each ran their own independent 400ms autosave with no idea the other existed, so whichever
+     tab's timer fired last silently overwrote the other's edits with no toast, no conflict, no
+     trace (H2). There is no real multi-writer support here — no merge, no locking on the actual
+     writes — so the fix is to guarantee only ONE tab ever persists at a time: every tab announces
+     itself over a BroadcastChannel scoped to this IDB_NAME; each tab independently computes the
+     same leader (the tab with the oldest announced timestamp, ties broken by id) from the set of
+     announcements it has seen, so every tab converges on the same answer without a central
+     coordinator. The newer tab(s) go read-only — flush() below skips idbSet entirely for them —
+     rather than the reverse, so the tab that was already there (and whose data is authoritative)
+     keeps writing. A tab that goes read-only still works locally (nothing here blocks DB.run);
+     only the save to IndexedDB is withheld, and onMultiTabState surfaces the state so the UI can
+     label it rather than let it fail invisibly.
+     Falls back to doing nothing (every tab stays a writer, i.e. today's pre-existing behavior) if
+     BroadcastChannel doesn't exist — any pre-2021 browser — rather than fail boot over a guard
+     that is an improvement, not a requirement.
+     Started lazily from boot(), only once memoryMode is known and false: Node itself ships a real
+     global BroadcastChannel (v15.4+), and one left open with a live listener keeps the process's
+     event loop alive — under `node --test`, which never has a real IndexedDB to guard in the
+     first place, that hung the whole run rather than exiting. There is also nothing worth
+     guarding in memoryMode (no shared IndexedDB another tab could race for). */
+  let multiTabGuard = { isReadOnly: () => false };
+  function startMultiTabGuard() {
+    if (typeof BroadcastChannel === 'undefined') return { isReadOnly: () => false };
+    let bc;
+    try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return { isReadOnly: () => false }; }
+    const selfId = Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
+    const selfTs = Date.now();
+    const peers = new Map(); // id -> ts, other known tabs (never includes selfId)
+    let readOnly = false;
+
+    function recompute() {
+      let leaderId = selfId, leaderTs = selfTs;
+      for (const [id, ts] of peers) {
+        if (ts < leaderTs || (ts === leaderTs && id < leaderId)) { leaderId = id; leaderTs = ts; }
+      }
+      const next = leaderId !== selfId;
+      if (next !== readOnly) {
+        readOnly = next;
+        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
+      }
+    }
+
+    bc.onmessage = (ev) => {
+      const msg = ev.data || {};
+      if (!msg || msg.id === selfId) return;
+      if (msg.type === 'hello') {
+        peers.set(msg.id, msg.ts);
+        recompute();
+        try { bc.postMessage({ type: 'hello-ack', id: selfId, ts: selfTs }); } catch (_) {}
+      } else if (msg.type === 'hello-ack') {
+        peers.set(msg.id, msg.ts);
+        recompute();
+      } else if (msg.type === 'bye') {
+        peers.delete(msg.id);
+        recompute();
+      }
+    };
+    try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
+
+    function teardown() {
+      try { bc.postMessage({ type: 'bye', id: selfId }); } catch (_) {}
+      try { bc.close(); } catch (_) {}
+    }
+    if (typeof global.addEventListener === 'function') global.addEventListener('pagehide', teardown);
+
+    return { isReadOnly: () => readOnly };
+  }
+
+  /* Debounced autosave: every mutation calls markDirty().
+     H3 fix: previously cleared `dirty` before the idbSet await settled, so a rejected save was
+     silently swallowed (nothing retried, nothing told the user) and a 400ms setTimeout with no
+     flush-on-close meant an edit made right before the tab closed was simply never written.
+     Now: `dirty` stays true until idbSet actually resolves, a rejection notifies onSaveFailed and
+     leaves dirty=true so the very next markDirty()'s timer retries, and pagehide/visibilitychange
+     force an immediate flush instead of waiting out the debounce. */
   let saveTimer = null;
   let dirty = false;
+  let saving = false;
+  let pendingDuringSave = false;
+
+  function scheduleFlush(delayMs) {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { saveTimer = null; flush(); }, delayMs == null ? 400 : delayMs);
+  }
+
   function markDirty() {
     dirty = true;
+    if (saving) pendingDuringSave = true;
     if (global.App && global.App.onSaving) global.App.onSaving();
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      if (!dirty) return;
-      dirty = false;
-      try {
-        await idbSet(DB_KEY, currentBytes());
+    scheduleFlush();
+  }
+
+  async function flush() {
+    if (!dirty) return;
+    if (saving) return; // a save is already in flight; markDirty() already flagged pendingDuringSave
+    if (multiTabGuard.isReadOnly()) return; // this tab lost the leader race — never persist over it
+    saving = true;
+    try {
+      const bytes = currentBytes(); // snapshot taken now; pendingDuringSave catches anything later
+      await idbSet(DB_KEY, bytes);
+      if (pendingDuringSave) {
+        // more edits landed while this save was writing — those aren't in `bytes`, so stay dirty
+        // and rely on the timer markDirty() already (re)armed to flush them.
+        pendingDuringSave = false;
+      } else {
+        dirty = false;
         if (global.App && global.App.onSaved) global.App.onSaved();
-      } catch (e) {
-        console.error('autosave failed', e);
       }
-    }, 400);
+    } catch (e) {
+      console.error('autosave failed', e);
+      pendingDuringSave = false;
+      if (global.App && global.App.onSaveFailed) global.App.onSaveFailed(e);
+      // dirty is left true on purpose: the next markDirty() re-arms the timer and retries.
+    } finally {
+      saving = false;
+    }
+  }
+
+  // Flush immediately, skipping the remainder of the debounce — used when the tab is about to
+  // disappear (pagehide) or go to the background (visibilitychange → hidden), so an edit made
+  // just before close isn't lost waiting out the 400ms window. Also wired to `beforeunload`,
+  // which — unlike pagehide — fires BEFORE the browser starts actually tearing the page down, so
+  // it gives the async idbSet inside flush() strictly more real time to land before the tab is
+  // gone; nothing here calls preventDefault or returns a value, so it never shows a "leave site?"
+  // prompt, it only gets a head start on the same save pagehide would otherwise trigger alone.
+  function flushNow() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    return flush();
+  }
+  if (typeof global.addEventListener === 'function') {
+    global.addEventListener('beforeunload', flushNow);
+    global.addEventListener('pagehide', flushNow);
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flushNow();
+    });
   }
 
   /* ---------------- Backup (single self-contained file) ---------------- */
+  // Every table a restored database must have before the app can even route to Dashboard/
+  // Projects/People/Instruments/Settings without throwing "no such table" — see H1 below.
+  const CORE_TABLES = ['projects', 'people', 'instruments', 'meetings', 'milestones'];
+
   async function buildBackup() {
     const uploadEntries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
     const uploads = {};
@@ -833,29 +972,148 @@
       kind: 'core-facility-backup',
       version: 2,
       created: new Date().toISOString(),
+      // Lets a restore in the real app refuse a demo sandbox's data outright (doRestore in
+      // app.js) while the sandbox itself is free to accept either kind of file for testing.
+      demo: !!global.IS_DEMO,
       db: Array.from(currentBytes()),
       uploads,
     };
   }
 
+  /* Row counts + a headline fact per core table, read from whichever sql.js Database instance is
+     passed in — the live `db` for the "what you have now" side of a restore preview, or a scratch
+     database opened over an uploaded file for the "what you're about to load" side. Never assumes
+     a table exists: a missing one just contributes 0, since the caller (inspectBackupCandidate)
+     has already required every CORE_TABLES entry to exist before this runs on untrusted bytes. */
+  function summarizeCoreTables(handle) {
+    const counts = {};
+    for (const t of CORE_TABLES) {
+      const res = handle.exec(`SELECT COUNT(*) AS c FROM ${t}`);
+      counts[t] = (res && res[0] && res[0].values && res[0].values[0]) ? Number(res[0].values[0][0]) || 0 : 0;
+    }
+    let newestBooking = '';
+    try {
+      const res = handle.exec("SELECT MAX(date) AS d FROM meetings WHERE date IS NOT NULL AND TRIM(date) != ''");
+      newestBooking = (res && res[0] && res[0].values && res[0].values[0] && res[0].values[0][0]) || '';
+    } catch (_) { /* meetings.date not present yet on a very old backup — leave blank */ }
+    return { counts, newestBooking };
+  }
+
+  // What's actually in the live, currently-open database — the "before" half of a restore
+  // preview (doRestore in app.js shows this next to inspectBackupCandidate's "after").
+  function liveSummary() {
+    return summarizeCoreTables(db);
+  }
+
+  /* H1 fix. Before: restoreBackup checked only `kind` and `!data.db`, so `db: []`/`db: {}` (or
+     any bytes sql.js could open but that never had this app's schema) passed straight through —
+     `new SQL.Database(rawBytes)` succeeds on an empty/foreign image, migrate() only ever adds
+     columns to tables that already exist (see migrate() above) and never recreates
+     projects/people/instruments/meetings/milestones from scratch, and the bad image was written
+     to IndexedDB before a single query ever proved it usable. Every route then threw "no such
+     table" on reload, including Settings, so Restore itself became unreachable — the app was
+     bricked with no in-app recovery. Fix: open the candidate bytes in a throwaway SQL.Database,
+     require every core table to exist and be queryable, and hand back a preview (row counts,
+     newest booking date, the backup's own version/created/demo fields) — all BEFORE
+     restoreBackup below ever touches the live `db` or IndexedDB. Throws (never returns) on
+     anything that fails the check, with a message meant to be shown to the user as-is. */
+  async function inspectBackupCandidate(data) {
+    if (!data || typeof data !== 'object' || data.kind !== 'core-facility-backup') {
+      throw new Error('Not a valid backup file — it does not look like a Core Facility Tracker backup.');
+    }
+    if (!data.db || (Array.isArray(data.db) && data.db.length === 0)) {
+      throw new Error('Not a valid backup file — no database was found inside it.');
+    }
+    let rawBytes;
+    try {
+      rawBytes = Array.isArray(data.db) ? new Uint8Array(data.db) : data.db;
+      if (!rawBytes || !rawBytes.length) throw new Error('empty');
+    } catch (e) {
+      throw new Error('Not a valid backup file — its database could not be read.');
+    }
+    const SQL = await initSqljs();
+    let scratch;
+    try {
+      scratch = new SQL.Database(rawBytes);
+    } catch (e) {
+      throw new Error('Not a valid backup file — its database could not be opened.');
+    }
+    try {
+      for (const t of CORE_TABLES) {
+        try {
+          scratch.exec(`SELECT COUNT(*) FROM ${t}`);
+        } catch (e) {
+          throw new Error(`Not a valid backup file — it is missing required data (no "${t}" table).`);
+        }
+      }
+      const { counts, newestBooking } = summarizeCoreTables(scratch);
+      return {
+        counts,
+        newestBooking,
+        version: data.version != null ? data.version : null,
+        created: data.created || null,
+        // Old backups (pre this fix) never wrote `demo` at all — treat that as "not a demo
+        // backup" so they keep restoring exactly as before, per the package brief.
+        demo: data.demo === true,
+      };
+    } finally {
+      try { scratch.close(); } catch (_) {}
+    }
+  }
+
   async function restoreBackup(data) {
-    if (data.kind !== 'core-facility-backup' || !data.db) throw new Error('Not a valid backup file.');
+    // Validates BEFORE anything below touches the live `db` or IndexedDB — see
+    // inspectBackupCandidate's comment. A throw here leaves the live handle exactly as it was.
+    const preview = await inspectBackupCandidate(data);
     const SQL = await initSqljs();
     const rawBytes = Array.isArray(data.db) ? new Uint8Array(data.db) : data.db;
-    db = new SQL.Database(rawBytes);
-    db.exec('PRAGMA foreign_keys = ON;');
-    migrate();
-    await idbSet(DB_KEY, currentBytes());
+    const newDb = new SQL.Database(rawBytes);
+    newDb.exec('PRAGMA foreign_keys = ON;');
+    const previousDb = db;
+    db = newDb;
+    try {
+      migrate();
+      await idbSet(DB_KEY, currentBytes());
+    } catch (e) {
+      // Never leave the live handle dead on a throw: put the working database back so the app
+      // keeps running on what it had before this restore attempt, and surface the real error.
+      db = previousDb;
+      try { newDb.close(); } catch (_) {}
+      throw e;
+    }
+    try { previousDb.close(); } catch (_) {}
     for (const [name, entry] of Object.entries(data.uploads || {})) {
       if (entry && typeof entry === 'object' && typeof entry.data === 'string') {
         await idbSet(UPLOAD_KEY + ':' + name, base64ToBlob(entry));
       }
     }
+    return preview;
   }
 
-  /* ---------------- Uploads (IndexedDB) ---------------- */
+  /* ---------------- Uploads (IndexedDB) ----------------
+     Attachment blobs (`uploads:<storageKey>`) used to have no delete path at all: removing an
+     attachment (deleteFile), deleting a project with no history to protect (archiveProject's
+     zero-ref branch), and Clear All Data every deleted the `files` row that pointed at a blob but
+     never the blob itself — it lingered forever in IndexedDB and kept shipping inside every
+     future backup (M9). deleteUpload/deleteUploads close that gap; callers pass the same
+     storageKey `files.path` already holds for kind='upload' rows. */
   async function saveUpload(name, blob) { await idbSet(UPLOAD_KEY + ':' + name, blob); }
   async function getUpload(name) { return idbGet(UPLOAD_KEY + ':' + name); }
+  async function deleteUpload(name) {
+    if (!name) return;
+    try { await idbDelete(UPLOAD_KEY + ':' + name); } catch (e) { console.error('deleteUpload failed', e); }
+  }
+  async function deleteUploads(names) {
+    for (const name of names || []) await deleteUpload(name);
+  }
+  // Every uploaded blob, regardless of which project or file row it belonged to — used by Clear
+  // All Data, which wipes every table and so must also wipe every attachment.
+  async function deleteAllUploads() {
+    try {
+      const entries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+      for (const { key } of entries) await idbDelete(key);
+    } catch (e) { console.error('deleteAllUploads failed', e); }
+  }
 
   /* ---------------- Silent auto-backup folder handle (IndexedDB) ---------------- */
   const AUTO_BACKUP_DIR_KEY = 'auto-backup-dir-handle';
@@ -1373,6 +1631,11 @@
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
       db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries','project_outputs')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
+    // M9: every attachment blob this database ever held is now orphaned (its `files` row is
+    // gone above) — without this they lingered in IndexedDB forever and kept shipping inside
+    // every future backup. Fire-and-forget: callers never await clearAllData(), and a failure
+    // here leaves at most a harmless orphaned blob, never blocks the row deletes above.
+    deleteAllUploads();
     markDirty();
   }
 
@@ -2005,10 +2268,15 @@
     get isDemo() { return !!global.IS_DEMO; },
     currentBytes,
     markDirty,
+    get isReadOnly() { return multiTabGuard.isReadOnly(); },
     buildBackup,
     restoreBackup,
+    inspectBackupCandidate,
+    liveSummary,
     saveUpload,
     getUpload,
+    deleteUpload,
+    deleteUploads,
     saveAutoBackupDirHandle,
     getAutoBackupDirHandle,
     clearAutoBackupDirHandle,
