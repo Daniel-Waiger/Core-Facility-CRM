@@ -571,31 +571,51 @@
   // same division of labor as overheadPct/instrument tier rates above — this function only does
   // arithmetic on whatever factor it's handed. Omitted/undefined ⇒ 1, so every existing caller
   // that predates this parameter (and any legacy booking recomputation) is unaffected.
+  // Every stored money figure round-trips through this — 2 decimal places, applied once at the
+  // very end of the calculation below (never mid-formula), so a chain of clean inputs still lands
+  // on the exact figures money.test.js pins (490 / 546.25 / 589.95) while a chain that would
+  // otherwise leave a float like 146.66666666… gets the same 2dp precision fmtMoney displays and
+  // every export reads back, instead of column-drifting a cent or two.
+  function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+  // Percentages and quantities that price a booking are meaningless (or actively wrong — see the
+  // review's M7) once negative: a negative discount is a surcharge in disguise, a negative
+  // instrument amount or staff rate flips a charge into a phantom credit. This is the last-resort
+  // belt-and-suspenders clamp — every real form also validates and rejects a negative value with
+  // a toast rather than silently coercing it (see app.js's savers) — but computeBookingBOM must
+  // never trust its inputs, since a legacy row or a future caller could still hand it one.
+  function clampNonNeg(n) { return Math.max(0, Number(n) || 0); }
+  function clampPct(n) { return Math.min(100, Math.max(0, Number(n) || 0)); }
+
   function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates, staffPctFactor }) {
     const bookingHours = hoursBetween(start, end);
-    const overheadPct = (rates && rates.overheadPct) || 0;
-    const taxPct = (rates && rates.taxPct) || 0;
-    const pctFactor = staffPctFactor == null ? 1 : staffPctFactor;
+    const overheadPct = clampNonNeg((rates && rates.overheadPct) || 0);
+    const taxPct = clampPct((rates && rates.taxPct) || 0);
+    const pctFactor = staffPctFactor == null ? 1 : clampNonNeg(staffPctFactor);
+    const safeGroupPct = clampPct(groupPct);
+    const safeManualPct = clampPct(manualPct);
 
     let instrTime = 0, instrAmount = 0;
     const instrumentLines = (instruments || []).map((it) => {
       const isTime = (it.cost_unit || 'time') === 'time';
-      const line = isTime ? (it.cost || 0) * bookingHours : (it.cost || 0) * (Number(it.amount) || 0);
+      const cost = clampNonNeg(it.cost);
+      const amount = clampNonNeg(it.amount);
+      const line = isTime ? cost * bookingHours : cost * amount;
       if (isTime) instrTime += line; else instrAmount += line;
-      return Object.assign({}, it, { isTime, line });
+      return Object.assign({}, it, { isTime, line: round2(line) });
     });
 
     let staffTotal = 0;
     const staffLines = (staff || []).map((p) => {
       const rawHours = (p.start && p.end) ? hoursBetween(p.start, p.end) : bookingHours;
       const billHours = billableStaffHours(rawHours);
-      const line = (p.rate || 0) * billHours * pctFactor;
+      const line = clampNonNeg(p.rate) * billHours * pctFactor;
       staffTotal += line;
-      return Object.assign({}, p, { rawHours, billHours, line });
+      return Object.assign({}, p, { rawHours, billHours, line: round2(line) });
     });
 
     const subtotal = instrTime + instrAmount + staffTotal;
-    const discPct = Math.min(100, (groupPct || 0) + (manualPct || 0));
+    const discPct = Math.min(100, safeGroupPct + safeManualPct);
     const discountAmt = instrTime * (discPct / 100);
     const afterDiscount = subtotal - discountAmt;
     const overheadAmt = afterDiscount * (overheadPct / 100);
@@ -604,11 +624,40 @@
     const total = beforeTax + taxAmt;
 
     return {
-      bookingHours, instrumentLines, staffLines, instrTime, instrAmount, staffTotal, subtotal,
-      groupPct: groupPct || 0, manualPct: manualPct || 0, discPct, discountAmt, afterDiscount,
-      overheadPct, overheadAmt, beforeTax, taxPct, taxAmt, total, staffPctFactor: pctFactor
+      bookingHours, instrumentLines, staffLines,
+      instrTime: round2(instrTime), instrAmount: round2(instrAmount), staffTotal: round2(staffTotal), subtotal: round2(subtotal),
+      groupPct: safeGroupPct, manualPct: safeManualPct, discPct, discountAmt: round2(discountAmt), afterDiscount: round2(afterDiscount),
+      overheadPct, overheadAmt: round2(overheadAmt), beforeTax: round2(beforeTax), taxPct, taxAmt: round2(taxAmt), total: round2(total), staffPctFactor: pctFactor
     };
-  }  /* A retired person/instrument keeps its real name in the database — the suffix is added at
+  }
+
+  /* Booking edit "frozen cost snapshot" decision (CLAUDE.md / roadmap: a saved booking's total
+     stays put unless a PRICED input actually changed). Pure and DOM-free on purpose — the real
+     bookingEditSave in app.js reads its two DOM-bound snapshots and hands them here, so this exact
+     decision is what test/unit exercises without needing a modal. `before`/`after` are plain
+     {start, end, manualPct, groupPct, category, groupOrg, instruments:[{id,amount}], staff:[{id,start,end}]}
+     objects; instrument/staff order never matters (both signatures sort by id first). */
+  function instrumentsPriceSig(list) {
+    return (list || []).slice().sort((a, b) => a.id - b.id)
+      .map((it) => `${it.id}:${round2(it.amount)}`).join(',');
+  }
+  function staffPriceSig(list) {
+    return (list || []).slice().sort((a, b) => a.id - b.id)
+      .map((it) => `${it.id}:${it.start || ''}:${it.end || ''}`).join(',');
+  }
+  function bookingPricedInputsChanged(before, after) {
+    if (!before || !after) return true;
+    if ((before.start || '') !== (after.start || '')) return true;
+    if ((before.end || '') !== (after.end || '')) return true;
+    if (round2(before.manualPct) !== round2(after.manualPct)) return true;
+    if (round2(before.groupPct) !== round2(after.groupPct)) return true;
+    if ((before.category || '') !== (after.category || '')) return true;
+    if ((before.groupOrg || '') !== (after.groupOrg || '')) return true;
+    if (instrumentsPriceSig(before.instruments) !== instrumentsPriceSig(after.instruments)) return true;
+    if (staffPriceSig(before.staff) !== staffPriceSig(after.staff)) return true;
+    return false;
+  }
+  /* A retired person/instrument keeps its real name in the database — the suffix is added at
      display time only, so historical records still read back exactly as they were entered. */
   function retiredName(name, isRetired) {
     return isRetired ? String(name == null ? '' : name) + ' (Retired)' : String(name == null ? '' : name);
@@ -727,6 +776,7 @@
     noteHtml,
     fmtDate,
     computeBookingBOM,
+    bookingPricedInputsChanged,
     ymd,
     today,
     todayPlusDays,
