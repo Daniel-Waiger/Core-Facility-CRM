@@ -49,4 +49,32 @@ describe('funnel: first_output_date fallback for an undated output uses the LOCA
     assert.equal(activeToOutput.sampleSize, 1, 'the one project with a booking and an output must contribute one sample to the median');
     assert.equal(activeToOutput.days, 0, 'first booking and first output land on the same LOCAL calendar day, so the delta must be 0, not -1');
   });
+
+  // Item 5 (second review of PR #44): computeFunnelRows' stage-6 "Research Output" COUNT came
+  // from loadOutputsInRange, which filtered and ordered directly in SQL on DB.outputEffDate —
+  // whose blank-date fallback is `date(created_at)`, a UTC calendar day. An undated output logged
+  // late in the local day (but still on the SAME UTC day) fell OUT of a same-day range query
+  // entirely — not just mis-ordered, actually dropped from the count. Fixed by loading unbounded
+  // and filtering/ordering in JS via the same utcTimestampToLocalDay the funnel median already
+  // used (previous test above); this exercises the RANGE FILTER path, not the median.
+  test('an undated output logged late in the local day is counted when the report range is that LOCAL day, not the UTC day', async () => {
+    assert.equal(process.env.TZ, 'Asia/Jerusalem', 'this test must run under TZ=Asia/Jerusalem to be meaningful');
+
+    const { DB, Reports } = await freshApp();
+    DB.run("INSERT INTO people (name, type) VALUES ('PI Two','PI')");
+    DB.run("INSERT INTO projects (title, code, status, pi_id) VALUES ('Range Project','FP-2','Active',1)");
+    const pid = DB.row("SELECT id FROM projects WHERE code='FP-2'").id;
+
+    // 2026-06-10 22:30:00 UTC is 2026-06-11 01:30 local (Asia/Jerusalem, UTC+3) — LOCAL day is
+    // 2026-06-11, UTC day is 2026-06-10. SQL's `date(created_at)` would file it under 2026-06-10.
+    DB.run("INSERT INTO project_outputs (project_id, type, title, date, created_at) VALUES (?, 'dataset', 'Late Output', '', '2026-06-10 22:30:00')", [pid]);
+
+    const inLocalDay = Reports.computeFunnelRows('2026-06-11', '2026-06-11');
+    const outputStageIn = inLocalDay.stages.find((s) => s.key === 'output');
+    assert.equal(outputStageIn.count, 1, 'a report range of the LOCAL day the output actually landed on must count it — the old SQL-side UTC fallback would have filtered it out');
+
+    const inUtcDayOnly = Reports.computeFunnelRows('2026-06-10', '2026-06-10');
+    const outputStageOut = inUtcDayOnly.stages.find((s) => s.key === 'output');
+    assert.equal(outputStageOut.count, 0, 'a report range of the UTC day (not the local day the output landed on) must NOT count it');
+  });
 });
