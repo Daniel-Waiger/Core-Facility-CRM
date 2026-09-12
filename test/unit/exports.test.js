@@ -190,6 +190,88 @@ describe('exports (#7): facility-wide XLSX carries a Notes sheet, appended last'
   });
 });
 
+describe('PDF font (G3): a Hebrew name is bidi-reversed for jsPDF, and the multi-script font is registered lazily', () => {
+  test('_pdfBidiReverse reverses a Hebrew run into visual order but leaves an embedded digit run and a pure-Latin string untouched', async () => {
+    const app = await freshApp();
+    const { Exports } = app;
+
+    // "שלום 123 עולם" (Shalom 123 Olam) — two Hebrew words around an embedded number, exactly the
+    // "embedded digits/Latin runs stay in order" case the helper must handle, not just a bare
+    // full-string reversal (which would also flip the digits to "321").
+    const input = 'שלום 123 עולם';
+    const out = Exports._pdfBidiReverse(input);
+    assert.ok(out.includes('123'), `an embedded digit run must stay in reading order, got: "${out}"`);
+    assert.ok(!out.includes('321'), `an embedded digit run must not come out reversed, got: "${out}"`);
+    // Each Hebrew word's own character order must be flipped (logical -> visual order) — check
+    // the first word ("שלום") comes out with its own characters reversed, computed rather than
+    // hand-transcribed so a right-to-left string in the test source can't itself be miskeyed.
+    const firstWord = 'שלום';
+    const firstWordReversed = firstWord.split('').reverse().join('');
+    assert.ok(out.includes(firstWordReversed), `a Hebrew run must have its own character order reversed, got: "${out}"`);
+
+    // A string with nothing to reorder (no RTL characters) must come back byte-for-byte identical
+    // — the helper must not touch Latin/digit-only strings at all.
+    const latinOnly = 'Extended CAR-T Time-Lapse Re-acquisition 2026';
+    assert.equal(Exports._pdfBidiReverse(latinOnly), latinOnly, 'a pure-Latin/digit string must be returned unchanged');
+  });
+
+  test('_pdfBidiReverse only reverses the embedded Hebrew run in an English sentence, leaving the labels and their order untouched', () => {
+    // Regression case: exportPdf's own summary line is exactly this shape —
+    // "Principal Investigator: <Hebrew name>   |   Funding: —   |   Modality: —". A first pass at
+    // this helper reversed the WHOLE line whenever it contained any RTL character at all, which
+    // moved "Principal Investigator:" to the far end of the line — confirmed by actually rendering
+    // a PDF with this line and reading the page image, not by inspecting the string alone.
+    const app = loadApp(['consts', 'db', 'ui', 'views', 'reports', 'exports']);
+    const Exports = app.Exports;
+    const piName = 'שרה כהן'; // שרה כהן
+    const line = `Principal Investigator: ${piName}   |   Funding: —   |   Modality: —`;
+    const out = Exports._pdfBidiReverse(line);
+
+    assert.ok(out.startsWith('Principal Investigator: '), `the English label must stay first and un-reversed, got: "${out}"`);
+    assert.ok(out.includes('   |   Funding: '), 'the surrounding structure/order must be untouched');
+    assert.ok(out.includes('   |   Modality: '), 'the surrounding structure/order must be untouched');
+    // The embedded Hebrew run itself must have its own character order reversed.
+    const nameReversed = piName.split('').reverse().join('');
+    assert.ok(out.includes(nameReversed), `the embedded Hebrew name itself must still be reversed into visual order, got: "${out}"`);
+  });
+
+  test('exportPdf registers the custom font on the jsPDF document once the (stubbed) font fetch resolves', async () => {
+    const app = await freshApp();
+    const { Exports } = app;
+
+    const fakeFontBytes = new Uint8Array([0x00, 0x01, 0x00, 0x00]).buffer; // content is irrelevant here
+    globalThis.fetch = async (url) => {
+      assert.match(url, /libs\/fonts\/OpenSans-Regular\.ttf$/, 'the font must be fetched from libs/fonts/, lazily, not bundled inline');
+      return { ok: true, arrayBuffer: async () => fakeFontBytes };
+    };
+    const calls = [];
+    const stubPdf = {
+      addFileToVFS: (...args) => calls.push(['addFileToVFS', ...args]),
+      addFont: (...args) => calls.push(['addFont', ...args]),
+    };
+
+    await Exports._preparePdfFont(stubPdf);
+
+    assert.equal(stubPdf.__pdfMultiFont, true, 'a resolved fetch must flag the document as font-loaded');
+    assert.ok(calls.some((c) => c[0] === 'addFileToVFS'), 'addFileToVFS must be called to register the font bytes');
+    assert.ok(calls.some((c) => c[0] === 'addFont'), 'addFont must be called to make the font selectable by name');
+  });
+
+  test('a font fetch that fails (offline before first use) falls back to Helvetica and toasts once, without throwing', async () => {
+    const app = await freshApp();
+    const { Exports, UI } = app;
+
+    globalThis.fetch = async () => { throw new Error('network unavailable'); };
+    let toastMsg = null;
+    UI.toast = (msg) => { toastMsg = msg; };
+    const stubPdf = { addFileToVFS: () => {}, addFont: () => {} };
+
+    await assert.doesNotReject(Exports._preparePdfFont(stubPdf));
+    assert.equal(stubPdf.__pdfMultiFont, false, 'a failed fetch must explicitly flag the document as NOT font-loaded');
+    assert.ok(toastMsg, 'a failed fetch must surface a toast rather than failing silently');
+  });
+});
+
 // A tiny stand-in for the `docx` UMD global (Document/Packer/Paragraph/TextRun/HeadingLevel/...) —
 // just enough for exportDocx to run to completion without throwing. Paragraph is reassigned per
 // test (see above) to capture the text passed to it; everything else only needs to exist.

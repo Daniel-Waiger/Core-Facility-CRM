@@ -450,6 +450,24 @@
         const target = Math.max(0, Math.min(defaultTop, isFinite(earliestTop) ? earliestTop : defaultTop));
         scrollEl.scrollTop = target;
       }
+      // Resource Timeline: a chip's box can be too narrow for its full "emoji + time + name" label
+      // (a short booking is only a few percent of a day column wide) — Views.calEvChipHtml already
+      // marked every such chip with data-tl-time as a fallback. Swap to that short label wherever
+      // the full one actually overflows its box; this runs synchronously right after the DOM is
+      // inserted, so nothing visibly flashes the overflowing state first.
+      document.querySelectorAll('.cal-tl-daycell .ev[data-tl-time]').forEach((el) => {
+        if (el.scrollWidth > el.clientWidth + 0.5) {
+          const t = el.getAttribute('data-tl-time');
+          el.textContent = '';
+          el.append('📅 ');
+          const span = document.createElement('span');
+          span.className = 'mono';
+          span.style.fontSize = '10px';
+          span.textContent = t;
+          el.appendChild(span);
+          el.classList.add('ev-compact');
+        }
+      });
     }
 
     if (name === 'reports') {
@@ -5224,7 +5242,7 @@
           <!-- Meetings Section -->
           <div class="card">
             <div class="row mb-8">
-              <span class="card-title grow">${ic('calendar')} Consultations &amp; Syncs Today (${mtgsToday.length})</span>
+              <span class="card-title grow">${ic('calendar')} Bookings Today (${mtgsToday.length})</span>
               <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log Booking</button>
             </div>
             <div class="card-body">

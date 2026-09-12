@@ -180,6 +180,159 @@
     return paras;
   }
 
+  /* ---------------- PDF font: Latin + Hebrew + Cyrillic + Greek in one file ----------------
+     jsPDF's built-in "helvetica" is metrics for the WinAnsi encoding only — a Hebrew, Cyrillic or
+     Greek character (a HUJI PI or lab name, say) renders as a blank box or garbled glyph, the same
+     root cause as the '→'/'✓' fix elsewhere in this file. Open Sans Regular covers Latin, the full
+     Hebrew block, Cyrillic and Greek in one ~144KB TTF — one embed, not a per-script font switch —
+     shipped at libs/fonts/OpenSans-Regular.ttf under the SIL Open Font License 1.1 (see
+     libs/fonts/OpenSans-OFL.txt). It does not cover Arabic; PDF_RTL_RE below still recognizes the
+     Arabic block for the bidi reversal (a trivial addition — see PDF_RTL_RE) but an Arabic string
+     drawn with this font still shows the wrong glyphs, same as before.
+
+     Only the Regular weight is shipped, so a bold/italic run that contains a non-Latin1 character
+     is drawn at normal weight in the fallback font rather than not at all — a readable name matters
+     more than a bold one this file can't draw for an unsupported script anyway.
+
+     Loaded lazily: fetched only when a PDF is actually exported (never on app load), and cached in
+     memory for the rest of the session so a second export doesn't re-fetch it. A failed fetch
+     (offline before the first PDF export) falls back to Helvetica for every string and surfaces a
+     toast rather than throwing — the export still completes, just without non-Latin glyphs. */
+  const PDF_FONT_FILE_NAME = 'OpenSans-Regular.ttf';
+  const PDF_FONT_URL = 'libs/fonts/' + PDF_FONT_FILE_NAME;
+  const PDF_FONT_NAME = 'OpenSansMulti';
+  let pdfFontB64Promise = null;
+
+  function loadPdfFontBase64() {
+    if (!pdfFontB64Promise) {
+      pdfFontB64Promise = global.fetch(PDF_FONT_URL)
+        .then((res) => {
+          if (!res || !res.ok) throw new Error('HTTP ' + (res && res.status));
+          return res.arrayBuffer();
+        })
+        .then((buf) => {
+          // btoa needs a binary string; built in chunks so ~150KB of bytes doesn't blow the call
+          // stack through String.fromCharCode.apply's argument limit.
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          const CHUNK = 0x8000;
+          for (let i = 0; i < bytes.length; i += CHUNK) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+          }
+          return global.btoa(binary);
+        })
+        .catch((err) => {
+          pdfFontB64Promise = null; // don't cache a failure — a later export (maybe back online) retries
+          throw err;
+        });
+    }
+    return pdfFontB64Promise;
+  }
+
+  // Registers the font on ONE jsPDF document instance — addFileToVFS/addFont are per-document in
+  // jsPDF, so this runs once per exportPdf() call, not once per session.
+  function registerPdfFontOnDoc(pdf, b64) {
+    pdf.addFileToVFS(PDF_FONT_FILE_NAME, b64);
+    pdf.addFont(PDF_FONT_FILE_NAME, PDF_FONT_NAME, 'normal');
+  }
+
+  // Resolves the font (fetching/caching it the first time), registers it on this document, and
+  // flags success/failure on the document itself (pdf.__pdfMultiFont) — read by pdfText/
+  // pdfSplitTextToSize below — rather than in module state, so two exports in flight can never
+  // stomp on each other's "is it loaded yet" flag. Never rejects: a failure still lets the export
+  // proceed (Helvetica-only) after one toast.
+  function preparePdfFont(pdf) {
+    return loadPdfFontBase64().then((b64) => {
+      registerPdfFontOnDoc(pdf, b64);
+      pdf.__pdfMultiFont = true;
+    }).catch(() => {
+      pdf.__pdfMultiFont = false;
+      UI.toast('Could not load the PDF’s Hebrew/Cyrillic/Greek font (offline?) — non-Latin names may not display correctly in this export.', 'error');
+    });
+  }
+
+  // Hebrew + Arabic (+ their presentation-form blocks) — anything jsPDF's built-in Helvetica
+  // (WinAnsi) cannot draw AND that reads right-to-left, so it also needs the run reversal below.
+  const PDF_RTL_RE = /[\u0591-\u07FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  // Everything outside Latin-1 (which Helvetica/WinAnsi covers) — Cyrillic and Greek included —
+  // triggers the fallback font even when it doesn't also need bidi reversal.
+  function pdfNeedsCustomFont(s) {
+    for (let i = 0; i < s.length; i++) { if (s.charCodeAt(i) > 0x00ff) return true; }
+    return false;
+  }
+
+  // Minimal bidi run-reversal — NOT a full Unicode Bidi Algorithm implementation, just enough for
+  // the strings this app actually draws (a name, a title, a label, and English sentences that
+  // embed one): jsPDF always draws a string strictly left-to-right character-by-character, so a
+  // Hebrew/Arabic run typed in logical (reading) order comes out backwards unless reordered into
+  // visual order first — but the correct reordering depends on which script the STRING as a whole
+  // reads as, same as the real Unicode Bidi Algorithm's own base-direction rule (its first-strong-
+  // character heuristic, simplified here to one scan):
+  //
+  //  - A string that opens with a Latin letter is an LTR sentence with an RTL run embedded in it —
+  //    "Principal Investigator: <a Hebrew name>   |   Funding: —" is exactly this shape. Only the
+  //    embedded run itself needs reversing (in place); the English labels and their order must not
+  //    move, or the labels themselves come out scrambled (confirmed by rendering this exact case:
+  //    reversing the WHOLE line moved "Principal Investigator:" to the end of it).
+  //  - A string that opens with an RTL letter (a lab name given entirely in Hebrew, say) reads as
+  //    an RTL paragraph: the whole string reverses, including which of two Hebrew words ends up
+  //    drawn further left — reversing only the embedded run's own characters would leave the WORDS
+  //    in reading order instead of visual order. Any embedded digit/Latin run (a number, a Western
+  //    name) still needs its own internal order restored after that whole-string reversal.
+  //
+  // A single interior space is allowed inside an RTL run (so "שרה כהן", a first+last name, reverses
+  // as one two-word unit) without extending the run across a genuinely non-RTL boundary.
+  const PDF_RTL_RUN_RE = /[\u0591-\u07FF](?:[\u0591-\u07FF ]*[\u0591-\u07FF])?/g;
+  const PDF_LTR_RUN_RE = /[0-9A-Za-z .,\-/@:_'"()]+/g;
+  function pdfBaseIsRtl(s) {
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (/[A-Za-z]/.test(c)) return false;
+      if (PDF_RTL_RE.test(c)) return true;
+    }
+    return false; // no strong (directional) character found — digits/punctuation only
+  }
+  function pdfBidiReverse(s) {
+    if (!PDF_RTL_RE.test(s)) return s;
+    if (pdfBaseIsRtl(s)) {
+      const reversed = s.split('').reverse().join('');
+      return reversed.replace(PDF_LTR_RUN_RE, (run) => run.split('').reverse().join(''));
+    }
+    return s.replace(PDF_RTL_RUN_RE, (run) => run.split('').reverse().join(''));
+  }
+
+  // Runs fn() with the doc's font temporarily switched to the multi-script font when `text` needs
+  // it (see pdfNeedsCustomFont) and the font actually loaded, restoring the caller's exact
+  // font+style afterward — so a heading's bold Helvetica, say, is never left clobbered for whatever
+  // text() call comes next. No-ops when the font isn't needed or isn't loaded.
+  function withPdfFont(pdf, text, fn) {
+    const str = String(text == null ? '' : text);
+    if (!pdf.__pdfMultiFont || !pdfNeedsCustomFont(str)) return fn();
+    const prev = pdf.getFont();
+    pdf.setFont(PDF_FONT_NAME, 'normal');
+    const result = fn();
+    pdf.setFont(prev.fontName, prev.fontStyle);
+    return result;
+  }
+
+  // The one helper every text-drawing call in the PDF path goes through: reverses RTL runs into
+  // visual order, and switches to the multi-script font for the call when the text needs it.
+  function pdfText(pdf, text, x, y, opts) {
+    const str = String(text == null ? '' : text);
+    const display = pdfBidiReverse(str);
+    return withPdfFont(pdf, str, () => pdf.text(display, x, y, opts));
+  }
+
+  // Same idea for splitTextToSize, which measures wrap width with whatever font is currently set —
+  // switch to the multi-script font first when the text needs it so line breaks land in the same
+  // place they would if the font were set permanently. Bidi reversal is applied per returned line
+  // by the caller (via pdfText), not here, since reversing before wrapping would wrap on the wrong
+  // (visual, not logical) character boundaries.
+  function pdfSplitTextToSize(pdf, text, maxWidth) {
+    const str = String(text == null ? '' : text);
+    return withPdfFont(pdf, str, () => pdf.splitTextToSize(str, maxWidth));
+  }
+
   // Render note HTML into a jsPDF doc. `cur` = { get y / set y, checkPage } so page-break
   // bookkeeping stays in sync with the caller's cursor. Returns the final y.
   function htmlToPdf(pdf, html, x, width, cur) {
@@ -197,7 +350,7 @@
         if (line === '') return;
         checkPage(6);
         setStyle(lineStyle || {});
-        pdf.text((bullet ? '• ' : '') + line, startX, cur.y);
+        pdfText(pdf, (bullet ? '• ' : '') + line, startX, cur.y);
         cur.y += 4.6;
         line = '';
       };
@@ -214,7 +367,8 @@
           if (!word) return;
           setStyle(r.style);
           const test = line + word;
-          if (pdf.getTextWidth((bullet ? '• ' : '') + test) > avail && line !== '') {
+          const testWidth = withPdfFont(pdf, test, () => pdf.getTextWidth((bullet ? '• ' : '') + test));
+          if (testWidth > avail && line !== '') {
             flush();
             bullet = false;               // wrapped continuation lines are not re-bulleted
             line = word.replace(/^\s+/, '');
@@ -513,6 +667,9 @@
   }
 
   /* ---------------- Multi-Page PDF Export ---------------- */
+  // The font is fetched lazily (only when a PDF is actually exported), so building the document
+  // waits on that one async step; nothing else here needs to be async, and the dispatcher in
+  // app.js does not await this call (fire-and-forget, same as every other export action).
   function exportPdf(id) {
     const d = loadProject(id);
     if (!d) { UI.toast('Project not found', 'error'); return; }
@@ -520,6 +677,10 @@
     if (!jsPDF) { UI.toast('jsPDF library not loaded', 'error'); return; }
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    return preparePdfFont(pdf).then(() => buildPdfBody(pdf, d));
+  }
+
+  function buildPdfBody(pdf, d) {
     const pageHeight = 280;
     const margin = 14;
     let y = 20;
@@ -531,7 +692,7 @@
         // Header on extra pages
         pdf.setFontSize(8);
         pdf.setTextColor(140, 150, 165);
-        pdf.text(`Core Facility Tracker • ${d.p.code} • ${d.p.title}`, margin, 10);
+        pdfText(pdf, `Core Facility Tracker • ${d.p.code} • ${d.p.title}`, margin, 10);
         pdf.line(margin, 12, 210 - margin, 12);
         pdf.setTextColor(20, 20, 20);
       }
@@ -543,7 +704,7 @@
       pdf.setFontSize(12);
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(79, 70, 229); // Primary indigo
-      pdf.text(text, margin, y);
+      pdfText(pdf, text, margin, y);
       y += 2;
       pdf.setDrawColor(226, 232, 240);
       pdf.line(margin, y, 210 - margin, y);
@@ -555,13 +716,13 @@
     // Title
     pdf.setFontSize(18);
     pdf.setFont('helvetica', 'bold');
-    pdf.text(d.p.title, margin, y);
+    pdfText(pdf, d.p.title, margin, y);
     y += 7;
 
     pdf.setFontSize(10);
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(100, 116, 139);
-    pdf.text(`Core Facility Project Report • Code: ${d.p.code} • Created: ${UI.fmtDate(d.p.created_at)}`, margin, y);
+    pdfText(pdf, `Core Facility Project Report • Code: ${d.p.code} • Created: ${UI.fmtDate(d.p.created_at)}`, margin, y);
     y += 8;
 
     // Summary Box
@@ -571,25 +732,25 @@
     y += 6;
     pdf.setFontSize(9);
     pdf.setTextColor(20, 20, 20);
-    pdf.text(`Status: ${d.p.status}   |   Priority: ${d.p.priority || 'Medium'}   |   Progress: ${d.prog.pct}% (${d.prog.done}/${d.prog.total} milestones done)`, margin + 4, y);
+    pdfText(pdf, `Status: ${d.p.status}   |   Priority: ${d.p.priority || 'Medium'}   |   Progress: ${d.prog.pct}% (${d.prog.done}/${d.prog.total} milestones done)`, margin + 4, y);
     y += 6;
-    pdf.text(`Principal Investigator: ${d.p.pi_name || '—'}   |   Funding: ${d.p.funding || '—'}   |   Modality: ${d.p.modality || '—'}`, margin + 4, y);
+    pdfText(pdf, `Principal Investigator: ${d.p.pi_name || '—'}   |   Funding: ${d.p.funding || '—'}   |   Modality: ${d.p.modality || '—'}`, margin + 4, y);
     y += 6;
     // R6: '→' (U+2192) is outside WinAnsi, the only encoding jsPDF's built-in Helvetica supports —
     // it silently renders as a blank/garbled glyph, unlike the DOCX path just above (a real
     // Word/LibreOffice font renders it fine, so that one keeps the arrow). ASCII "to" instead.
-    pdf.text(`Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} to ${UI.fmtDate(d.p.end_date)}`, margin + 4, y);
+    pdfText(pdf, `Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} to ${UI.fmtDate(d.p.end_date)}`, margin + 4, y);
     y += 6;
-    pdf.text(`Grant: ${grantLabelFor(d.p)}`, margin + 4, y);
+    pdfText(pdf, `Grant: ${grantLabelFor(d.p)}`, margin + 4, y);
     y += 12;
 
     if (d.p.notes) {
       addHeading('Project Notes');
       pdf.setFontSize(9);
-      const splitNotes = pdf.splitTextToSize(d.p.notes, 210 - (margin * 2));
+      const splitNotes = pdfSplitTextToSize(pdf, d.p.notes, 210 - (margin * 2));
       for (const line of splitNotes) {
         checkPage(5);
-        pdf.text(line, margin, y);
+        pdfText(pdf, line, margin, y);
         y += 5;
       }
     }
@@ -607,9 +768,9 @@
         // spells out "DONE" right after it, so the checkmark was pure decoration, not information.
         const statusPrefix = `[${UI.msStatusLabel(m.status).toUpperCase()}]`;
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`${statusPrefix} ${m.name}`, margin, y);
+        pdfText(pdf, `${statusPrefix} ${m.name}`, margin, y);
         pdf.setFont('helvetica', 'normal');
-        pdf.text(`Due: ${UI.fmtDate(m.due_date)}`, 160, y);
+        pdfText(pdf, `Due: ${UI.fmtDate(m.due_date)}`, 160, y);
         y += 5;
         if (m.owners || m.instruments || m.note) {
           const detail = [
@@ -619,7 +780,7 @@
           ].filter(Boolean).join(' • ');
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(detail, margin + 4, y);
+          pdfText(pdf, detail, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 5;
@@ -627,7 +788,7 @@
       });
     } else {
       pdf.setFontSize(9);
-      pdf.text('No milestones recorded.', margin, y);
+      pdfText(pdf, 'No milestones recorded.', margin, y);
       y += 6;
     }
 
@@ -638,12 +799,12 @@
       d.ppl.forEach((pe) => {
         checkPage(6);
         const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        pdf.text(`• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
+        pdfText(pdf, `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
         y += 5;
       });
     } else {
       pdf.setFontSize(9);
-      pdf.text('No team members assigned.', margin, y);
+      pdfText(pdf, 'No team members assigned.', margin, y);
       y += 6;
     }
 
@@ -653,12 +814,12 @@
       pdf.setFontSize(9);
       d.inst.forEach((i) => {
         checkPage(6);
-        pdf.text(`• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}`, margin, y);
+        pdfText(pdf, `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}`, margin, y);
         y += 5;
       });
     } else {
       pdf.setFontSize(9);
-      pdf.text('No instruments assigned.', margin, y);
+      pdfText(pdf, 'No instruments assigned.', margin, y);
       y += 6;
     }
 
@@ -671,13 +832,13 @@
         pdf.setFont('helvetica', 'bold');
         const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
         const catStr = m.category ? ` [${m.category}]` : '';
-        pdf.text(`${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, margin, y);
+        pdfText(pdf, `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (m.grant_id) {
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(`Grant: ${grantLabelFor(m)}`, margin + 4, y);
+          pdfText(pdf, `Grant: ${grantLabelFor(m)}`, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 4;
@@ -685,7 +846,7 @@
         if (m.attendees) {
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(`Attendees: ${m.attendees}`, margin + 4, y);
+          pdfText(pdf, `Attendees: ${m.attendees}`, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 4;
@@ -699,7 +860,7 @@
         if (m.actions) {
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
-          pdf.text(`Actions: ${m.actions}`, margin + 4, y);
+          pdfText(pdf, `Actions: ${m.actions}`, margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
@@ -708,14 +869,14 @@
             checkPage(5);
             pdf.setFontSize(8);
             pdf.setTextColor(100, 116, 139);
-            pdf.text(`Tier: ${DB.tierLabel(m.tier_id)}`, margin + 4, y);
+            pdfText(pdf, `Tier: ${DB.tierLabel(m.tier_id)}`, margin + 4, y);
             pdf.setTextColor(20, 20, 20);
             pdf.setFontSize(9);
             y += 4;
           }
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
-          pdf.text(`Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, margin + 4, y);
+          pdfText(pdf, `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
@@ -730,7 +891,7 @@
       d.entries.forEach((e) => {
         checkPage(14);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`${UI.fmtDate(e.date)}: ${e.description}${bookingStatusSuffix(e)}`, margin, y);
+        pdfText(pdf, `${UI.fmtDate(e.date)}: ${e.description}${bookingStatusSuffix(e)}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         const bits = [];
@@ -740,14 +901,14 @@
         if (bits.length) {
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(bits.join('   |   '), margin + 4, y);
+          pdfText(pdf, bits.join('   |   '), margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 4;
         }
         checkPage(6);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, margin + 4, y);
+        pdfText(pdf, `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, margin + 4, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         y += 2;
@@ -765,14 +926,14 @@
         // ', logged' because prose has no header legend to carry a '*'.
         const when = o.date ? ' (' + UI.fmtDate(o.date) + ')'
           : (o.eff_date ? ' (' + UI.fmtDate(o.eff_date) + ', logged)' : '');
-        pdf.text(`[${o.type.toUpperCase()}] ${o.title}${when}`, margin, y);
+        pdfText(pdf, `[${o.type.toUpperCase()}] ${o.title}${when}`, margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (o.reference || o.note) {
           const detail = [o.reference, o.note].filter(Boolean).join(' — ');
           pdf.setFontSize(8);
           pdf.setTextColor(100, 116, 139);
-          pdf.text(detail, margin + 4, y);
+          pdfText(pdf, detail, margin + 4, y);
           pdf.setTextColor(20, 20, 20);
           pdf.setFontSize(9);
           y += 5;
@@ -786,7 +947,7 @@
       pdf.setFontSize(9);
       d.kv.forEach((k) => {
         checkPage(6);
-        pdf.text(`• ${k.key}: ${k.value}`, margin, y);
+        pdfText(pdf, `• ${k.key}: ${k.value}`, margin, y);
         y += 5;
       });
     }
@@ -797,7 +958,7 @@
       pdf.setPage(i);
       pdf.setFontSize(8);
       pdf.setTextColor(140, 150, 165);
-      pdf.text(`Page ${i} of ${totalPages}`, 210 / 2, 290, { align: 'center' });
+      pdfText(pdf, `Page ${i} of ${totalPages}`, 210 / 2, 290, { align: 'center' });
     }
 
     pdf.save(`${d.p.code}_${d.p.title.replace(/[^a-z0-9_-]/gi, '_')}.pdf`);
@@ -1308,6 +1469,11 @@
     UI.toast('Exported custom report to XLSX');
   }
 
-  global.Exports = { exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx };
+  global.Exports = {
+    exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx,
+    // Exposed for test/unit/exports.test.js only (the RTL bidi helper and the lazy font loader) —
+    // no other file in the app reads these directly.
+    _pdfBidiReverse: pdfBidiReverse, _preparePdfFont: preparePdfFont,
+  };
 
 })(window);
