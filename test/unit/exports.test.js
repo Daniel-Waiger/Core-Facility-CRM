@@ -158,6 +158,38 @@ describe('exports (R4): DOCX/PDF money follows the same waived-cancellation rule
   });
 });
 
+describe('exports (#7): facility-wide XLSX carries a Notes sheet, appended last', () => {
+  test('Notes is present and is the LAST sheet, so appending it can never renumber/shift a data sheet a row-builder elsewhere indexes positionally', async () => {
+    const app = await freshApp();
+    XLSX = app.XLSX;
+    const { DB, Exports } = app;
+    seedFixture(DB);
+
+    const built = Exports.buildAllXlsxBlob();
+    assert.ok(built, 'a seeded DB produces a workbook');
+    const wbAll = app.captured[app.captured.length - 1];
+
+    assert.ok(wbAll.SheetNames.includes('Notes'), 'workbook has a Notes sheet');
+    assert.equal(wbAll.SheetNames[wbAll.SheetNames.length - 1], 'Notes', 'Notes must be the LAST sheet');
+  });
+
+  test('Notes discloses legacy-pricing blanks, waived-row status, and the "(Retired)" suffix — one sentence each', async () => {
+    const app = await freshApp();
+    XLSX = app.XLSX;
+    const { DB, Exports } = app;
+    seedFixture(DB);
+
+    Exports.buildAllXlsxBlob();
+    const wbAll = app.captured[app.captured.length - 1];
+    const text = sheetRows(wbAll, 'Notes').map((r) => (r[0] || '')).join('\n');
+
+    assert.match(text, /legacy/i, 'discloses that a blank/"—" tier means legacy (pre-tier) pricing');
+    assert.match(text, /overhead/i, 'names the overhead percentage specifically, not just "pricing" in general');
+    assert.match(text, /waived/i, 'discloses what a waived cancellation means for the money columns');
+    assert.match(text, /\(Retired\)/, 'discloses the "(Retired)" suffix convention used throughout the sheet');
+  });
+});
+
 // A tiny stand-in for the `docx` UMD global (Document/Packer/Paragraph/TextRun/HeadingLevel/...) —
 // just enough for exportDocx to run to completion without throwing. Paragraph is reassigned per
 // test (see above) to capture the text passed to it; everything else only needs to exist.

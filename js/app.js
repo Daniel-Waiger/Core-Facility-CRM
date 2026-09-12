@@ -263,7 +263,7 @@
         </aside>
         <div class="main">
           <div class="topbar">
-            <span class="title" id="page-title">Dashboard</span>
+            <span class="title" id="page-title" tabindex="-1">Dashboard</span>
             <div class="grow"></div>
             <span class="saved-dot" id="saved-state" data-tooltip="Your changes save automatically to this browser"><span class="dot"></span><span class="txt">Saved</span></span>
           </div>
@@ -328,6 +328,24 @@
     document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('active', n.dataset.nav === name));
     document.getElementById('page-title').innerHTML = TITLES[name] || 'Dashboard';
     renderView();
+    moveFocusToNewScreen();
+  }
+
+  // After a genuine route change (never after a same-screen data refresh — those call
+  // refresh()/renderView() directly and never reach applyRoute), move focus to the new screen's
+  // own heading. Without this, a keyboard or screen-reader user who navigates while focused on a
+  // field with no same-id counterpart on the destination screen (renderView's own focus-restore
+  // above only reattaches focus when that id still exists) is left on document.body — the DOM's
+  // default landing spot once a focused element is removed from the page — with no indication
+  // anything happened. Two cases deliberately skip the move: an open modal (its own focus should
+  // never be yanked away by a background route change) and a focus target renderView DID
+  // successfully restore inside the freshly rendered view (nothing to fix in that case).
+  function moveFocusToNewScreen() {
+    if (document.querySelector('.modal-dim')) return;
+    const view = document.getElementById('view');
+    if (document.activeElement && view && view.contains(document.activeElement)) return;
+    const heading = document.getElementById('page-title');
+    if (heading) heading.focus({ preventScroll: true });
   }
 
   function onHashChange() {
@@ -1990,10 +2008,18 @@
     const rate = Number(rateVal) || 0;
     if (rate < 0) { UI.toast('Rate cannot be negative', 'error'); return; }
 
+    // The denormalized meetings.attendees display string (CLAUDE.md: "keep both in sync on every
+    // save") is only ever built from a name, so only a rename can leave it stale — read the name
+    // as stored BEFORE this write to tell a real rename apart from an email/note/rate-only edit.
+    const before = DB.row('SELECT name FROM people WHERE id=?', [id]);
     DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
     // people.name may have just changed — meetings.attendees is a denormalized copy of it, so
     // every meeting this person is on must be recomputed from meeting_people or it goes stale.
-    DB.refreshAttendeesForPerson(id);
+    // Gated on an actual rename (not just called unconditionally): a person with a long booking
+    // history costs one query per meeting they've ever attended, which is real work for zero
+    // benefit on an email/note/rate-only edit, where the attendees string could not have gone
+    // stale in the first place.
+    if (before && before.name !== name) DB.refreshAttendeesForPerson(id);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Person updated');
     refresh();
@@ -4312,7 +4338,26 @@
   // independent DB.setCategoryPolicy call — a facility-SETTINGS write, same "applies to NEW
   // bookings only" framing as the card's own copy; no existing meetings row is ever touched here.
   function saveCategoryPolicies() {
-    document.querySelectorAll('.cat-policy-row').forEach((rowEl) => {
+    const rowEls = [...document.querySelectorAll('.cat-policy-row')];
+    // Validate every row BEFORE writing any of them: DB.setCategoryPolicy clamps a negative to 0
+    // as a defensive floor (a belt-and-suspenders guard against some other future caller), but a
+    // value the admin actually typed here — negative, or over 100% — is a mistake that should be
+    // rejected with a toast naming the category, not silently clamped and saved without a word.
+    // A whole-form validation (rather than skipping just the bad row) avoids half the categories
+    // saving and one silently not, which the admin would have no way to notice.
+    for (const rowEl of rowEls) {
+      const category = rowEl.dataset.category;
+      if (!category) continue;
+      const pctEl = rowEl.querySelector('.cat-staff-pct');
+      if (!pctEl) continue;
+      const raw = pctEl.value.trim();
+      const pct = Number(raw);
+      if (raw !== '' && (!Number.isFinite(pct) || pct < 0 || pct > 100)) {
+        UI.toast(`"${category}" staff % must be between 0 and 100.`, 'error');
+        return;
+      }
+    }
+    rowEls.forEach((rowEl) => {
       const category = rowEl.dataset.category;
       if (!category) return;
       const pctEl = rowEl.querySelector('.cat-staff-pct');
@@ -4646,7 +4691,7 @@
   function recomputeServiceEntryTotal(m, prefix) {
     const qty = Number((m.querySelector('#' + prefix + '-qty') || {}).value) || 0;
     const rate = Number((m.querySelector('#' + prefix + '-rate') || {}).value) || 0;
-    const total = qty * rate;
+    const total = UI.round2(qty * rate);
     const el = m.querySelector('#' + prefix + '-total');
     if (el) el.textContent = fmtMoney(total);
     return total;
@@ -4719,7 +4764,7 @@
     const unit = m.querySelector('#se-unit').value || 'hour';
     const rate = Number(m.querySelector('#se-rate').value) || 0;
     if (rejectNegative(qty, 'Quantity') || rejectNegative(rate, 'Rate')) return;
-    const total = qty * rate;
+    const total = UI.round2(qty * rate);
 
     DB.run(`INSERT INTO service_entries (project_id, grant_id, person_id, instrument_id, date, description, qty, unit, rate, total_cost)
             VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -4786,7 +4831,7 @@
     const unit = m.querySelector('#see-unit').value || 'hour';
     const rate = Number(m.querySelector('#see-rate').value) || 0;
     if (rejectNegative(qty, 'Quantity') || rejectNegative(rate, 'Rate')) return;
-    const total = qty * rate;
+    const total = UI.round2(qty * rate);
 
     DB.run(`UPDATE service_entries SET project_id=?, grant_id=?, person_id=?, instrument_id=?, date=?, description=?, qty=?, unit=?, rate=?, total_cost=? WHERE id=?`,
       [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total, id]);

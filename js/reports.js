@@ -1311,7 +1311,7 @@
         ccol('name', 'Instrument', 'text', (r) => UI.retiredName(r.name, r.retired)),
         ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
         ccol('hours', 'Hours', 'hours', (r) => r.hours),
-        ccol('revenue', 'Revenue', 'money', (r) => r.revenue),
+        ccol('revenue', 'Line Charges', 'money', (r) => r.revenue),
         ccol('distinctUsers', 'Distinct Users', 'number', (r) => r.distinctUsers),
         ccol('newUsers', 'New Users', 'number', (r) => r.newUsers),
         ccol('projectsServed', 'Projects Served', 'number', (r) => r.projectsServed),
@@ -1595,7 +1595,7 @@
           <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">${g.supervisor ? 'Supervisor: ' + nameCell(g.supervisor.name, g.supervisor.retired) : 'Unassigned (no supervisor on file)'}</div>
           <div class="tbl-wrap">
             <table class="tbl">
-              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Revenue</th><th>Distinct Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
+              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Line Charges</th><th>Distinct Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
               <tbody>
                 ${g.rows.map((r) => `
                   <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1613,7 +1613,7 @@
             </table>
           </div>
         </div>`).join('')}
-      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Revenue follows the retained-charge rule used everywhere else. Omitted on purpose (need Tier 4 data this app doesn't have yet): trained-user pool trend and downtime share.</div>
+      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Line Charges follows the retained-charge rule used everywhere else. Omitted on purpose (need Tier 4 data this app doesn't have yet): trained-user pool trend and downtime share.</div>
     </div>
 
     <div class="card mb-16">

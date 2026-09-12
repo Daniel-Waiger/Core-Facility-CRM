@@ -134,7 +134,7 @@
       <h2 id="stewardship-card">Card 5 — Instrument stewardship scorecard</h2>
       <p>Where Card 1 answers "how busy is this instrument," this card answers the question a supervisor is actually asked: "why do we still have this instrument, and is it earning its keep?" It's grouped by <strong>supervising staff</strong> — the people set as an instrument's Supervising Staff on its own edit form — with one row per instrument under each supervisor:</p>
       <ul>
-        <li><strong>Bookings, Hours, Revenue</strong> — the same figures as Card 1, for this instrument alone.</li>
+        <li><strong>Bookings, Hours, Line Charges</strong> — the same figures as Card 1, for this instrument alone.</li>
         <li><strong>Distinct Users</strong> — how many different people actually used the instrument in the range.</li>
         <li><strong>New Users</strong> — how many of those people were using <em>this instrument</em> for the very first time ever, with that first-ever booking falling inside the range. The app checks the instrument's whole booking history to know this, not just the range you've selected, so a returning user from three years ago is never mislabeled "new."</li>
         <li><strong>Projects Served</strong> — how many distinct projects booked the instrument.</li>
@@ -142,7 +142,7 @@
         <li><strong>Consults</strong> — how many of its bookings were tagged Category = "consult" (see the Consults card below).</li>
       </ul>
       <figure class="shot">
-        <img src="../screenshots/65-stewardship-scorecard.png" alt="The Instrument Stewardship card grouped by supervisor, with columns for bookings, hours, revenue, distinct users, new users, projects served, facility-wide sessions and consults" loading="lazy"
+        <img src="../screenshots/65-stewardship-scorecard.png" alt="The Instrument Stewardship card grouped by supervisor, with columns for bookings, hours, line charges, distinct users, new users, projects served, facility-wide sessions and consults" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/65-stewardship-scorecard.png</div>
         <figcaption>Grouped by supervisor — David Kim's four instruments, Priya Anand's one, Tom Alvarez's two, each with the full row of figures.</figcaption>
@@ -294,7 +294,7 @@
         <p>It shows up in By Project (as itself or under "Facility-wide" if it has no project either) and in the Instrument/Staff cards as usual — but it's omitted from the By Lab/Group table, since there's no lab to group it under.</p>
       </details>
       <details class="quiz-q">
-        <summary>An instrument has two supervisors on file. On the Stewardship card, should you add its Hours and Revenue together where it appears under each of them, to get a combined total?</summary>
+        <summary>An instrument has two supervisors on file. On the Stewardship card, should you add its Hours and Line Charges together where it appears under each of them, to get a combined total?</summary>
         <p>No. It's the same instrument, the same bookings, repeated once per supervisor so each can see it — not two different instruments or two halves of one. Adding the two appearances together would double-count every booking on it.</p>
       </details>
       <details class="quiz-q">
@@ -303,7 +303,7 @@
       </details>
       <details class="quiz-q">
         <summary>You're building a Custom Report on the Stewardship entity and try to uncheck the Supervisor column. What happens, and why?</summary>
-        <p>You can't — it's checked and disabled. Stewardship repeats a shared instrument's identical row under every supervisor it has; without the Supervisor column, two of those rows would look like separate instruments, and someone could add their hours or revenue together and double-count the same bookings.</p>
+        <p>You can't — it's checked and disabled. Stewardship repeats a shared instrument's identical row under every supervisor it has; without the Supervisor column, two of those rows would look like separate instruments, and someone could add their hours or line charges together and double-count the same bookings.</p>
       </details>
     </section>
 

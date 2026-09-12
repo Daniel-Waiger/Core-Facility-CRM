@@ -998,6 +998,27 @@
     wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
 
+    // Final sheet: Notes — mirrors the Reports & Utilization export's own Notes sheet (a plain,
+    // one-column explanation) so the figures above can be read without this code open alongside
+    // them. Appended LAST rather than first: every sheet above is read positionally by row-builder
+    // logic other packages may be editing concurrently, and appending here can never shift an
+    // existing sheet's index or column layout.
+    const allNotes = [
+      ['FACILITY-WIDE EXPORT — NOTES'],
+      [''],
+      ['Legacy pricing ("Bookings & Costs" Overhead % column is blank)'],
+      ['A booking priced before any pricing tier existed, or never assigned one (Tier column shows "—"), was actually charged the facility-wide legacy overhead percentage in effect at the time, not a tier\'s own rate — that resolved percentage was never itself stored on the booking, so it cannot be reconstructed after the fact. Overhead % is left blank for that row rather than showing a misleading 0%.'],
+      [''],
+      ['Cancelled bookings and service entries'],
+      ['The Status column marks a cancellation as either "Cancelled (charged)" (the charge was retained) or "Cancelled (waived)" (the charge was dropped). A waived row\'s final money column (Charged Total on Bookings & Costs, Total Cost on Service Entries) is zeroed even though its stored Subtotal/Before Tax figures are not — so the columns can look inconsistent for that row on purpose: the money columns show what was actually billed, not what the booking would have cost if it had run.'],
+      [''],
+      ['"(Retired)" suffix'],
+      ['A retired person or instrument, or a discontinued instrument shown elsewhere as "Retired", is never deleted or renamed — deleting it would erase real history (who attended, which instrument ran a session). This export marks it with a trailing "(Retired)" wherever its name appears, so historical rows stay attributed correctly without pretending the person or instrument is still active.']
+    ];
+    const wsAllNotes = XLSX.utils.aoa_to_sheet(allNotes);
+    wsAllNotes['!cols'] = [{ wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, wsAllNotes, 'Notes');
+
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
   }
@@ -1134,7 +1155,7 @@
     // supervisor count). Fed from the exact same Reports.computeStewardshipRows the screen
     // renders from. A shared instrument repeats under every supervisor it's linked to — see the
     // Notes sheet for why that's intentional.
-    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Revenue', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
+    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Line Charges', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
     stewardship.groups.forEach((g) => {
       const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
       g.rows.forEach((r) => {
