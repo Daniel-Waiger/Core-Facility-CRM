@@ -215,7 +215,7 @@ describe('PDF font (G3): a Hebrew name is bidi-reversed for jsPDF, and the multi
     assert.equal(Exports._pdfBidiReverse(latinOnly), latinOnly, 'a pure-Latin/digit string must be returned unchanged');
   });
 
-  test('_pdfBidiReverse leaves a base-left-to-right line untouched, Hebrew run included, because jsPDF's own bidi engine reorders mixed lines', () => {
+  test('_pdfBidiReverse leaves a base-left-to-right line untouched, Hebrew run included, because the bundled jsPDF bidi engine reorders mixed lines', () => {
     // Regression case: exportPdf's own summary line is exactly this shape —
     // "Principal Investigator: <Hebrew name>   |   Funding: —   |   Modality: —". The bundled
     // jsPDF (libs/jspdf.umd.min.js, __bidiEngine__) already reorders a mixed line correctly, so a
