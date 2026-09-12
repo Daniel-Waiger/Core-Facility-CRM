@@ -810,8 +810,18 @@ textarea.input { resize: vertical; min-height: 74px; }
      booking sat next to it. The box now always matches its real geometric width; Views.calEvChipHtml
      instead renders three label tiers (.ev-label-full/-compact/-icon) and app.js's renderView picks
      the one that actually fits via `lbl-compact`/`lbl-icon` (see its comment) — only one tier is
-     shown at a time, below. */
-  position: absolute; font-size: 9.5px; line-height: 1.2;
+     shown at a time, below.
+     box-sizing is explicit here (not left to the global `* { box-sizing: border-box; }` reset)
+     because border-box alone does NOT stop this padding from setting a floor on the box's
+     rendered width: when a browser-computed width is smaller than the horizontal padding, the
+     box does not shrink its padding to fit — it renders at (at least) the padding's own width
+     instead, silently overriding a geometrically correct, narrower `width:%` from Views.js. Two
+     back-to-back 1-hour bookings just wide enough to need the compact/icon label tier hit exactly
+     this: their real slot is narrower than 4px+4px of padding, so both rendered at the padding
+     floor and visibly overlapped each other by a few px even though their `left`/`width` never
+     did. The base (full-label) tier keeps its padding, since a chip wide enough to show the full
+     label is in no danger of this; only the two tighter tiers below get less of it. */
+  position: absolute; font-size: 9.5px; line-height: 1.2; box-sizing: border-box;
   padding: 1px 4px; border-radius: 4px; background: var(--primary-soft); color: var(--primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; z-index: 1;
   box-shadow: 0 0 0 1px var(--surface);
@@ -820,12 +830,15 @@ textarea.input { resize: vertical; min-height: 74px; }
 .cal-tl-daycell .ev.done { opacity: 0.6; text-decoration: line-through; background: var(--surface-2); color: var(--text-muted); }
 /* Label tiers: only one shown at a time in the chip's normal (unwidened) state — full by
    default, compact/icon-only added by app.js's renderView once it measures the fuller tier
-   doesn't fit this chip's real box. */
+   doesn't fit this chip's real box. Padding shrinks with each narrower tier (see the box-sizing
+   comment above) so the padding floor itself never exceeds the chip's real geometric slot. */
 .cal-tl-daycell .ev .ev-label-compact, .cal-tl-daycell .ev .ev-label-icon { display: none; }
 .cal-tl-daycell .ev.lbl-compact .ev-label-full { display: none; }
 .cal-tl-daycell .ev.lbl-compact .ev-label-compact { display: inline; }
+.cal-tl-daycell .ev.lbl-compact { padding-left: 2px; padding-right: 2px; }
 .cal-tl-daycell .ev.lbl-icon .ev-label-compact { display: none; }
 .cal-tl-daycell .ev.lbl-icon .ev-label-icon { display: inline; }
+.cal-tl-daycell .ev.lbl-icon { padding-left: 1px; padding-right: 1px; }
 /* A compact/icon-only chip is still hard to read at its real width — expanding on hover/focus
    (mouse OR keyboard, via tabindex="0" on the chip) shows the full label again and grows the box
    just for that moment, so nothing stays permanently illegible. z-index lifts it above whatever

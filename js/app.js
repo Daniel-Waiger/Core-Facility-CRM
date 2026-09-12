@@ -42,7 +42,14 @@
       UI.setSavedState(readOnly ? 'readonly' : 'saved');
       if (readOnly) {
         showReadOnlyTabBanner();
-        UI.toast('This database is already open in another tab. This tab is read-only — changes here will not be saved.', 'error');
+        // `promoteFailed` means this tab was ALREADY read-only and just failed another attempt to
+        // catch up to the leader that closed — db.js already toasted that (once per failure
+        // streak, see its own `repeat` check). "This database is already open in another tab"
+        // would be actively wrong here: no other tab is holding it open, this one just hasn't
+        // finished switching over yet.
+        if (!opts || !opts.promoteFailed) {
+          UI.toast('This database is already open in another tab. This tab is read-only — changes here will not be saved.', 'error');
+        }
       } else {
         hideReadOnlyTabBanner();
         if (opts && opts.promoted) {

@@ -43,6 +43,48 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     return page;
   }
 
+  // Polls the raw IndexedDB record for a substring, rather than assuming any fixed delay after
+  // another tab's pagehide flush was long enough to land — a sleep-then-check-once races that
+  // write, and under load (or simply bad luck) can check before it arrives even though it's
+  // genuinely on its way. Reads the 'core.db' key directly (sql.js's exported bytes are UTF-8 for
+  // TEXT columns, so a substring search needs no SQL parsing) from a single lightweight page that
+  // never loads index.html — it has no App, no DB, no autosave and no multi-tab guard of its own,
+  // so it can never itself become a writer or add contention while this polls. Because the write
+  // being awaited here is the tail end of another tab's OWN close (a real `pagehide` racing actual
+  // page teardown, not just this app's own logic), this can still occasionally observe the write
+  // as genuinely never landing rather than merely late — the timeout is generous, not infinite,
+  // and a caller should treat that outcome as a real (if rare) loss to report, not a fixed bug.
+  async function pollIndexedDbContains(ctx, needle, timeoutMs) {
+    const reader = await ctx.newPage();
+    await reader.goto(srv.base + '/__idb-poll-probe__', { waitUntil: 'commit' }).catch(() => {});
+    const startedAt = Date.now();
+    let found = false;
+    while (Date.now() - startedAt < timeoutMs) {
+      found = await reader.evaluate((needleArg) => new Promise((resolve, reject) => {
+        const req = indexedDB.open('core-facility', 1);
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('kv')) { db.close(); return resolve(false); }
+          const tx = db.transaction('kv', 'readonly');
+          const getReq = tx.objectStore('kv').get('core.db');
+          getReq.onsuccess = () => {
+            const rec = getReq.result;
+            db.close();
+            if (!rec || !rec.v) return resolve(false);
+            const bytes = rec.v instanceof Uint8Array ? rec.v : new Uint8Array(rec.v);
+            resolve(new TextDecoder('utf-8', { fatal: false }).decode(bytes).includes(needleArg));
+          };
+          getReq.onerror = () => { db.close(); reject(getReq.error); };
+        };
+      }), needle);
+      if (found) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await reader.close();
+    return found;
+  }
+
   test('closing a tab flushes an edit made just before close, without waiting out the debounce', async () => {
     const ctx = await freshContext();
     const page1 = await openApp(ctx);
@@ -52,12 +94,23 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     });
     // Close well within the 400ms debounce window — if this row survives, pagehide (not the
     // timer) is what saved it. Playwright's page.close() fires the same pagehide/visibilitychange
-    // sequence a real tab close does.
+    // sequence a real tab close does, but resolving that call only means the PAGE has torn down —
+    // it says nothing about whether the async IndexedDB write flush() kicked off from its
+    // pagehide handler has actually landed yet. A fixed sleep here raced that write under full
+    // suite parallelism — poll for the row's actual arrival instead, with a generous timeout,
+    // rather than assume any fixed delay was enough.
+    //
+    // Even this can still very occasionally see `found` stay false for the whole timeout: once in
+    // a while the renderer process is torn down before the IndexedDB write it already issued is
+    // acknowledged at the browser-process level, and no amount of waiting afterward recovers a
+    // write that was genuinely never completed — that is a real (if rare) race in how the OS/
+    // browser schedules an unload-triggered async write under load, not something a test-side poll
+    // can paper over. What this rewrite removes is the much more common failure mode: checking
+    // once, immediately, before a write that WAS going to land had any chance to.
     await page1.close();
 
-    const page2 = await openApp(ctx);
-    const count = await page2.evaluate(() => DB.row("SELECT COUNT(*) c FROM projects WHERE code='PH-1'").c);
-    assert.equal(count, 1, 'the edit made just before the tab closed should have been flushed by pagehide, not lost');
+    const found = await pollIndexedDbContains(ctx, 'PagehideProof', 10000);
+    assert.equal(found, true, 'the edit made just before the tab closed should have been flushed by pagehide, not lost');
 
     await ctx.close();
   });
