@@ -805,9 +805,11 @@ textarea.input { resize: vertical; min-height: 74px; }
 .cal-tl-hour-slot:hover { background: var(--surface-2); }
 .cal-tl-daycell .ev {
   /* A short booking's proportional width (e.g. 2h of 24 = ~8%) can render under 15px on a
-     typical lane column — too narrow to read even the time. A 34px floor keeps a couple of
-     characters visible; it's still an approximation the chip's title tooltip resolves exactly. */
-  position: absolute; min-width: 34px; font-size: 9.5px; line-height: 1.2;
+     typical lane column — too narrow to read even the emoji+name label. A 54px floor is wide
+     enough for the short "📅 09:00" fallback label (see app.js's renderView, which swaps to it
+     whenever the full label overflows) to read in full; the chip's title tooltip always carries
+     the complete name regardless of which label is showing. */
+  position: absolute; min-width: 54px; font-size: 9.5px; line-height: 1.2;
   padding: 1px 4px; border-radius: 4px; background: var(--primary-soft); color: var(--primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; z-index: 1;
   box-shadow: 0 0 0 1px var(--surface);

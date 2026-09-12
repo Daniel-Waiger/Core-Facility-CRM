@@ -904,11 +904,22 @@
 
   // One event chip, shared by month cells (no styleAttr) and week event blocks (styleAttr carries
   // the absolute top/height positioning from calEventBlockLayout).
-  function calEvChipHtml(e, styleAttr) {
+  //
+  // opts.compactable marks a chip whose box can end up too narrow for its full label to read (the
+  // Resource Timeline's per-instrument lanes, where a short booking's width is a few percent of a
+  // day column) — see the Timeline call site. Rather than guess a width in pixels here (the actual
+  // column width is a grid `1fr` unknown until layout), the chip carries the start time it would
+  // fall back to in a `data-tl-time` attribute, and a post-render pass in app.js's renderView
+  // (after the DOM is inserted, so nothing flashes) swaps in that short label wherever the full one
+  // actually overflows its box (`scrollWidth > clientWidth`) — a measurement, not an estimate, so
+  // it holds at any column width. Untimed events have no time to fall back to, so they stay full.
+  function calEvChipHtml(e, styleAttr, opts) {
+    const compact = !!(opts && opts.compactable && e.start_time);
     return `
       <div class="ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}"
            style="${styleAttr || ''}"
            data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"
+           ${compact ? `data-tl-time="${esc(e.start_time)}"` : ''}
            title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}">
         ${e.kind === 'mt' ? '📅 ' : '🎯 '}${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
       </div>`;
@@ -1209,12 +1220,12 @@
           if (leftPct == null) {
             // Untimed booking (saved without a start_time) — still shown, as a full-width strip,
             // rather than silently vanishing from the lane.
-            return calEvChipHtml(e, 'position:absolute;left:2px;right:2px;top:2px;bottom:2px');
+            return calEvChipHtml(e, 'position:absolute;left:2px;right:2px;top:2px;bottom:2px', { compactable: true });
           }
           const endPct = calTimeToPx(e.end_time, CAL_TL_HOUR_PCT);
           const MIN_W = 4;
           const widthPct = (endPct != null && endPct > leftPct) ? Math.max(MIN_W, endPct - leftPct) : MIN_W;
-          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px`);
+          return calEvChipHtml(e, `position:absolute;left:${leftPct}%;width:${widthPct}%;top:2px;bottom:2px`, { compactable: true });
         }).join('');
         // A retired instrument's lane still shows its history, but an empty slot in it should not
         // pre-lock a brand-new booking to a resource that's no longer available for new work —
