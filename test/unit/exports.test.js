@@ -341,6 +341,23 @@ describe('PDF font (G3): a Hebrew name is bidi-reversed for jsPDF, and the multi
     assert.ok(toastMsg, 'a failed fetch must surface a toast rather than failing silently');
   });
 });
+describe('PDF base direction: accented Latin letters are strong LTR, math signs are not', () => {
+  test('a line whose first letter is à, ö, Ø, ß, æ or ñ is base-LTR even when Hebrew follows', () => {
+    const app = loadApp(['consts', 'db', 'ui', 'views', 'reports', 'exports']);
+    for (const lead of ['à', 'ö', 'Ø', 'ß', 'æ', 'ñ']) {
+      const line = `${lead} שלום עולם`;
+      assert.equal(app.Exports._pdfBidiReverse(line), line, `"${lead}" must count as a strong left-to-right letter`);
+    }
+  });
+  test('a line starting with × or ÷ followed by Hebrew is still base-RTL', () => {
+    const app = loadApp(['consts', 'db', 'ui', 'views', 'reports', 'exports']);
+    for (const lead of ['×', '÷']) {
+      const line = `${lead} שלום`;
+      assert.notEqual(app.Exports._pdfBidiReverse(line), line, `"${lead}" must not decide the base direction`);
+    }
+  });
+});
+
 
 // A tiny stand-in for the `docx` UMD global (Document/Packer/Paragraph/TextRun/HeadingLevel/...) —
 // just enough for exportDocx to run to completion without throwing. Paragraph is reassigned per

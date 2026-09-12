@@ -315,9 +315,10 @@
   // neutral punctuation, not strong LTR characters. Counting them as strong LTR made a line that is
   // otherwise all Hebrew/Arabic (e.g. "× שלום עולם") misclassify as base-LTR on nothing but a math
   // symbol, so pdfBaseIsRtl() never reversed it and the whole line drew in logical (backwards)
-  // order. Split the range around both so neither counts, and reach a strong-LTR verdict from the
-  // FIRST real letter that follows instead.
-  const PDF_STRONG_LTR_RE = /[A-Za-zÀ-Öø-ʯͰ-ϿЀ-ӿԀ-ԯḀ-ỿ]/;
+  // order. The range is split around exactly those two code points (À–Ö, Ø–ö, ø–ʯ) so every
+  // accented Latin letter between them — Ø, ß, à, é, ñ, ö and the rest — still counts as strong
+  // LTR, and the verdict comes from the FIRST real letter instead.
+  const PDF_STRONG_LTR_RE = /[A-Za-zÀ-ÖØ-öø-ʯͰ-ϿЀ-ӿԀ-ԯḀ-ỿ]/;
   function pdfBaseIsRtl(s) {
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
