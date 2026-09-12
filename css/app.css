@@ -151,6 +151,16 @@ body {
    than reserve column width it never uses — the full address is still one hover away. */
 .tbl td.tbl-email { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1px; }
 
+/* .tbl-email above truncates with an ellipsis and relies on its `title` attribute to reveal the
+   full address on :hover — fine on a mouse, but :hover never fires on a touch device, and there
+   is then no way at all to see anything past the ellipsis. So under a coarse pointer, let it wrap
+   instead of truncating — `anywhere` (not `break-word`, the file's usual rule) is deliberate here
+   specifically: an email address has no natural break point, and readability wins over one tidy
+   truncated line once :hover is off the table entirely. */
+@media (pointer: coarse) {
+  .tbl td.tbl-email { white-space: normal; overflow: visible; text-overflow: clip; max-width: none; overflow-wrap: anywhere; }
+}
+
 /* ---------- Sidebar Items ---------- */
 .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; border-bottom: 1px solid var(--border); }
 .brand .logo {

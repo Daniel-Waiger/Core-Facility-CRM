@@ -783,9 +783,13 @@
      and two people reading the same invoice figure should not see two different numbers.
      Pinning also keeps the exports and the printed reports identical whoever generated them. */
   const MONEY_LOCALE = 'en-US';
+  // round2 (the shared 2-decimal-place rounding helper) is defined once, above, next to
+  // computeBookingBOM — reused here rather than redefined, and reused again by app.js's
+  // service-entry savers so a value rounded before storage can never disagree with how fmtMoney
+  // displays it.
   function fmtMoney(n) {
     const cur = (global.DB && global.DB.getConfig) ? global.DB.getConfig('currency', '$') : '$';
-    return cur + (Math.round((Number(n) || 0) * 100) / 100)
+    return cur + round2(n)
       .toLocaleString(MONEY_LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
@@ -887,6 +891,7 @@
     isSafeUrl,
     fmtMoney,
     DATE_LOCALE,
+    round2,
     unitLabel,
     msStatusLabel,
     detectOS,

@@ -186,6 +186,29 @@ describe('money: staffPctFactor', () => {
   });
 });
 
+describe('money: UI.round2 is the one shared 2dp rounding helper', () => {
+  // js/app.js's service-entry savers (seSave/seEditSave) round `qty * rate` through UI.round2
+  // before storing it, rather than storing the raw float — the same rounding fmtMoney applies at
+  // display time, so a stored total and its displayed figure never disagree. CLAUDE.md requires
+  // exactly one copy of shared money arithmetic; this pins UI.round2 as that copy so a future
+  // change doesn't fork a second rounding formula into app.js.
+  test('qty 3 x rate 1.15 rounds to 3.45, not the raw floating-point 3.4499999999999997', () => {
+    const raw = 3 * 1.15;
+    assert.notEqual(raw, 3.45, 'sanity check: the unrounded float is NOT already 3.45');
+    assert.equal(UI.round2(raw), 3.45);
+  });
+
+  test('round2 matches the rounding fmtMoney applies for display (same figure, cent-accurate)', () => {
+    assert.equal(UI.round2(3 * 1.15), 3.45);
+    assert.equal(UI.fmtMoney(3 * 1.15), '$3.45');
+  });
+
+  test('round2 tolerates non-numeric/undefined input the same way the rest of the money helpers do', () => {
+    assert.equal(UI.round2(undefined), 0);
+    assert.equal(UI.round2(NaN), 0);
+  });
+});
+
 describe('money: the regression triple', () => {
   // js/db.js's seedSampleData, booking #1 (search its comment for "490 / 546.25 / 589.95"),
   // documents the exact inputs this must reproduce, and js/db.js's own seed data (peopleData /
