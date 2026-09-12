@@ -664,6 +664,16 @@
       // table), but the category-policy defaults still need seeding here — see
       // seedDefaultCategoryPolicies's comment for why this can't just live inside migrate().
       seedDefaultCategoryPolicies();
+      // M5 fix: migrate()'s pricing-tier seed guard (see its comment) is only ever reached by an
+      // EXISTING database going through migrate() — a brand-new database never runs migrate() at
+      // all, so 'pricing_tiers_seeded' was never written here, and the very first migrate() this
+      // fresh database eventually goes through (its next reload) would find the flag unset and
+      // reseed Internal/External from whatever overhead_internal/overhead_external happen to be
+      // set — even if a facility had deliberately deleted both tiers in the meantime (the only way
+      // to delete a tier is the zero-ref path, so a deleted tier really was meant to stay gone).
+      // Setting the flag here, the moment this fresh database is created, makes "no tiers seeded
+      // yet" a one-time-only decision exactly as migrate() intends, on a fresh DB too.
+      setConfig('pricing_tiers_seeded', 1);
     }
     if (!memoryMode) multiTabGuard = startMultiTabGuard();
     return { persistent: !memoryMode };
@@ -831,11 +841,27 @@
      itself over a BroadcastChannel scoped to this IDB_NAME; each tab independently computes the
      same leader (the tab with the oldest announced timestamp, ties broken by id) from the set of
      announcements it has seen, so every tab converges on the same answer without a central
-     coordinator. The newer tab(s) go read-only — flush() below skips idbSet entirely for them —
-     rather than the reverse, so the tab that was already there (and whose data is authoritative)
-     keeps writing. A tab that goes read-only still works locally (nothing here blocks DB.run);
-     only the save to IndexedDB is withheld, and onMultiTabState surfaces the state so the UI can
-     label it rather than let it fail invisibly.
+     coordinator, and two tabs opened in the same instant still pick exactly one leader between
+     them (the tie-break on id is total, so both sides of the race agree). The newer tab(s) go
+     read-only rather than the reverse, so the tab that was already there (and whose data is
+     authoritative) keeps writing.
+     A read-only tab is READ-ONLY, not just non-persisting: assertWritable() (called from run() and
+     clearAllData(), the two ways this file ever mutates rows on a user's behalf) throws and toasts
+     instead of letting the edit happen at all — so a form submitted in a read-only tab never
+     touches even this tab's own in-memory copy, and the very next line in whatever saver called it
+     (closing its modal, refreshing the view) never runs either. onMultiTabState surfaces the state
+     so the UI can show a persistent banner (reusing temp-session-banner) rather than let this fail
+     silently or as a wall of uncaught-exception noise.
+     Promotion (a read-only tab becomes the leader, e.g. because the leader tab closed) is the
+     dangerous direction, not the safe one: this tab's in-memory `db` was never written to (it was
+     read-only) but it IS possibly stale — the outgoing leader kept autosaving while this tab did
+     nothing, so resuming this tab's own autosave loop as-is would flush a stale image right over
+     the leader's last, newer save. So promotion reloads `db` from IndexedDB FIRST — discarding
+     this tab's in-memory image entirely, which is safe precisely because it was read-only and so
+     never diverged from what it last loaded/saw broadcast — re-renders the current screen from
+     that fresh copy, and only THEN flips readOnly to false and lets normal autosave resume.
+     Writes stay blocked for the whole async gap the reload takes (see `promoting` below), so a
+     click landing in that narrow window is refused exactly like any other read-only write.
      Falls back to doing nothing (every tab stays a writer, i.e. today's pre-existing behavior) if
      BroadcastChannel doesn't exist — any pre-2021 browser — rather than fail boot over a guard
      that is an improvement, not a requirement.
@@ -853,6 +879,33 @@
     const selfTs = Date.now();
     const peers = new Map(); // id -> ts, other known tabs (never includes selfId)
     let readOnly = false;
+    let promoting = false; // true only during the async reload-from-disk gap on promotion
+
+    // Promotion: reload the in-memory database from IndexedDB before this tab is allowed to write
+    // or autosave again — see the big comment above. Never throws outward; a failed reload leaves
+    // this tab's existing (still merely stale, never divergent) copy in place rather than bricking
+    // it, and simply proceeds to let it become the writer with what it already had.
+    async function reloadFromDiskAndPromote() {
+      try {
+        const SQL = await initSqljs();
+        const blob = await idbGet(DB_KEY);
+        if (blob) {
+          db = new SQL.Database(blob);
+          db.exec('PRAGMA foreign_keys = ON;');
+        }
+      } catch (e) {
+        console.error('multi-tab promotion: reload from IndexedDB failed, resuming with the existing in-memory copy', e);
+      }
+      // This tab was read-only, so nothing here should be unsaved — but clear any leftover autosave
+      // state anyway rather than trust that invariant blindly (belt-and-suspenders, same reasoning
+      // as the explicit child-row deletes CLAUDE.md documents alongside cascade).
+      dirty = false;
+      pendingDuringSave = false;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      readOnly = false;
+      promoting = false;
+      if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(false, { promoted: true });
+    }
 
     function recompute() {
       let leaderId = selfId, leaderTs = selfTs;
@@ -860,10 +913,20 @@
         if (ts < leaderTs || (ts === leaderTs && id < leaderId)) { leaderId = id; leaderTs = ts; }
       }
       const next = leaderId !== selfId;
-      if (next !== readOnly) {
-        readOnly = next;
-        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
+      if (next === readOnly) return; // no change
+      if (readOnly && !next) {
+        // Promotion. Block writes for the duration (isReadOnly() below checks `promoting` too) and
+        // do the disk reload before anything is allowed to touch `db` again.
+        if (promoting) return; // already in flight
+        promoting = true;
+        reloadFromDiskAndPromote();
+        return;
       }
+      // Demotion (another, older tab showed up) needs no reload — this tab simply stops writing;
+      // its own in-memory copy stays exactly what it was, which is fine since read-only tabs never
+      // diverge from what they last legitimately saw.
+      readOnly = next;
+      if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
     }
 
     bc.onmessage = (ev) => {
@@ -889,7 +952,23 @@
     }
     if (typeof global.addEventListener === 'function') global.addEventListener('pagehide', teardown);
 
-    return { isReadOnly: () => readOnly };
+    return { isReadOnly: () => readOnly || promoting };
+  }
+
+  // Every user-facing write funnels through here (run()'s single call site for every parameterized
+  // INSERT/UPDATE/DELETE, and clearAllData()'s raw multi-statement DELETE) — see the multi-tab
+  // guard comment above for why a read-only tab must refuse the write itself, not merely skip
+  // persisting it afterwards. Throws so the caller's remaining statements (e.g. a saver's join-row
+  // inserts, its closeDim/toast/refresh) never run either; the toast fires here so every caller
+  // gets the same message without each of the ~24 save functions having to catch this individually.
+  function assertWritable() {
+    if (!multiTabGuard.isReadOnly()) return;
+    if (global.UI && global.UI.toast) {
+      global.UI.toast('This tab is read-only because the database is open in another tab.', 'error');
+    }
+    const err = new Error('This tab is read-only because the database is open in another tab.');
+    err.dbReadOnly = true;
+    throw err;
   }
 
   /* Debounced autosave: every mutation calls markDirty().
@@ -903,6 +982,15 @@
   let dirty = false;
   let saving = false;
   let pendingDuringSave = false;
+  // Red-team D: a failed save used to leave `dirty` true with nothing armed to retry it until the
+  // NEXT edit happened to call markDirty() again — a facility that stops typing right after a
+  // failure (the exact moment it's most likely to notice something's wrong) would sit unsaved
+  // indefinitely. And onSaveFailed toasted on every single failed attempt, which — once retries
+  // exist — would mean one toast every retry forever. failureStreak counts consecutive failures so
+  // the toast fires once per streak (see flush()'s catch) rather than once per attempt, and a
+  // RETRY_BACKOFF_MS timer is armed after a failure so the save keeps retrying on its own.
+  let failureStreak = 0;
+  const RETRY_BACKOFF_MS = 5000;
 
   function scheduleFlush(delayMs) {
     if (saveTimer) clearTimeout(saveTimer);
@@ -932,11 +1020,19 @@
         dirty = false;
         if (global.App && global.App.onSaved) global.App.onSaved();
       }
+      failureStreak = 0;
     } catch (e) {
       console.error('autosave failed', e);
       pendingDuringSave = false;
-      if (global.App && global.App.onSaveFailed) global.App.onSaveFailed(e);
-      // dirty is left true on purpose: the next markDirty() re-arms the timer and retries.
+      failureStreak++;
+      // Toast once per failure streak, not once per retry — onSaveFailed still updates the
+      // persistent saved-dot every time (cheap, and it's supposed to stay visible), but a repeated
+      // toast for the same ongoing failure would just be noise.
+      if (global.App && global.App.onSaveFailed) global.App.onSaveFailed(e, { repeat: failureStreak > 1 });
+      // dirty is left true on purpose, AND a backoff retry is armed here explicitly — the next
+      // markDirty() (if any) would re-arm it too, but nothing guarantees another edit ever
+      // happens, so this save must be able to retry itself with no further user action.
+      scheduleFlush(RETRY_BACKOFF_MS);
     } finally {
       saving = false;
     }
@@ -1161,6 +1257,7 @@
 
   // Parameterized mutation helper
   function run(sql, params = []) {
+    assertWritable();
     if (!params || params.length === 0) {
       db.exec(sql);
     } else {
@@ -1657,6 +1754,7 @@
 
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
   function clearAllData() {
+    assertWritable();
     db.exec(`
       DELETE FROM project_people;
       DELETE FROM project_instruments;
@@ -2010,6 +2108,13 @@
     setConfig('overhead_external', '5');
     setConfig('tax_pct', '8');
     setConfig('currency', '$');
+    // M5: the demo database goes through boot()'s fresh-DB branch too (see the comment there),
+    // which already sets this — but seedSampleData can also run via Settings > Load Sample Data
+    // (force reset) against a demo DB restored from an older backup made before that fresh-DB
+    // fix existed. Setting it again here, right where the legacy overhead values it guards
+    // against re-seeding from are (re)written, keeps a later migrate() from recreating tiers a
+    // facility deliberately deleted, on every path that writes these two config values.
+    setConfig('pricing_tiers_seeded', 1);
     setGroupDiscount('Bio-Photonics Lab', 5); // only lab with a standing discount, on purpose —
     // Neural Dynamics Institute and Therapeutics & Onco-Therapy deliberately have none, so
     // Reports' By Lab/Group table shows a real contrast, not three identical discounted rows.

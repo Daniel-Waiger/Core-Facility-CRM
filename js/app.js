@@ -20,17 +20,36 @@
     // change to the saved-dot, and nothing ever retried it. Now the dot shows the failure
     // persistently (it stays until a save actually succeeds) and a toast calls it out once; the
     // retry itself lives in db.js (dirty stays true, so the next markDirty() tries again).
-    onSaveFailed() {
+    // Red-team D: db.js now retries a failed save on its own (a backoff timer, not just the next
+    // edit), and reports whether this is the FIRST failure of a streak or a repeat of one already
+    // reported — only toast on the first, so a save that keeps failing for a while doesn't spam a
+    // toast every retry; the dot stays in its error state the whole time regardless.
+    onSaveFailed(err, opts) {
       UI.setSavedState('error');
-      UI.toast('Your last change could not be saved to this browser. It will keep retrying.', 'error');
+      if (!opts || !opts.repeat) {
+        UI.toast('Your last change could not be saved to this browser. It will keep retrying.', 'error');
+      }
     },
-    // H2: told by DB's multi-tab guard that a second tab has this same database open. `readOnly`
-    // tabs never call idbSet (see db.js flush()), so only one tab ever persists at a time — this
-    // just labels which one this tab is, so the state is never silent.
-    onMultiTabState(readOnly) {
+    // H2: told by DB's multi-tab guard that a second tab has this same database open. A read-only
+    // tab's writes are actually refused (see db.js's assertWritable, called from run()/
+    // clearAllData()) — this just keeps the UI in step with that: the saved-dot label, a
+    // persistent banner (so the state can't be missed the way a toast alone could), and, on
+    // promotion (this tab going from read-only back to writable after reloading the other tab's
+    // last save from disk — see db.js's reloadFromDiskAndPromote), closing any open modal (it may
+    // hold form state built from the now-replaced in-memory database) and re-rendering the current
+    // screen from the fresh copy.
+    onMultiTabState(readOnly, opts) {
       UI.setSavedState(readOnly ? 'readonly' : 'saved');
       if (readOnly) {
+        showReadOnlyTabBanner();
         UI.toast('This database is already open in another tab. This tab is read-only — changes here will not be saved.', 'error');
+      } else {
+        hideReadOnlyTabBanner();
+        if (opts && opts.promoted) {
+          UI.closeAllModals();
+          UI.toast('The other tab closed. This tab can now save changes.');
+          refresh();
+        }
       }
     },
     syncCategoryBillingHints: syncCategoryBillingHints,
@@ -809,6 +828,24 @@
     if (reloadBtn) reloadBtn.onclick = () => location.reload();
   }
 
+  // H2: persistent (no dismiss — it isn't safe to let it be forgotten) banner shown for the life
+  // of a tab the multi-tab guard has put in read-only mode. Reuses the temp-session-banner styling
+  // (css/app.css), same reasoning as showDemoBanner below.
+  function showReadOnlyTabBanner() {
+    if (document.getElementById('readonly-tab-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'readonly-tab-banner';
+    bar.className = 'temp-session-banner';
+    bar.innerHTML = `
+      <span class="temp-session-banner-ic">${ic('alert')}</span>
+      <span>This tab is read-only because the database is open in another tab. Changes here will not be saved — close the other tab, or make your changes there instead.</span>`;
+    document.body.prepend(bar);
+  }
+  function hideReadOnlyTabBanner() {
+    const bar = document.getElementById('readonly-tab-banner');
+    if (bar) bar.remove();
+  }
+
   function showTemporarySessionBanner() {
     if (document.getElementById('temp-session-banner')) return;
     const bar = document.createElement('div');
@@ -1055,7 +1092,21 @@
         return;
       }
       const act = e.target.closest('[data-act]');
-      if (act) handleAct(act.dataset.act, act);
+      if (act) {
+        // H2: a save attempted from a read-only tab throws (db.js's assertWritable already
+        // shows the toast) rather than silently doing nothing — catch it here, the one place
+        // every data-act click funnels through, so it never surfaces as an uncaught exception in
+        // the console instead of the toast the user already saw. Anything else rethrows: this is
+        // not a general error-swallower.
+        try {
+          const result = handleAct(act.dataset.act, act);
+          if (result && typeof result.catch === 'function') {
+            result.catch((err) => { if (!err || !err.dbReadOnly) throw err; });
+          }
+        } catch (err) {
+          if (!err || !err.dbReadOnly) throw err;
+        }
+      }
     });
 
     // Clears the "this field is the one the toast meant" marker as soon as the visitor starts
@@ -1878,6 +1929,7 @@
     const note = m.querySelector('#p-note').value.trim();
     const isStaff = m.querySelector('#p-is-staff').checked ? 1 : 0;
     const rate = Number(m.querySelector('#p-rate').value) || 0;
+    if (rejectNegative(rate, 'Rate')) return;
 
     DB.run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', [name, type, org, dept, email, note, isStaff, rate]);
     const newPerson = DB.row('SELECT last_insert_rowid() as id');
@@ -2051,11 +2103,18 @@
     const m = UI.topModal();
     const name = m.querySelector('#i-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); m.querySelector('#i-name').classList.add('is-invalid'); return; }
+    const cost = Number(m.querySelector('#i-cost').value) || 0;
+    const minDuration = Number(m.querySelector('#i-min-duration').value) || 0;
+    const maxDuration = Number(m.querySelector('#i-max-duration').value) || 0;
+    const minGap = Number(m.querySelector('#i-min-gap').value) || 0;
+    const minNotice = Number(m.querySelector('#i-min-notice').value) || 0;
+    if (rejectNegative(cost, 'Cost') || rejectNegative(minDuration, 'Min Duration')
+      || rejectNegative(maxDuration, 'Max Duration') || rejectNegative(minGap, 'Min Gap')
+      || rejectNegative(minNotice, 'Min Notice')) return;
     DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
-       Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time',
-       Number(m.querySelector('#i-min-duration').value) || 0, Number(m.querySelector('#i-max-duration').value) || 0,
-       Number(m.querySelector('#i-min-gap').value) || 0, Number(m.querySelector('#i-min-notice').value) || 0]);
+       cost, m.querySelector('#i-cost-unit').value || 'time',
+       minDuration, maxDuration, minGap, minNotice]);
     // See the matching comment in msSave — DB.q1 relies on a Statement method this build of
     // sql.js doesn't have and throws; DB.row(...).id is the same lookup every other saver uses.
     const iid = DB.row('SELECT last_insert_rowid() as id').id;
@@ -2153,7 +2212,13 @@
     // admin mode is off, and this loop is then a no-op that leaves any existing overrides alone
     // (unlike the supervisor picker above, this is NOT rebuilt-from-form on every save: a form
     // that never shows the override rows to a non-admin editor must not be read as "no overrides").
-    m.querySelectorAll('.tier-rate-input').forEach((inp) => {
+    const tierInputs = Array.from(m.querySelectorAll('.tier-rate-input'));
+    for (const inp of tierInputs) {
+      const v = inp.value.trim();
+      if (v === '') continue;
+      if (rejectNegative(Number(v) || 0, 'Tier Rate')) return;
+    }
+    tierInputs.forEach((inp) => {
       const tierId = Number(inp.dataset.tierId);
       const v = inp.value.trim();
       if (v === '') DB.deleteInstrumentTierRate(id, tierId);
@@ -3012,7 +3077,12 @@
     return DB.rows(
       `SELECT name, status FROM instruments WHERE id IN (${instIds.map(() => '?').join(',')}) AND status IN ('Maintenance','Down')`,
       instIds
-    ).map((r) => `${r.name} is currently marked "${r.status}"`);
+    // Red-team b1: this list is joined straight into UI.confirmModal's HTML body below — an
+    // instrument name is free text a facility manager types, so it must be escaped like any other
+    // user-entered string rendered as HTML, not just the values that happen to come from a fixed
+    // vocab (status does too, for the same belt-and-suspenders reason as everywhere else in the
+    // app that renders a stored value).
+    ).map((r) => `${esc(r.name)} is currently marked "${esc(r.status)}"`);
   }
 
   function renderBookingConflicts(m, ids) {
@@ -3305,7 +3375,19 @@
     return dates;
   }
 
+  // Red-team b16: bookingSave is async and awaits a confirm dialog mid-save (the Maintenance/Down
+  // advisory above) — a second click on the save button (or a stray Enter) while that confirm is
+  // open would re-enter this function while UI.topModal() now resolves to the CONFIRM dialog, not
+  // the booking form, crashing on a null `.querySelector`. Guard re-entry for the whole function,
+  // not just the awaited section, so a click during the earlier synchronous validation is refused
+  // exactly the same way.
+  let bookingSaveBusy = false;
   async function bookingSave() {
+    if (bookingSaveBusy) return;
+    bookingSaveBusy = true;
+    try { return await bookingSaveImpl(); } finally { bookingSaveBusy = false; }
+  }
+  async function bookingSaveImpl() {
     const m = UI.topModal();
     const title = m.querySelector('#bk-title').value.trim();
     if (!title) { UI.toast('Booking title required', 'error'); m.querySelector('#bk-title').classList.add('is-invalid'); return; }
@@ -3374,7 +3456,7 @@
     const statusAdvisories = instrumentStatusAdvisory(instIds);
     if (statusAdvisories.length) {
       const ok = await UI.confirmModal(
-        'Instrument Under Maintenance',
+        'Instrument Not Available',
         `${statusAdvisories.join('; ')}. Book it anyway?`,
         { confirmText: 'Book Anyway' }
       );
@@ -3492,7 +3574,14 @@
     };
   }
 
+  // Red-team b16: same re-entry hazard as bookingSave above, guarded the same way.
+  let bookingEditSaveBusy = false;
   async function bookingEditSave(id) {
+    if (bookingEditSaveBusy) return;
+    bookingEditSaveBusy = true;
+    try { return await bookingEditSaveImpl(id); } finally { bookingEditSaveBusy = false; }
+  }
+  async function bookingEditSaveImpl(id) {
     const m = UI.topModal();
     const title = m.querySelector('#bke-title').value.trim();
     if (!title) { UI.toast('Title required', 'error'); m.querySelector('#bke-title').classList.add('is-invalid'); return; }
@@ -3550,11 +3639,21 @@
     if (conflicts.length) { UI.toast(conflicts.join('; '), 'error'); return; }
 
     // Advisory, not a hard block — mirrors bookingSave's identical gate exactly (roadmap: "every
-    // advisory must mirror its save gate").
-    const statusAdvisories = instrumentStatusAdvisory(instIds);
+    // advisory must mirror its save gate"). Red-team b1: unlike a brand-new booking (bookingSave,
+    // where the instrument selection is always a fresh decision), an EDIT can be a notes-only
+    // change to an old, already-past booking whose instrument happens to be marked Down/
+    // Maintenance today for an unrelated reason — that booking already happened, so re-litigating
+    // "book it anyway?" on every subsequent notes edit is just noise, not a warning anyone can act
+    // on. Same reasoning as skipNotice just above: only actually ask when either the instrument
+    // selection changed (a real new decision) or the booking is still upcoming (the advisory is
+    // still actionable — the slot hasn't been used yet).
+    const storedInstIds = storedInstruments.map((r) => r.id).sort((a, b) => a - b);
+    const currentInstSorted = [...instIds].sort((a, b) => a - b);
+    const instrumentsUnchanged = storedInstIds.length === currentInstSorted.length && storedInstIds.every((v, i) => v === currentInstSorted[i]);
+    const statusAdvisories = (!instrumentsUnchanged || !bookingHasStarted({ date, start_time: start })) ? instrumentStatusAdvisory(instIds) : [];
     if (statusAdvisories.length) {
       const ok = await UI.confirmModal(
-        'Instrument Under Maintenance',
+        'Instrument Not Available',
         `${statusAdvisories.join('; ')}. Book it anyway?`,
         { confirmText: 'Book Anyway' }
       );
@@ -5085,7 +5184,7 @@
           <div class="card">
             <div class="row mb-8">
               <span class="card-title grow">${ic('calendar')} Consultations &amp; Syncs Today (${mtgsToday.length})</span>
-              <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log</button>
+              <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Log Booking</button>
             </div>
             <div class="card-body">
               ${mtgsToday.length ? mtgsToday.map((m) => `

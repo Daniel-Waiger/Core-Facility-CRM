@@ -918,7 +918,14 @@
     //     rate has since changed. It reads blank when Before Tax is 0 (nothing to divide by) or the
     //     booking's charge was waived (counts=false below) — a waived Total Cost is deliberately 0
     //     by policy, not a tax outcome, so a percentage there would be meaningless.
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Total Cost']];
+    // R8/verifier gap: on a waived-cancelled row, Subtotal/Before Tax are the unchanged
+    // priced-at-booking-time snapshot (same rule the per-project Meetings sheet's Subtotal/Before
+    // Tax columns already follow — see the R4 test) while the final money column zeroes to what
+    // the facility actually bills. Left labelled "Total Cost" that reads as a broken row (146.67 →
+    // 164.12 → 0, tax blank); naming it "Charged Total" instead — no different value, no
+    // Subtotal/Before Tax change — makes plain that this column, unlike the two before it, answers
+    // "what got billed", so a 0 next to an untouched Subtotal is expected, not an arithmetic gap.
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Charged Total']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
@@ -928,7 +935,7 @@
       LEFT JOIN projects p ON p.id = mt.project_id
       LEFT JOIN grants g ON g.id = mt.grant_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      // A waived cancellation contributes 0 to the Total Cost column so the column sums to what
+      // A waived cancellation contributes 0 to the Charged Total column so the column sums to what
       // the facility actually bills; the Status column says why.
       const counts = !(m.is_cancelled && !m.billing_retained);
       const beforeTax = m.total_before_tax || 0;

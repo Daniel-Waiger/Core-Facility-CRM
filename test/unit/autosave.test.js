@@ -25,7 +25,7 @@ describe('autosave: H3 — a rejected save keeps the database dirty and retries'
      actual browser. */
   function makeFakeIndexedDB() {
     const store = new Map();
-    const state = { failNextPut: false, putCount: 0, lastPutValue: null };
+    const state = { failNextPut: false, failNextNPuts: 0, putCount: 0, lastPutValue: null };
     const dbHandle = {
       objectStoreNames: { contains: () => true },
       createObjectStore: () => {},
@@ -44,8 +44,9 @@ describe('autosave: H3 — a rejected save keeps the database dirty and retries'
           put(entry) {
             const req = {};
             state.putCount++;
-            const shouldFail = state.failNextPut;
+            let shouldFail = state.failNextPut;
             state.failNextPut = false;
+            if (state.failNextNPuts > 0) { shouldFail = true; state.failNextNPuts--; }
             queueMicrotask(() => {
               if (shouldFail) {
                 req.error = new Error('simulated IndexedDB write failure');
@@ -162,5 +163,50 @@ describe('autosave: H3 — a rejected save keeps the database dirty and retries'
     const titles = rows[0].values.map((r) => r[0]);
     reopened.close();
     assert.deepEqual(titles, ['First', 'Second'], 'the retried save must carry the edit that failed the first time, not just the newest one');
+  });
+
+  test('red-team D: a failed save retries on its own (no second edit needed), and toasts once per failure streak, not once per retry', async () => {
+    const savedBC = globalThis.BroadcastChannel;
+    delete globalThis.BroadcastChannel;
+    restoreGlobals.push(() => { globalThis.BroadcastChannel = savedBC; });
+
+    const fake = makeFakeIndexedDB();
+    globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+    restoreGlobals.push(() => { delete globalThis.indexedDB; });
+
+    const app = loadApp(['consts', 'db', 'ui']);
+    globalThis.initSqlJs = require(path.join(REPO, 'libs', 'sql-asm.js'));
+
+    const failedCalls = []; // each entry: whether onSaveFailed was called with {repeat:true}
+    const saveEvents = [];
+    globalThis.App = {
+      onSaving() { saveEvents.push('saving'); },
+      onSaved() { saveEvents.push('saved'); },
+      onSaveFailed(err, opts) { failedCalls.push(!!(opts && opts.repeat)); },
+      onMultiTabState() {},
+    };
+    restoreGlobals.push(() => { delete globalThis.App; });
+
+    await app.DB.boot();
+
+    // Fail the first TWO save attempts; nothing here ever calls DB.run a second time — every
+    // retry beyond the first must come from db.js's own backoff timer, not from a new edit.
+    fake.state.failNextNPuts = 2;
+    app.DB.run("INSERT INTO projects (title, code, status) VALUES ('Retried','P-9','Active')");
+
+    // First attempt (after the 400ms debounce) fails.
+    await wait(600);
+    assert.equal(fake.state.putCount, 1, 'the first attempt must have fired after the normal debounce');
+    assert.deepEqual(failedCalls, [false], 'the first failure of a streak must NOT be reported as a repeat');
+
+    // Second attempt fires on its own ~5s later — no new edit was made.
+    await wait(5300);
+    assert.equal(fake.state.putCount, 2, 'a second attempt must fire on its own via the backoff timer, with no further edit');
+    assert.deepEqual(failedCalls, [false, true], 'the second consecutive failure must be reported as a repeat, so the UI toasts only once per streak');
+
+    // Third attempt (the backoff timer fires again) succeeds, since failNextNPuts is now spent.
+    await wait(5300);
+    assert.equal(fake.state.putCount, 3, 'a third attempt must fire on its own and this one succeeds');
+    assert.ok(saveEvents.includes('saved'), 'the streak must end in a real save once the write stops failing');
   });
 });

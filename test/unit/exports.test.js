@@ -137,6 +137,24 @@ describe('exports (R4): DOCX/PDF money follows the same waived-cancellation rule
     const totalMatch = costLine.match(/Total (\S+)$/);
     assert.ok(totalMatch, `Cost paragraph must end with "Total <amount>"; got: "${costLine}"`);
     assert.equal(totalMatch[1], UI.fmtMoney(0), `DOCX Total must read ${UI.fmtMoney(0)} for a waived-cancelled booking, matching XLSX's zeroed Total Cost; got: "${costLine}"`);
+
+    // Facility-wide "Bookings & Costs" sheet — verifier gap: Subtotal/Before Tax must stay the
+    // unchanged priced-at-booking-time snapshot (same rule just asserted above for the per-project
+    // Meetings sheet), while the last column — named "Charged Total", not "Total Cost", precisely
+    // so a reader doesn't read a zero there as a broken Subtotal->Before Tax->Total chain — zeroes.
+    Exports.buildAllXlsxBlob();
+    const wbAll = app.captured[app.captured.length - 1];
+    const bcRows = sheetRows(wbAll, 'Bookings & Costs');
+    assert.deepEqual(bcRows[0].slice(-3), ['Before Tax', 'Effective Tax %', 'Charged Total'], 'the money columns must read Before Tax / Effective Tax % / Charged Total, in that order');
+    const bcRow = bcRows.find((r) => r[2] === 'Waived');
+    assert.ok(bcRow, 'the waived booking must appear on the facility-wide Bookings & Costs sheet');
+    // header: [Project Code, Project, Booking, Grant, Tier, Status, Date, Start, End, Instruments,
+    //          Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %, Before Tax,
+    //          Effective Tax %, Charged Total]
+    assert.equal(bcRow[11], 150, 'Subtotal must stay the unwaived snapshot (150), unchanged by waiving the charge');
+    assert.equal(bcRow[15], 150, 'Before Tax must likewise stay the unwaived snapshot (150)');
+    assert.equal(bcRow[16], '', 'Effective Tax % is blank — nothing was actually billed to derive a rate from');
+    assert.equal(bcRow[17], 0, 'Charged Total must be zeroed for a waived cancellation');
   });
 });
 

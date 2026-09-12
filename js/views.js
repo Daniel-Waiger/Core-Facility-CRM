@@ -541,11 +541,11 @@
         </div>
       </div>
 
-      <!-- Meetings Card -->
+      <!-- Bookings Card -->
       <div class="card">
         <div class="row mb-8">
-          <div class="grow"><span class="card-title">${ic('calendar')} Meetings &amp; Syncs</span></div>
-          <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Add Meeting</button>
+          <div class="grow"><span class="card-title">${ic('calendar')} Bookings &amp; Syncs</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="add-meeting">${ic('plus')} Add Booking</button>
         </div>
         <div class="card-body">
           ${mtgs.length ? mtgs.map((m) => `
@@ -554,7 +554,7 @@
                 <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email Attendees">${ic('mail')}</button>
-                <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit Meeting">${ic('edit')}</button>
+                <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit Booking">${ic('edit')}</button>
                 ${m.is_cancelled
                   ? `<button class="btn btn-ghost btn-sm" data-act="booking-reinstate" data-id="${m.id}" title="Reinstate — puts it back in the schedule">${ic('rocket')}</button>`
                   : `<button class="btn btn-ghost btn-sm" data-act="meeting-cancel" data-id="${m.id}" title="Cancel — keeps the record, frees the slot">${ic('archive')}</button>`}
@@ -562,7 +562,7 @@
               ${m.attendees ? `<div class="faint small mt-8"><strong>Attendees:</strong> ${esc(m.attendees)}</div>` : ''}
               ${m.note ? `<div class="small muted mt-8 rte-content">${global.UI.noteHtml(m.note)}</div>` : ''}
               ${m.actions ? `<div class="action-items mt-8"><span class="badge warning font-medium">Actions:</span> ${esc(m.actions)}</div>` : ''}
-            </div>`).join('') : emptyState('calendar', 'No meetings recorded', 'Log sync meetings, consultation notes, and action items.')}
+            </div>`).join('') : emptyState('calendar', 'No bookings recorded', 'Log bookings, consultation notes, and action items.')}
         </div>
       </div>
     </div>`;
@@ -1484,7 +1484,8 @@
                 </tr>`).join('')}
             </tbody>
           </table>
-        </div>` : emptyState('tag', 'No grants yet', 'Add a grant to make it pickable on projects and bookings.')}
+        </div>
+        <div class="faint small mt-8">Allowed Users is for your own reference — it does not restrict who can pick this grant on a project or booking.</div>` : emptyState('tag', 'No grants yet', 'Add a grant to make it pickable on projects and bookings.')}
       </div>
     </div>
 
