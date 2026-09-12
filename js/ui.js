@@ -495,10 +495,15 @@
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
+  /* Pinned for the same reason MONEY_LOCALE (below) is pinned: toLocaleDateString(undefined, …)
+     follows the viewer's browser locale, so the same booking would render 9/12/2026 for one
+     person and 12/9/2026 for another reading the same screen or export. One facility, one date
+     format — see MONEY_LOCALE's comment for the full rationale. */
+  const DATE_LOCALE = 'en-US';
   function fmtDate(d) {
     if (!d) return '—';
     const dt = new Date(String(d).slice(0, 10) + 'T00:00:00');
-    return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString();
+    return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString(DATE_LOCALE);
   }
   /* 'YYYY-MM-DD' for a Date's LOCAL calendar day.
      Why not toISOString().slice(0,10)? A Date is a single instant, and toISOString() re-describes
@@ -736,6 +741,7 @@
     retiredName,
     isSafeUrl,
     fmtMoney,
+    DATE_LOCALE,
     unitLabel,
     msStatusLabel,
     detectOS,

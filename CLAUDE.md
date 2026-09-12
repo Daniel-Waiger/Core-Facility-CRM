@@ -245,8 +245,8 @@ One rule, so a screen never mixes both styles in the same row of buttons:
   confirmation-dialog bodies, empty states, validation and conflict messages, sentence-shaped
   tooltips. `This slot is already booked.`, `Nothing here yet — add your first project.`
 - Inside Title Case, keep short joining words lowercase unless they are first or last: *a, an,
-  and, as, at, but, by, for, in, nor, of, on, or, per, the, to, vs, with*. Acronyms stay as they
-  are (PI, XLSX, PDF, DOCX, JSON, PWA, VAT).
+  and, as, at, but, by, for, from, in, nor, of, on, or, per, the, to, vs, with*. Acronyms stay as
+  they are (PI, XLSX, PDF, DOCX, JSON, PWA, VAT).
 - A confirmation dialog's `confirmText` is a control, so it is Title Case and names the verb
   ("Delete", "Retire", "Archive") — see the section above.
 
