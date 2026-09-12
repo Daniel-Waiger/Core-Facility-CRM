@@ -15,7 +15,7 @@
 
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript } = require('./helpers/browser');
+const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript, waitForAppReady } = require('./helpers/browser');
 
 const playwright = tryRequirePlaywright();
 const skip = playwright ? false : 'Playwright is not installed — see test/README.md (unit tests need nothing)';
@@ -43,7 +43,7 @@ describe('every screen renders', { skip }, () => {
     page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 
     await page.goto(srv.base + '/index.html?demo=1');
-    await page.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(page);
     await page.waitForTimeout(2000);
     // Opening a fresh sandbox starts the tour, which blocks input for orientation; dismiss it.
     await page.evaluate(() => window.UI && UI.stopTour && UI.stopTour());

@@ -917,15 +917,25 @@
     return memo(facts, 'milestonesAll', () => DB.rows('SELECT id, updated_at FROM milestones'))
       .filter((r) => dateInRange(utcTimestampToLocalDay(r.updated_at), from, to));
   }
+  // Item 5 (second review): this used to filter and order on SQL's DB.outputEffDate('po')
+  // directly, whose blank-date fallback is `date(po.created_at)` — a UTC calendar day (see
+  // outputEffDate's own comment: "Ordering only", which this filter/order was not). At a UTC+
+  // offset, an undated output logged in the last few hours of the local day fell out of the
+  // selected range (or sorted a day early) exactly as loadProjectFunnelFacts's first_output_date
+  // did before ITS fix above — same bug, different call site. Load every output unbounded, compute
+  // each one's effective date in JS via the SAME utcTimestampToLocalDay used by the funnel (so a
+  // row can never disagree between the two), then filter and sort here instead of in SQL.
   function loadOutputsInRange(from, to, facts) {
-    return memo(facts, 'outputs', () => DB.rows(`
-      SELECT po.*, p.code AS project_code, p.title AS project_title,
-             ${DB.outputEffDate('po')} AS eff_date
+    const all = memo(facts, 'outputsAllWithEffDate', () => DB.rows(`
+      SELECT po.*, p.code AS project_code, p.title AS project_title
       FROM project_outputs po
-      JOIN projects p ON p.id = po.project_id
-      WHERE (? = '' OR ${DB.outputEffDate('po')} >= ?)
-        AND (? = '' OR ${DB.outputEffDate('po')} <= ?)
-      ORDER BY eff_date DESC, po.id DESC`, rangeParams(from, to)));
+      JOIN projects p ON p.id = po.project_id`).map((o) => ({
+      ...o,
+      eff_date: (o.date && String(o.date).trim() !== '') ? o.date : utcTimestampToLocalDay(o.created_at),
+    })));
+    return all
+      .filter((o) => dateInRange(o.eff_date, from, to))
+      .sort((a, b) => (b.eff_date < a.eff_date ? -1 : b.eff_date > a.eff_date ? 1 : b.id - a.id));
   }
   // created_at/updated_at/archived_at are all written via `datetime('now')` (see db.js), which is
   // a UTC instant, formatted 'YYYY-MM-DD HH:MM:SS' with NO timezone marker — unlike every other

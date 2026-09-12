@@ -801,7 +801,13 @@
       const tx = s.transaction('kv', 'readwrite');
       tx.objectStore('kv').put({ k: key, v: val });
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      // Item 4 follow-up (found while browser-testing item 4's fix): tx.error can be null/undefined
+      // for a transaction that failed WITHOUT an underlying request error (e.g. an explicit
+      // transaction.abort() call, as a real IndexedDB failure can look like) — rejecting with that
+      // bare null used to reach a caller's `catch (e) { ...e.message... }` and throw a SECOND,
+      // unrelated TypeError ("Cannot read properties of null") instead of the failure the caller
+      // was trying to report. Fall back to a real Error the same way onabort already does below.
+      tx.onerror = () => reject(tx.error || new Error('idbSet transaction failed'));
       tx.onabort = () => reject(tx.error || new Error('idbSet transaction aborted'));
     });
   }
@@ -812,7 +818,8 @@
       const tx = s.transaction('kv', 'readwrite');
       tx.objectStore('kv').delete(key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      // Same null-error fallback as idbSet's tx.onerror above.
+      tx.onerror = () => reject(tx.error || new Error('idbDelete transaction failed'));
       tx.onabort = () => reject(tx.error || new Error('idbDelete transaction aborted'));
     });
   }
@@ -915,14 +922,26 @@
      event loop alive — under `node --test`, which never has a real IndexedDB to guard in the
      first place, that hung the whole run rather than exiting. There is also nothing worth
      guarding in memoryMode (no shared IndexedDB another tab could race for). */
+  // Item 2 (second review): how long a tab waits, after hearing a `bye` whose sender says a save
+  // was still pending/in flight, before giving up on a follow-up `saved` message and promoting
+  // anyway. Bounded the same way SAVE_IDLE_TIMEOUT_MS bounds restoreBackup's own wait — a `saved`
+  // that never arrives (the outgoing tab was actually killed, not just closed cleanly) must not
+  // leave every OTHER tab stuck read-only forever.
+  const BYE_GRACE_MS = 1500;
+
   let multiTabGuard = { isReadOnly: () => false };
   function startMultiTabGuard() {
     if (typeof BroadcastChannel === 'undefined') return { isReadOnly: () => false };
     let bc;
     try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return { isReadOnly: () => false }; }
     const selfId = Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
-    const selfTs = Date.now();
+    let selfTs = Date.now();
     const peers = new Map(); // id -> ts, other known tabs (never includes selfId)
+    // Item 2: a peer whose `bye` said its final flush was still pending is held HERE (id -> the
+    // setTimeout that will eventually force its departure) instead of being deleted from `peers`
+    // immediately — see the `bye` handler below for why immediate deletion is the actual bug this
+    // closes, and BYE_GRACE_MS above for the bound.
+    const pendingDepartures = new Map();
     let readOnly = false;
     let promoting = false; // true only during the async reload-from-disk gap on promotion
     // Counts consecutive failed promotion attempts (reset to 0 on a successful one) — mirrors
@@ -1002,10 +1021,22 @@
       if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(readOnly);
     }
 
-    bc.onmessage = (ev) => {
+    // Cancels a held departure timer (a later message from the same tab proves it's still here,
+    // or has now genuinely finished leaving) without necessarily deleting the peer — callers decide
+    // that themselves right after calling this.
+    function clearPendingDeparture(id) {
+      const timer = pendingDepartures.get(id);
+      if (timer != null) { clearTimeout(timer); pendingDepartures.delete(id); }
+    }
+
+    function onBcMessage(ev) {
       const msg = ev.data || {};
       if (!msg || msg.id === selfId) return;
       if (msg.type === 'hello') {
+        // A hello from a tab whose departure we were waiting out means it's clearly still here
+        // (or came straight back) — cancel the wait rather than let a stale timer later delete a
+        // peer that has since re-announced itself.
+        clearPendingDeparture(msg.id);
         peers.set(msg.id, msg.ts);
         recompute();
         try { bc.postMessage({ type: 'hello-ack', id: selfId, ts: selfTs }); } catch (_) {}
@@ -1013,17 +1044,103 @@
         peers.set(msg.id, msg.ts);
         recompute();
       } else if (msg.type === 'bye') {
+        // Item 2 (second review): a `bye` sent right as its tab is torn down used to delete the
+        // peer and recompute immediately — but that tab's OWN teardown (below) broadcasts `bye`
+        // and used to close its channel right away while its final autosave flush was still async
+        // and in flight. A surviving tab could promote on this `bye` alone, reload from
+        // IndexedDB BEFORE that flush's write ever landed, and capture stale bytes — then, once
+        // promoted, autosave right over the outgoing tab's actual last write once it does land a
+        // moment later. So: a `bye` that says a save was still pending does NOT promote anyone by
+        // itself. It waits for either a follow-up `saved` from the same tab (sent once its final
+        // flush genuinely settles, if the tab lives long enough to send it) or BYE_GRACE_MS,
+        // whichever comes first, before treating the peer as actually gone.
+        if (msg.pending) {
+          if (!pendingDepartures.has(msg.id)) {
+            const timer = setTimeout(() => {
+              pendingDepartures.delete(msg.id);
+              peers.delete(msg.id);
+              recompute();
+            }, BYE_GRACE_MS);
+            pendingDepartures.set(msg.id, timer);
+          }
+        } else {
+          clearPendingDeparture(msg.id);
+          peers.delete(msg.id);
+          recompute();
+        }
+      } else if (msg.type === 'saved') {
+        // The outgoing tab's final flush landed — safe to treat it as gone right away instead of
+        // waiting out the rest of the grace period.
+        clearPendingDeparture(msg.id);
         peers.delete(msg.id);
         recompute();
       }
-    };
+    }
+    bc.onmessage = onBcMessage;
     try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
 
-    function teardown() {
-      try { bc.postMessage({ type: 'bye', id: selfId }); } catch (_) {}
+    // Item 2: the outgoing tab's own side of the fix above. Broadcasts `bye` immediately (so
+    // peers learn this tab is leaving with as little delay as possible either way) carrying
+    // whether a save is still dirty/in flight; if so, waits for flushNow() — which by this point
+    // also covers item 3's fix (awaits any save already in flight, then flushes whatever landed
+    // during it) — to actually settle before announcing `saved` and only THEN closing the
+    // channel. If the page is torn down before that wait resolves, the `saved` message simply
+    // never goes out and peers fall back to the bounded grace period above — never worse than
+    // before this fix, and correct whenever the tab lives long enough to finish.
+    async function teardown() {
+      const pending = dirty || saving || pendingDuringSave;
+      try { bc.postMessage({ type: 'bye', id: selfId, pending }); } catch (_) {}
+      if (pending) {
+        try { await flushNow(); } catch (_) {}
+        // Only claim `saved` if the flush actually left nothing dirty — a permanently failing
+        // save (this tab closing right as autosave itself is broken) must not tell peers it's
+        // safe to promote; they fall back to the grace period instead of trusting a false "saved".
+        if (!dirty) {
+          try { bc.postMessage({ type: 'saved', id: selfId }); } catch (_) {}
+        }
+      }
       try { bc.close(); } catch (_) {}
     }
     if (typeof global.addEventListener === 'function') global.addEventListener('pagehide', teardown);
+
+    // Item 2 (suppressed finding): `pagehide` also fires when a page merely enters the
+    // back-forward cache (bfcache) rather than being genuinely closed — teardown() above still
+    // runs, announcing `bye` and closing `bc`, exactly as if the tab were gone, while the page's
+    // JS (this whole closure, `readOnly` included) is FROZEN, not reloaded. If the browser later
+    // restores it FROM bfcache, resuming with whatever `readOnly` happened to hold when it was
+    // frozen would let it resume as a writer with no re-election and a `bc` that teardown() already
+    // closed — every other tab already believes it left. `pageshow` with `event.persisted` is the
+    // signal a bfcache restore actually happened; treat it as rejoining as a brand-new tab: forced
+    // read-only until the election says otherwise, a fresh BroadcastChannel, a fresh timestamp (so
+    // it re-enters the tie-break as the newest tab, not whatever it was before being frozen), and a
+    // fresh `hello` so every other tab learns about it again.
+    function rejoinAsNewTab() {
+      readOnly = true;
+      promoting = false;
+      peers.clear();
+      for (const timer of pendingDepartures.values()) clearTimeout(timer);
+      pendingDepartures.clear();
+      try { bc.close(); } catch (_) {}
+      try { bc = new BroadcastChannel('cf-tab-guard:' + IDB_NAME); } catch (e) { return; }
+      bc.onmessage = onBcMessage;
+      selfTs = Date.now();
+      // Route the "am I actually alone, or is an older tab out there" decision through the SAME
+      // recompute()/reloadFromDiskAndPromote() machinery every other state change already uses,
+      // rather than duplicating its onMultiTabState call here: with `peers` empty and `readOnly`
+      // forced true above, recompute() immediately takes the promotion branch — reloading `db`
+      // fresh from IndexedDB before this tab is trusted to write again, exactly as safe as any
+      // other promotion — and demotes back to read-only on its own if an older tab's `hello-ack`
+      // arrives afterward.
+      recompute();
+      try { bc.postMessage({ type: 'hello', id: selfId, ts: selfTs }); } catch (_) {}
+      // teardown() is already registered as a 'pagehide' listener (below) — since it's the same
+      // function reference, addEventListener would just be a no-op duplicate if called again here,
+      // so it isn't; the ORIGINAL registration covers every future pagehide, this bfcache-restored
+      // tab included.
+    }
+    if (typeof global.addEventListener === 'function') {
+      global.addEventListener('pageshow', (ev) => { if (ev && ev.persisted) rejoinAsNewTab(); });
+    }
 
     return { isReadOnly: () => readOnly || promoting };
   }
@@ -1140,12 +1257,21 @@
     }
   }
 
+  // Item 3 (second review): flushNow() used to just call flush(), which returns immediately (a
+  // no-op) whenever a save is already `saving` — so an edit made WHILE that save is in flight
+  // (pendingDuringSave) had nothing to make it go out during a lifecycle event; it waited for the
+  // 400ms timer scheduleFlush() re-armed, which pagehide/beforeunload may not give time to fire.
+  // `currentFlushPromise` exposes the in-flight call's own promise (set right as `saving` flips
+  // true, cleared once that call's own await settles) so flushNow() can await it and then call
+  // flush() again for whatever landed during it — see flushNow() below.
+  let currentFlushPromise = null;
   async function flush() {
     if (!dirty) return;
     if (saving) return; // a save is already in flight; markDirty() already flagged pendingDuringSave
     if (multiTabGuard.isReadOnly()) return; // this tab lost the leader race — never persist over it
     const myGen = dbGeneration;
     saving = true;
+    const thisFlush = (async () => {
     try {
       if (myGen !== dbGeneration) {
         // A restore superseded this database between markDirty() scheduling us and us actually
@@ -1192,6 +1318,13 @@
     } finally {
       saving = false;
     }
+    })();
+    currentFlushPromise = thisFlush;
+    try {
+      await thisFlush;
+    } finally {
+      if (currentFlushPromise === thisFlush) currentFlushPromise = null;
+    }
   }
 
   // Flush immediately, skipping the remainder of the debounce — used when the tab is about to
@@ -1203,6 +1336,15 @@
   // prompt, it only gets a head start on the same save pagehide would otherwise trigger alone.
   function flushNow() {
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (saving && currentFlushPromise) {
+      // A save is already in flight (its snapshot was taken before this edit landed) — flush()
+      // itself would just return immediately here. Await the in-flight save, then call flush()
+      // again so whatever markDirty() flagged as pendingDuringSave goes out now, during this same
+      // lifecycle event, instead of waiting on a debounce timer the event may not allow to fire.
+      // Not awaited by callers that don't need to (the event handlers below fire-and-forget this),
+      // but the returned promise lets a caller/test wait for the real end-to-end completion.
+      return currentFlushPromise.then(() => flush(), () => flush());
+    }
     return flush();
   }
   if (typeof global.addEventListener === 'function') {
@@ -1331,6 +1473,28 @@
     // Validates BEFORE anything below touches the live `db` or IndexedDB — see
     // inspectBackupCandidate's comment. A throw here leaves the live handle exactly as it was.
     const preview = await inspectBackupCandidate(data);
+
+    // Second-review item 1: this used to validate each upload entry (`typeof entry.data ===
+    // 'string'`) INSIDE the apply loop below, which ran AFTER old uploads had already been
+    // deleted and the SQL database already swapped in and persisted — so a malformed entry
+    // (`{}`, or a `data` string that isn't valid base64) left the restore half-applied: new
+    // database, old uploads gone, new uploads short by whatever failed to decode. Decode every
+    // entry into a Blob here, before the db swap or any IndexedDB delete — a malformed entry now
+    // rejects the WHOLE restore, with the live database and upload set untouched.
+    const uploadBlobs = new Map();
+    for (const [name, entry] of Object.entries(data.uploads || {})) {
+      if (!entry || typeof entry !== 'object' || typeof entry.data !== 'string') {
+        throw new Error(`Not a valid backup file — the attached file "${name}" is malformed.`);
+      }
+      let blob;
+      try {
+        blob = base64ToBlob(entry);
+      } catch (e) {
+        throw new Error(`Not a valid backup file — the attached file "${name}" could not be decoded.`);
+      }
+      uploadBlobs.set(name, blob);
+    }
+
     // All async prep — engine init and parsing the incoming bytes into a standalone Database —
     // happens BEFORE waitForSaveIdle() is even called, specifically so that once that wait
     // resolves, the generation bump and the `db` swap below run with NOTHING async in between.
@@ -1374,22 +1538,37 @@
       try { newDb.close(); } catch (_) {}
       throw e;
     }
-    try { previousDb.close(); } catch (_) {}
+    // previousDb is kept OPEN (not closed yet) past this point — if the upload apply below fails,
+    // the rollback branch needs it live to re-export and re-persist as the working database again.
     // 4b: restore must REPLACE the upload set, not merge into it — an attachment removed from the
     // facility's data before this backup was taken (or never present in it) must not survive the
     // restore just because some earlier database left its blob sitting in IndexedDB. Delete every
-    // uploads:* entry the incoming backup doesn't carry before writing the ones it does.
-    const backupUploadNames = new Set(Object.keys(data.uploads || {}));
-    const existingUploads = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
-    for (const { key } of existingUploads) {
-      const name = key.slice((UPLOAD_KEY + ':').length);
-      if (!backupUploadNames.has(name)) await idbDelete(key);
-    }
-    for (const [name, entry] of Object.entries(data.uploads || {})) {
-      if (entry && typeof entry === 'object' && typeof entry.data === 'string') {
-        await idbSet(UPLOAD_KEY + ':' + name, base64ToBlob(entry));
+    // uploads:* entry the incoming backup doesn't carry before writing the ones it does. Every
+    // entry was already decoded and validated above, so nothing here can fail on malformed input —
+    // only a genuine IndexedDB error (a full/blocked store) reaches the catch below.
+    try {
+      const backupUploadNames = new Set(uploadBlobs.keys());
+      const existingUploads = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+      for (const { key } of existingUploads) {
+        const name = key.slice((UPLOAD_KEY + ':').length);
+        if (!backupUploadNames.has(name)) await idbDelete(key);
       }
+      for (const [name, blob] of uploadBlobs) {
+        await idbSet(UPLOAD_KEY + ':' + name, blob);
+      }
+    } catch (e) {
+      // Roll back rather than leave the SQL database restored with the upload set only half
+      // applied: put previousDb back as the live database, re-persist IT (bumping the generation
+      // again so any lingering flush targeting the now-abandoned newDb is dropped, same guard as
+      // the swap above), and rethrow so doRestore reports the failure honestly instead of the
+      // toast in app.js claiming "Database restored successfully" over a half-done restore.
+      db = previousDb;
+      dbGeneration++;
+      try { await withDeadline(idbSet(DB_KEY, currentBytes()), SAVE_IDLE_TIMEOUT_MS, e); } catch (_) { /* best effort re-persist; the original error is what we throw */ }
+      try { newDb.close(); } catch (_) {}
+      throw e;
     }
+    try { previousDb.close(); } catch (_) {}
     return preview;
   }
 
@@ -1415,11 +1594,13 @@
   }
   // Every uploaded blob, regardless of which project or file row it belonged to — used by Clear
   // All Data, which wipes every table and so must also wipe every attachment.
+  // Item 4 (second review): this used to catch-and-log a failure here and resolve successfully
+  // anyway, so clearAllData() (which awaits this) reported "cleared" while blobs were still
+  // sitting in IndexedDB. Let a rejection propagate — callers now decide how to report it rather
+  // than being lied to about the outcome.
   async function deleteAllUploads() {
-    try {
-      const entries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
-      for (const { key } of entries) await idbDelete(key);
-    } catch (e) { console.error('deleteAllUploads failed', e); }
+    const entries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+    for (const { key } of entries) await idbDelete(key);
   }
 
   /* ---------------- Silent auto-backup folder handle (IndexedDB) ---------------- */
@@ -2706,6 +2887,7 @@
     get isDemo() { return !!global.IS_DEMO; },
     currentBytes,
     markDirty,
+    flushNow,
     get isReadOnly() { return multiTabGuard.isReadOnly(); },
     buildBackup,
     restoreBackup,

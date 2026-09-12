@@ -123,4 +123,18 @@ function setFlagScript(key, value) {
   } catch (_) {} })()`;
 }
 
-module.exports = { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript, TEST_FLAGS, REPO };
+/* Item 9 (second review): every spec used to consider the app "open" as soon as
+   `window.DB && window.App` existed — but both are assigned SYNCHRONOUSLY at script-eval time
+   (js/app.js's `global.App = {...}` runs immediately; js/db.js attaches `global.DB` the same way),
+   well before `App.boot()`'s own `await DB.boot()` (IndexedDB open + schema init/migrate, all
+   async) resolves. A spec's very next `page.evaluate`/`DB.run()` call could therefore race real
+   boot work — reading/writing a database that isn't ready yet, or an App whose routing/dispatcher
+   isn't wired up. Wait for a signal that only exists once finishBoot() has actually rendered the
+   shell instead: `#page-title` is created by renderShell(), called from finishBoot(status) AFTER
+   `await DB.boot()` and (in a demo tab) AFTER `await DB.seedSampleData()` both resolve — so its
+   presence means boot is genuinely done, not merely started. */
+async function waitForAppReady(page) {
+  await page.waitForFunction(() => !!(window.DB && window.App && document.getElementById('page-title')));
+}
+
+module.exports = { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript, TEST_FLAGS, REPO, waitForAppReady };

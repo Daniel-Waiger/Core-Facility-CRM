@@ -592,7 +592,16 @@
       const handleFresh = () => {
         const proceed = async () => {
           savePref();
-          await DB.clearAllData();
+          // Item 4 (second review): clearAllData() now propagates an upload-deletion failure
+          // instead of swallowing it — a facility that hit that failure used to see "All facility
+          // data cleared" while old attachments were still sitting in IndexedDB. Report it instead.
+          try {
+            await DB.clearAllData();
+          } catch (e) {
+            console.error('clearAllData failed', e);
+            UI.toast('Could not fully clear the database: ' + e.message, 'error');
+            return;
+          }
           UI.closeDim(modalDim);
           route('dashboard');
           UI.toast('All facility data cleared.');
@@ -1242,7 +1251,16 @@
         // allowed to actually re-seed over existing sandbox data.
         UI.confirmModal('Reset Sandbox?', 'This restores the demo sandbox to its original sample data. Anything you changed here will be lost. This does not affect your real facility records.', { danger: true, confirmText: 'Reset Sandbox' }).then(async (yes) => {
           if (yes) {
-            await DB.seedSampleData({ force: true });
+            // Item 4 (second review): seedSampleData() calls clearAllData(), which now propagates
+            // an upload-deletion failure instead of swallowing it — report that honestly rather
+            // than claiming the sandbox was reset.
+            try {
+              await DB.seedSampleData({ force: true });
+            } catch (e) {
+              console.error('seedSampleData failed', e);
+              UI.toast('Could not reset the demo sandbox: ' + e.message, 'error');
+              return;
+            }
             refresh();
             UI.toast('Demo sandbox reset to its original sample data.');
           }
@@ -1252,7 +1270,15 @@
       case 'clear-data': {
         UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and bookings? This cannot be undone.', { danger: true, confirmText: 'Delete Everything' }).then(async (yes) => {
           if (yes) {
-            await DB.clearAllData();
+            // Item 4 (second review): clearAllData() now propagates an upload-deletion failure
+            // instead of swallowing it — report that honestly rather than claiming success.
+            try {
+              await DB.clearAllData();
+            } catch (e) {
+              console.error('clearAllData failed', e);
+              UI.toast('Could not fully clear the database: ' + e.message, 'error');
+              return;
+            }
             refresh();
             UI.toast('All facility data cleared.');
           }

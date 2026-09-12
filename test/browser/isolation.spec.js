@@ -15,7 +15,7 @@
 
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN } = require('./helpers/browser');
+const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, waitForAppReady } = require('./helpers/browser');
 
 const playwright = tryRequirePlaywright();
 const skip = playwright ? false : 'Playwright is not installed — see test/README.md (unit tests need nothing)';
@@ -71,7 +71,7 @@ describe('demo sandbox isolation', { skip }, () => {
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(srv.base + '/index.html' + query);
-    await page.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(page);
     page._errors = errors;
     return page;
   }
@@ -107,7 +107,7 @@ describe('demo sandbox isolation', { skip }, () => {
 
     // And it survives a reload, i.e. what is on disk is really intact.
     await real.reload();
-    await real.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(real);
     const counts = await real.evaluate((m) => ({
       marker: DB.row('SELECT COUNT(*) c FROM projects WHERE title=?', [m]).c,
       projects: DB.row('SELECT COUNT(*) c FROM projects').c,

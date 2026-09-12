@@ -12,7 +12,7 @@
 
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN } = require('./helpers/browser');
+const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, waitForAppReady } = require('./helpers/browser');
 
 const playwright = tryRequirePlaywright();
 const skip = playwright ? false : 'Playwright is not installed — see test/README.md (unit tests need nothing)';
@@ -39,7 +39,7 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
   async function openApp(ctx, query = '') {
     const page = await ctx.newPage();
     await page.goto(srv.base + '/index.html' + query);
-    await page.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(page);
     return page;
   }
 
@@ -109,6 +109,118 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     await ctx.close();
   });
 
+  // Item 2 (suppressed finding, second review of PR #44): `pagehide` also fires when a page merely
+  // enters the back-forward cache (bfcache), not just on a genuine close — teardown() still runs,
+  // announcing `bye` and closing the guard's BroadcastChannel, while the page itself is only
+  // FROZEN, not destroyed. If the browser later restores it FROM bfcache (`pageshow` with
+  // `event.persisted`), simply resuming as whatever `readOnly` held when it was frozen would let it
+  // resume as a writer with a closed channel and no re-election — every other tab already believes
+  // it left. Reproduces: tab1 is the sole (leader) tab; simulate its pagehide+bfcache-restore cycle
+  // while tab2 is opened in between (a real reason the world could have changed while tab1 was
+  // frozen) — tab1 must NOT resume as a blind writer; it must re-join the election and end up
+  // correctly read-only, since tab2 is now the rightful (older, still-live) leader.
+  test('a bfcache pageshow (event.persisted) re-joins the election as a new tab instead of resuming as writer', async () => {
+    const ctx = await freshContext();
+    const tab1 = await openApp(ctx); // sole tab — leader
+    await tab1.waitForTimeout(300);
+    assert.equal(await tab1.evaluate(() => DB.isReadOnly), false, 'tab1 must start as the (only) writer');
+
+    // Simulate tab1 entering the bfcache: pagehide fires (teardown announces `bye` and closes its
+    // channel), but the page itself is NOT actually destroyed — we keep evaluating on it.
+    await tab1.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+    await tab1.waitForTimeout(200);
+
+    // While tab1 is "frozen", a genuinely new tab opens — it has nothing to lose the race against
+    // (tab1's channel is closed and it announced departure), so it becomes the writer.
+    const tab2 = await openApp(ctx);
+    await tab2.waitForTimeout(500);
+    assert.equal(await tab2.evaluate(() => DB.isReadOnly), false, 'tab2 must become the writer — tab1 already announced it left');
+
+    // tab1 is restored from bfcache: `pageshow` fires with `persisted: true`.
+    await tab1.evaluate(() => {
+      const ev = new Event('pageshow');
+      Object.defineProperty(ev, 'persisted', { value: true });
+      window.dispatchEvent(ev);
+    });
+    await tab1.waitForTimeout(500); // let the fresh hello/hello-ack handshake settle
+
+    assert.equal(await tab1.evaluate(() => DB.isReadOnly), true, 'tab1 must NOT resume as a blind writer after a bfcache restore — it must re-join the election and lose to tab2, the still-live rightful leader');
+    assert.equal(await tab2.evaluate(() => DB.isReadOnly), false, 'tab2 must remain the writer throughout — tab1\'s bfcache restore must not have silently taken over');
+
+    // And tab1 in this now-correctly-read-only state must refuse a write, exactly like any other
+    // read-only tab (same guard as the "a second tab..." test below).
+    const attempt = await tab1.evaluate(() => {
+      try { DB.run("INSERT INTO projects (title, code, status) VALUES ('FromBfcacheTab','BFC-1','Active')"); return { threw: false }; }
+      catch (e) { return { threw: true }; }
+    });
+    assert.equal(attempt.threw, true, 'tab1, now correctly read-only post-bfcache-restore, must refuse a write');
+
+    await ctx.close();
+  });
+
+  // Item 2 (second review of PR #44): pagehide's own teardown() used to broadcast `bye` and close
+  // its BroadcastChannel immediately, while the outgoing tab's own final flush (issued by the
+  // SEPARATE, earlier-registered pagehide->flushNow listener) was still async and in flight — a
+  // surviving read-only tab could promote off that bare `bye` and reload from IndexedDB BEFORE the
+  // outgoing tab's write ever landed, capturing stale bytes. Reproduces the exact race: tab1 (the
+  // leader) makes an edit, its own autosave write is artificially slowed by ~800ms (delaying only
+  // WHEN idbSet's transaction reports itself complete to db.js, not the real underlying commit),
+  // then pagehide fires — and the promoted tab's database must end up containing the edit, not a
+  // stale pre-edit copy.
+  test('closing the leader with its save deliberately slowed: the promoted tab ends up with the edit, not a stale reload', async () => {
+    const ctx = await freshContext();
+    const tab1 = await openApp(ctx); // leader
+    await tab1.waitForTimeout(300);
+
+    const tab2 = await openApp(ctx); // read-only — opened after tab1
+    await tab2.waitForTimeout(500);
+    assert.equal(await tab2.evaluate(() => DB.isReadOnly), true, 'tab2 must start read-only');
+
+    // Slow down exactly the NEXT IndexedDB transaction's completion notification by ~800ms —
+    // delays when db.js's own idbSet() promise resolves, without touching the real underlying
+    // commit, so this reproduces "the outgoing tab's flush is still genuinely in flight when
+    // pagehide fires" without needing to fake IndexedDB itself.
+    await tab1.evaluate(() => {
+      const proto = IDBTransaction.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'oncomplete');
+      let armed = true;
+      Object.defineProperty(proto, 'oncomplete', {
+        configurable: true,
+        set(fn) {
+          if (armed && typeof fn === 'function') {
+            armed = false;
+            desc.set.call(this, function (...args) { setTimeout(() => fn.apply(this, args), 800); });
+          } else {
+            desc.set.call(this, fn);
+          }
+        },
+        get() { return desc.get.call(this); },
+      });
+    });
+
+    await tab1.evaluate(() => {
+      DB.run("INSERT INTO projects (title, code, status) VALUES ('SlowFlushProof','SLOW-1','Active')");
+    });
+    // Fire pagehide right away — well within the 400ms debounce, and well before the artificially
+    // slowed write (~800ms) can have completed.
+    await tab1.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+
+    // Immediately after pagehide, tab2 must NOT have promoted yet — the leader's `bye` said a save
+    // was still pending, so tab2 must be waiting (for a `saved` message or the bounded grace
+    // period), not reloading from IndexedDB right away.
+    await tab1.waitForTimeout(150);
+    assert.equal(await tab2.evaluate(() => DB.isReadOnly), true, 'tab2 must still be read-only shortly after pagehide — it must not have promoted before the leader\'s slow write landed');
+
+    // Eventually (once the slowed write lands and tab1 announces `saved`, well within the
+    // BYE_GRACE_MS fallback) tab2 promotes.
+    await tab2.waitForFunction(() => window.DB && DB.isReadOnly === false, { timeout: 5000 });
+
+    const hasEdit = await tab2.evaluate(() => !!DB.row("SELECT id FROM projects WHERE code='SLOW-1'"));
+    assert.equal(hasEdit, true, 'the promoted tab\'s database must contain the slow-flushed edit — a reload that raced ahead of it would have missed this row entirely');
+
+    await ctx.close();
+  });
+
   test('a second tab on the same database goes read-only; only the first tab ever persists', async () => {
     const ctx = await freshContext();
     const tab1 = await openApp(ctx);
@@ -150,7 +262,7 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     await tab1.waitForTimeout(700); // past the 400ms debounce
 
     await tab1.reload();
-    await tab1.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(tab1);
     const titles = await tab1.evaluate(() => DB.rows('SELECT title FROM projects ORDER BY title').map((r) => r.title));
     assert.ok(titles.includes('FromLeaderTab'), 'the leader tab\'s edit must have been saved');
     assert.ok(!titles.includes('FromReadOnlyTab'), 'the read-only tab\'s edit must never have been persisted, or it would have silently overwritten the leader\'s data');
@@ -204,7 +316,7 @@ describe('persistence: autosave flush and the multi-tab guard', { skip }, () => 
     await tabB.waitForTimeout(700);
 
     await tabB.reload();
-    await tabB.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(tabB);
     const names = await tabB.evaluate(() => DB.rows('SELECT name FROM people ORDER BY name').map((r) => r.name));
     assert.ok(names.includes('PersonFromA'), 'A\'s person must still be present after the promoted tab\'s own later save');
     assert.ok(names.includes('PersonFromB'), 'B\'s post-promotion save must have persisted, proving it is a real writer now');

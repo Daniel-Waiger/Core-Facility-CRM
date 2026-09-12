@@ -702,12 +702,22 @@
   // never trust its inputs, since a legacy row or a future caller could still hand it one.
   function clampNonNeg(n) { return Math.max(0, Number(n) || 0); }
   function clampPct(n) { return Math.min(100, Math.max(0, Number(n) || 0)); }
+  // Item 8 (second review): a 1.0 ratio is the ceiling a "percent of the floored staff hours"
+  // factor can mean (100% — the whole line) before it stops being a percentage and starts being a
+  // multiplier; a category billing policy with a corrupted/mistyped staff_pct of 150 must not turn
+  // into a 1.5x multiplier on every staff line. Same defensive belt-and-suspenders reasoning as
+  // clampNonNeg/clampPct above: real callers already validate staff_pct at 0-100 before dividing by
+  // 100 to get this factor, but computeBookingBOM must never trust its inputs.
+  function clampFactor(n) { return Math.min(1, Math.max(0, Number(n) || 0)); }
 
   function computeBookingBOM({ start, end, instruments, staff, groupPct, manualPct, rates, staffPctFactor }) {
     const bookingHours = hoursBetween(start, end);
-    const overheadPct = clampNonNeg((rates && rates.overheadPct) || 0);
+    // Item 8 (second review): overheadPct was floored at 0 but never capped — a corrupted/mistyped
+    // overhead rate above 100% silently inflated every "before tax" figure with no ceiling. Capped
+    // the same way taxPct already is via clampPct, just below.
+    const overheadPct = clampPct((rates && rates.overheadPct) || 0);
     const taxPct = clampPct((rates && rates.taxPct) || 0);
-    const pctFactor = staffPctFactor == null ? 1 : clampNonNeg(staffPctFactor);
+    const pctFactor = staffPctFactor == null ? 1 : clampFactor(staffPctFactor);
     const safeGroupPct = clampPct(groupPct);
     const safeManualPct = clampPct(manualPct);
 
