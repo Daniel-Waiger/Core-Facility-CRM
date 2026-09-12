@@ -500,21 +500,29 @@
 
     // One-time migration of the legacy overhead_internal/overhead_external app_config pair into
     // two default tiers, so an existing facility sees its old rates as named, editable tiers
-    // instead of losing them. Only runs once (pricing_tiers starts empty) and only when there was
-    // actually a legacy rate configured — a brand-new database with no app_config rows yet gets no
-    // tiers either, same as it would get no group_discounts rows. LEGACY FALLBACK STAYS IN FORCE
-    // regardless: any org with no group_tiers row keeps pricing at the (unedited-from-here-on)
-    // overhead_internal + overhead_external sum — see resolveOverheadForOrg — so an untouched
-    // facility (or a group nobody ever assigns a tier to) behaves exactly as before this feature.
+    // instead of losing them. Guarded by 'pricing_tiers_seeded' rather than just "pricing_tiers is
+    // empty": migrate() runs on EVERY boot of an existing database, and without the flag, a
+    // facility that deletes both default tiers (a real zero-ref Delete is offered once nothing
+    // references them) got them right back on the next reload, because the legacy config values
+    // are never cleared. The flag makes this genuinely one-time — set the moment this block is
+    // evaluated at all, whether or not it actually had anything to seed — so a re-empty table never
+    // re-triggers it. LEGACY FALLBACK STAYS IN FORCE regardless: any org with no group_tiers row
+    // keeps pricing at the (unedited-from-here-on) overhead_internal + overhead_external sum — see
+    // resolveOverheadForOrg — so an untouched facility (or a group nobody ever assigns a tier to)
+    // behaves exactly as before this feature, and a first upgrade behaves exactly as it did before
+    // this flag existed.
     try {
-      const already = row('SELECT COUNT(*) as c FROM pricing_tiers') || { c: 0 };
-      if (!already.c) {
-        const hasInternal = getConfig('overhead_internal', null);
-        const hasExternal = getConfig('overhead_external', null);
-        if (hasInternal != null || hasExternal != null) {
-          run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['Internal', getConfigNum('overhead_internal', 0)]);
-          run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['External', getConfigNum('overhead_external', 0)]);
+      if (getConfig('pricing_tiers_seeded', null) == null) {
+        const already = row('SELECT COUNT(*) as c FROM pricing_tiers') || { c: 0 };
+        if (!already.c) {
+          const hasInternal = getConfig('overhead_internal', null);
+          const hasExternal = getConfig('overhead_external', null);
+          if (hasInternal != null || hasExternal != null) {
+            run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['Internal', getConfigNum('overhead_internal', 0)]);
+            run('INSERT INTO pricing_tiers (name, overhead_pct) VALUES (?,?)', ['External', getConfigNum('overhead_external', 0)]);
+          }
         }
+        setConfig('pricing_tiers_seeded', 1);
       }
     } catch (_) {}
 
@@ -1240,7 +1248,8 @@
   }
   function setGroupDiscount(org, percent) {
     if (!org) return;
-    run('INSERT INTO group_discounts (org, percent) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET percent=excluded.percent', [org, Number(percent) || 0]);
+    const clamped = Math.min(100, Math.max(0, Number(percent) || 0));
+    run('INSERT INTO group_discounts (org, percent) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET percent=excluded.percent', [org, clamped]);
   }
   function listGroupDiscounts() {
     return rows('SELECT org, percent FROM group_discounts ORDER BY org');
@@ -1409,6 +1418,10 @@
     parts.total = parts.projects + parts.milestones + parts.bookings + parts.entries;
     return parts;
   }
+  // `billed` follows the same Project Costs rule as views.js/reports.js (CLAUDE.md: "a row counts
+  // unless is_cancelled && !billing_retained") — a cancelled-and-waived booking or service entry
+  // bills 0 on that screen, so the Archive dialog quoting a different (raw) figure here would be
+  // telling the admin a project "carries" money that Project Costs itself shows as zero.
   function countProjectRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_people WHERE project_id=?) AS team,
@@ -1419,8 +1432,8 @@
       (SELECT COUNT(*) FROM files WHERE project_id=?) AS files,
       (SELECT COUNT(*) FROM kv WHERE project_id=?) AS fields,
       (SELECT COUNT(*) FROM project_outputs WHERE project_id=?) AS outputs,
-      (SELECT COALESCE(SUM(total_cost),0) FROM meetings WHERE project_id=?) AS billed,
-      (SELECT COALESCE(SUM(total_cost),0) FROM service_entries WHERE project_id=?) AS entriesBilled`,
+      (SELECT COALESCE(SUM(CASE WHEN is_cancelled=1 AND billing_retained=0 THEN 0 ELSE total_cost END),0) FROM meetings WHERE project_id=?) AS billed,
+      (SELECT COALESCE(SUM(CASE WHEN is_cancelled=1 AND billing_retained=0 THEN 0 ELSE total_cost END),0) FROM service_entries WHERE project_id=?) AS entriesBilled`,
       [id, id, id, id, id, id, id, id, id, id]) || {};
     const parts = {
       team: r.team || 0, instruments: r.instruments || 0, milestones: r.milestones || 0,
@@ -1449,6 +1462,27 @@
     parts.any = parts.lines + parts.attendees + (parts.total > 0 ? 1 : 0);
     return parts;
   }
+
+  /* Rebuilds ONE meeting's denormalized `attendees` display string from meeting_people — the
+     single source of truth for who was actually there. Exists so every writer of `people.name`
+     (today, just pEditSave) can keep the two in sync per CLAUDE.md's "denormalized display string
+     + join table must both be written on every save", the same way bookingSave/bookingEditSave
+     already do for a booking's own attendee edits. */
+  function refreshAttendeesForMeeting(meetingId) {
+    const names = rows(
+      `SELECT p.name AS name FROM meeting_people mp JOIN people p ON p.id = mp.person_id WHERE mp.meeting_id=?`,
+      [meetingId]
+    ).map((r) => r.name).join(', ');
+    run('UPDATE meetings SET attendees=? WHERE id=?', [names, meetingId]);
+  }
+  // Every meeting a person is on, recomputed — call this after ANY write to people.name so a
+  // rename can never leave meetings.attendees stale (it drifted silently until this existed:
+  // pEditSave updated people.name only, and every export/list kept showing the old name).
+  function refreshAttendeesForPerson(personId) {
+    rows('SELECT DISTINCT meeting_id FROM meeting_people WHERE person_id=?', [personId])
+      .forEach((r) => refreshAttendeesForMeeting(r.meeting_id));
+  }
+
   /* How much of the app a grant touches: projects billed against it and bookings billed against
      it (both via a nullable, REFERENCES-less grant_id column — see the migrate() comment for why).
      Zero references means there's nothing to preserve, so retireGrant offers a real delete instead
@@ -1567,6 +1601,15 @@
     const oldTier = row('SELECT tier_id FROM group_tiers WHERE org=?', [oldName]);
     const targetHadTier = !!row('SELECT 1 as x FROM group_tiers WHERE org=?', [newName]);
     const tierMerged = !!(oldTier && targetHadTier);
+    // The ORG vocab table (facility-registered "+ Add New" lab names, listed by orgNames()) is
+    // ANOTHER place this name lives, independent of people/discounts/tiers — a lab entered via
+    // vocab but not yet assigned to anyone would otherwise still show the old name in every
+    // Lab/Group/Company picker after a rename. category/value carries a UNIQUE constraint, so a
+    // rename that collides with an existing vocab entry for newName is a merge (drop the old row)
+    // exactly like group_discounts/group_tiers above, not a raced UPDATE.
+    const oldVocab = !!row("SELECT 1 as x FROM vocab WHERE category='ORG' AND value=?", [oldName]);
+    const targetHadVocab = !!row("SELECT 1 as x FROM vocab WHERE category='ORG' AND value=?", [newName]);
+    const vocabMerged = !!(oldVocab && targetHadVocab);
 
     if (peopleCount) run('UPDATE people SET organization=? WHERE organization=?', [newName, oldName]);
     if (bookingsCount) run('UPDATE meetings SET group_org=? WHERE group_org=?', [newName, oldName]);
@@ -1595,9 +1638,20 @@
       }
     }
 
+    let vocabMoved = false;
+    if (oldVocab) {
+      if (targetHadVocab) {
+        run("DELETE FROM vocab WHERE category='ORG' AND value=?", [oldName]);
+      } else {
+        run("UPDATE vocab SET value=? WHERE category='ORG' AND value=?", [newName, oldName]);
+        vocabMoved = true;
+      }
+    }
+
     return {
       peopleCount, bookingsCount, discountMoved, merged, hadDiscount: !!oldDiscount,
-      tierMoved, tierMerged, hadTier: !!oldTier
+      tierMoved, tierMerged, hadTier: !!oldTier,
+      vocabMoved, vocabMerged, hadVocab: oldVocab
     };
   }
 
@@ -2319,6 +2373,8 @@
     grantLabel,
     setProjectArchived,
     countBookingRefs,
+    refreshAttendeesForMeeting,
+    refreshAttendeesForPerson,
     setBookingCancelled,
     setServiceEntryCancelled,
     setRetired,

@@ -117,7 +117,7 @@
         </div>
         <select class="input select-filter" id="proj-status-filter" style="width:140px">
           <option value="">All Statuses</option>
-          ${global.DB.vocabList('STATUS').map((s) => `<option value="${s}" ${projectFilter.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+          ${global.DB.vocabList('STATUS').map((s) => `<option value="${esc(s)}" ${projectFilter.status === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
         </select>
         <select class="input select-filter" id="proj-priority-filter" style="width:130px">
           <option value="">All Priorities</option>
@@ -312,8 +312,8 @@
         <span class="faint small font-medium">Quick Status:</span>
         <div class="row" style="gap:6px;flex-wrap:wrap">
           ${global.DB.vocabList('STATUS').map((st) => `
-            <button class="btn btn-sm ${p.status === st ? 'btn-primary' : 'btn-ghost'}" data-act="set-project-status" data-status="${st}">
-              ${st}
+            <button class="btn btn-sm ${p.status === st ? 'btn-primary' : 'btn-ghost'}" data-act="set-project-status" data-status="${esc(st)}">
+              ${esc(st)}
             </button>
           `).join('')}
           <button class="btn btn-sm btn-secondary" data-act="vocab-add" data-cat="STATUS" data-target="" data-label="Status" data-tooltip="Add a custom project status">${ic('plus')} Add Status</button>
@@ -1467,7 +1467,7 @@
         ${grants.length ? `
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>Name</th><th>Number</th><th>Note</th><th title="People allowed to be picked for this grant">Allowed Users</th><th style="text-align:right">Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Number</th><th>Note</th><th title="People associated with this grant, for reference — bookings and projects are not restricted to them">Allowed Users</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
               ${grants.map((g) => `
                 <tr class="${g.is_retired ? 'row-retired' : ''}">
