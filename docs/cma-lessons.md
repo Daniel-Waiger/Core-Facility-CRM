@@ -159,4 +159,34 @@ A lesson that just restates an architecture rule should be deleted — point at
   every old label — four places quoted labels that no longer existed, and three
   of those were made stale by the same run that fixed them.
 
+## Testing this app's private closures (2026-09-12)
+
+- **Save functions must use a "topmost modal" helper — a first-match `.modal` lookup breaks under
+  stacked modals.** 24 of 26 save functions in `js/app.js` read `document.querySelector('.modal')`,
+  which is the *bottom* modal when a second one is open on top of it (e.g. opened from Today's
+  Agenda) — the save silently reads/writes the wrong form. Any new save function should reuse a
+  single "topmost `.modal`" helper, not repeat the pattern that already broke four real paths.
+
+- **No unit test loaded `js/exports.js` at all, and export-only defects survived because of it** —
+  a stale "(Archived)" suffix promised by a comment but never written, and a bare `GROUP_CONCAT`
+  missing the retired-suffix `CASE WHEN` every other query in the file uses. A money/label rule
+  proven once in `js/reports.js` or `js/app.js` is not proven again for its XLSX/DOCX/PDF path;
+  each export format is its own code path (CLAUDE.md) and needs its own assertion.
+
+- **`restoreBackup` validated only the envelope** (`kind` and `!data.db`), not that the bytes
+  inside were a usable database — `db: []` passed. A round-trip test that only checks "restore
+  didn't throw" cannot catch this; it takes a test that actually queries a core table afterward.
+
+- **"The demo already shows it" is a cheap, real first check for a reports/aggregation claim.**
+  Both R1/R2-class defects in this codebase (a revenue figure pre-discount, a matrix dropping
+  instrument-less bookings) were independently reproducible in the shipped demo seed with no setup
+  — before writing a fixture, try the claim against the demo dataset first.
+
+- **A correction pass over the previous review's own claims found two more wrong ones on inspection**
+  — one about which vocab category was actually unescaped (PERSON_TYPES was fine; `people.type` and
+  the STATUS vocab were not), one about a UI overlap being clipped rather than visually stacked.
+  This is the same "corrections need their own adversarial pass" lesson already recorded above,
+  seen again in a different section of the same run — restating it here would be a duplicate; this
+  entry exists only to note it recurred, not to re-explain it.
+
 <!-- cma:append-here -->

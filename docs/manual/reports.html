@@ -112,9 +112,11 @@
         <li>Each cell reads as <strong>"n sess · x h"</strong> — a count of sessions, and a number of hours.</li>
         <li><strong>Sessions are not split.</strong> If a staff member worked one booking that used two instruments, that's one full session credited under each instrument column they touched.</li>
         <li><strong>Hours ARE split</strong> across the booking's instruments, so that each staff member's row still adds up to their real total hours rather than over-counting them. If someone spent 2 hours on a booking that used 2 instruments, each instrument's cell gets 1 of those 2 hours — the two combined give back their true 2 hours.</li>
+        <li>This matrix only has cells for bookings that had at least one instrument on them. A booking with no instrument (staff time only) still counts on Card 2's Raw hours total, but has nothing to attribute a column to here, so it's left out of this card entirely.</li>
       </ul>
       <div class="callout why"><p><strong>🔍 Why it works this way.</strong> This is the opposite of Card 1's rule, and deliberately so: the Instrument card is answering "how occupied was this instrument?" (both instruments really were tied up for the whole time, so each gets full hours). The matrix is answering "how did this person's time break down by instrument?" — and a person only has so many hours in a day, so splitting keeps their row honest rather than making it look like they worked twice as many hours as they did.</p></div>
-      <div class="callout try"><p><strong>🧪 Try it.</strong> In the demo sandbox, find a staff member and instrument pair in its matrix, then cross-check the hours against that person's Raw hours total on Card 2 — the matrix row should sum to the same total.</p></div>
+      <div class="callout warn"><p><strong>⚠️ Careful.</strong> Because instrument-less bookings are left out, a staff member's matrix row does NOT always add up to their Raw hours total on Card 2 — only to the portion of it that came from bookings with an instrument attached. Someone with any staff-only session will show less here than their real total.</p></div>
+      <div class="callout try"><p><strong>🧪 Try it.</strong> In the demo sandbox, find a staff member in the matrix and add up their row. Then compare it with their Raw hours total on Card 2 — if it's lower, that's the gap above: they have at least one booking with no instrument on it, credited on Card 2 but absent from this matrix.</p></div>
     </section>
 
     <section>
