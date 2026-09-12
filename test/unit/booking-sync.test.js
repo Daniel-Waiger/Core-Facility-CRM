@@ -18,6 +18,14 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { freshApp, fakeBookingModal } = require('./helpers/app-harness');
+/* The savers read their form off UI.topModal() — the `.modal` inside the LAST `.modal-dim` in the
+ * document (see js/ui.js). Present the fake modal through exactly that lookup. */
+function mountModal(app, modal) {
+  const dim = { querySelector: (sel) => (sel === '.modal' ? modal : null) };
+  app.document.querySelectorAll = (sel) => (sel === '.modal-dim' ? [dim] : []);
+  app.document.querySelector = (sel) => (sel === '.modal' ? modal : null);
+}
+
 const { seedFixture } = require('./helpers/sqlite');
 
 function attendeeState(DB, meetingId) {
@@ -35,11 +43,11 @@ describe('bookingSave: attendees string and meeting_people are written together'
     const app = await freshApp();
     const { alice, sam, liveProject } = seedFixture(app.DB);
 
-    app.document.querySelector = (sel) => (sel === '.modal' ? modal : null);
     const modal = fakeBookingModal({
       prefix: 'bk', title: 'New Session', date: '2026-04-01', start: '09:00', end: '10:00',
       project: liveProject, ownerIds: [alice, sam],
     });
+    mountModal(app, modal);
 
     app.internals.bookingSave();
 
@@ -55,11 +63,11 @@ describe('bookingSave: attendees string and meeting_people are written together'
     const app = await freshApp();
     const { liveProject } = seedFixture(app.DB);
 
-    app.document.querySelector = (sel) => (sel === '.modal' ? modal : null);
     const modal = fakeBookingModal({
       prefix: 'bk', title: 'No Owners', date: '2026-04-01', start: '09:00', end: '10:00',
       project: liveProject, ownerIds: [],
     });
+    mountModal(app, modal);
 
     app.internals.bookingSave();
 
@@ -86,11 +94,11 @@ describe('bookingEditSave: the delete-then-reinsert rebuild keeps attendees and 
     const { alice, sam, liveProject } = seedFixture(app.DB);
     const id = existingBooking(app, { liveProject, alice });
 
-    app.document.querySelector = (sel) => (sel === '.modal' ? modal : null);
     const modal = fakeBookingModal({
       prefix: 'bke', title: 'Existing', date: '2026-04-01', start: '09:00', end: '10:00',
       project: liveProject, ownerIds: [alice, sam],
     });
+    mountModal(app, modal);
 
     app.internals.bookingEditSave(id);
 
@@ -113,11 +121,11 @@ describe('bookingEditSave: the delete-then-reinsert rebuild keeps attendees and 
     app.DB.run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [id, sam]);
 
     // The form now only shows Alice — Sam was unpicked.
-    app.document.querySelector = (sel) => (sel === '.modal' ? modal : null);
     const modal = fakeBookingModal({
       prefix: 'bke', title: 'Existing', date: '2026-04-01', start: '09:00', end: '10:00',
       project: liveProject, ownerIds: [alice],
     });
+    mountModal(app, modal);
 
     app.internals.bookingEditSave(id);
 
@@ -131,11 +139,11 @@ describe('bookingEditSave: the delete-then-reinsert rebuild keeps attendees and 
     const { alice, liveProject } = seedFixture(app.DB);
     const id = existingBooking(app, { liveProject, alice });
 
-    app.document.querySelector = (sel) => (sel === '.modal' ? modal : null);
     const modal = fakeBookingModal({
       prefix: 'bke', title: 'Existing', date: '2026-04-01', start: '09:00', end: '10:00',
       project: liveProject, ownerIds: [],
     });
+    mountModal(app, modal);
 
     app.internals.bookingEditSave(id);
 
