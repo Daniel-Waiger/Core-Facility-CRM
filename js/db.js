@@ -786,16 +786,23 @@
       req.onerror = () => reject(req.error);
     });
   }
+  // Resolve only once the TRANSACTION commits (tx.oncomplete), not once the individual request
+  // succeeds (req.onsuccess) — a request can succeed and still have its transaction abort/fail to
+  // commit (e.g. a quota error surfacing at commit time), and a caller awaiting idbSet/idbDelete
+  // needs "durably written", not "queued". req.onsuccess/req.onerror are NOT wired to resolve/
+  // reject here on purpose: a Promise settles on its first resolve/reject call, so if req.onsuccess
+  // also called resolve() it would win the race and the promise would settle before tx.oncomplete
+  // ever fires, making the tx handlers below dead code (this is exactly the bug being fixed).
+  // req.onerror is still surfaced via tx.onerror/tx.onabort, which fire for the same failure.
   async function idbSet(key, val) {
     if (memoryMode) { memoryStore.set(key, val); return; }
     const s = await idbOpen();
     return new Promise((resolve, reject) => {
       const tx = s.transaction('kv', 'readwrite');
-      const req = tx.objectStore('kv').put({ k: key, v: val });
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      tx.objectStore('kv').put({ k: key, v: val });
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('idbSet transaction aborted'));
     });
   }
   async function idbDelete(key) {
@@ -803,11 +810,10 @@
     const s = await idbOpen();
     return new Promise((resolve, reject) => {
       const tx = s.transaction('kv', 'readwrite');
-      const req = tx.objectStore('kv').delete(key);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      tx.objectStore('kv').delete(key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('idbDelete transaction aborted'));
     });
   }
   async function idbGetAllWithPrefix(prefix) {
@@ -933,7 +939,22 @@
           db.exec('PRAGMA foreign_keys = ON;');
         }
       } catch (e) {
-        console.error('multi-tab promotion: reload from IndexedDB failed, resuming with the existing in-memory copy', e);
+        // The reload failed, so this tab's in-memory `db` might still be the stale copy it had
+        // as a reader — promoting it to writer anyway would risk autosaving that stale image
+        // right over whatever the outgoing leader last wrote. Stay read-only (never fall through
+        // to the success path below), tell the UI so it can keep showing the read-only banner,
+        // and retry the reload after a short delay rather than leaving this tab stuck read-only
+        // forever with no way back in short of a manual reload.
+        console.error('multi-tab promotion: reload from IndexedDB failed — staying read-only and retrying', e);
+        promoting = false; // allow a retry to actually run reloadFromDiskAndPromote() again
+        if (global.UI && global.UI.toast) {
+          global.UI.toast('Could not switch this tab to the active database copy. Retrying…', 'error');
+        }
+        if (global.App && global.App.onMultiTabState) global.App.onMultiTabState(true, { promoteFailed: true });
+        setTimeout(() => {
+          if (readOnly && !promoting) { promoting = true; reloadFromDiskAndPromote(); }
+        }, 3000);
+        return;
       }
       // This tab was read-only, so nothing here should be unsaved — but clear any leftover autosave
       // state anyway rather than trust that invariant blindly (belt-and-suspenders, same reasoning
@@ -1021,6 +1042,23 @@
   let dirty = false;
   let saving = false;
   let pendingDuringSave = false;
+  // Bumped by restoreBackup() right before it swaps the live `db` handle. A flush() that started
+  // against the OLD database (its `bytes` snapshot taken via currentBytes() before the swap) must
+  // never persist after the swap — if its idbSet(DB_KEY, ...) lands after restore's own write, the
+  // old database would silently overwrite the just-restored one in IndexedDB. flush() captures the
+  // generation it started with and refuses to write if it has since changed; restoreBackup also
+  // waits for any flush already in flight to finish before it ever swaps `db`, so this counter is
+  // the belt to that suspenders for the narrower window in between.
+  let dbGeneration = 0;
+  function waitForSaveIdle() {
+    if (!saving) return Promise.resolve();
+    return new Promise((resolve) => {
+      (function check() {
+        if (!saving) return resolve();
+        setTimeout(check, 15);
+      })();
+    });
+  }
   // Red-team D: a failed save used to leave `dirty` true with nothing armed to retry it until the
   // NEXT edit happened to call markDirty() again — a facility that stops typing right after a
   // failure (the exact moment it's most likely to notice something's wrong) would sit unsaved
@@ -1047,14 +1085,34 @@
     if (!dirty) return;
     if (saving) return; // a save is already in flight; markDirty() already flagged pendingDuringSave
     if (multiTabGuard.isReadOnly()) return; // this tab lost the leader race — never persist over it
+    const myGen = dbGeneration;
     saving = true;
     try {
+      if (myGen !== dbGeneration) {
+        // A restore superseded this database between markDirty() scheduling us and us actually
+        // starting — writing this snapshot now would stomp the just-restored database. Drop it;
+        // restoreBackup() persists the new database itself.
+        pendingDuringSave = false;
+        return;
+      }
       const bytes = currentBytes(); // snapshot taken now; pendingDuringSave catches anything later
       await idbSet(DB_KEY, bytes);
-      if (pendingDuringSave) {
-        // more edits landed while this save was writing — those aren't in `bytes`, so stay dirty
-        // and rely on the timer markDirty() already (re)armed to flush them.
+      if (myGen !== dbGeneration) {
+        // Same race, caught after the write went out: a restore happened while this idbSet was
+        // in flight. The bytes we just wrote are stale (the old database); don't clear `dirty` or
+        // report success for them — restoreBackup()'s own write is what actually matters now.
         pendingDuringSave = false;
+        return;
+      }
+      if (pendingDuringSave) {
+        // More edits landed while this save was writing — those aren't in `bytes`, so stay dirty.
+        // Normally the timer markDirty() (re)armed while `saving` was true covers this — but a
+        // lifecycle flush (pagehide/beforeunload/visibilitychange, via flushNow()) clears that
+        // timer to jump the debounce queue, and if THIS save was the one already in flight when
+        // that happened, the timer it relied on is gone with nothing left to fire. Schedule one
+        // explicitly here so a save that raced a tab-close flush is never left dirty forever.
+        pendingDuringSave = false;
+        scheduleFlush();
       } else {
         dirty = false;
         if (global.App && global.App.onSaved) global.App.onSaved();
@@ -1214,6 +1272,13 @@
     // Validates BEFORE anything below touches the live `db` or IndexedDB — see
     // inspectBackupCandidate's comment. A throw here leaves the live handle exactly as it was.
     const preview = await inspectBackupCandidate(data);
+    // 4c: let any autosave already in flight finish writing the OLD database first. Without this,
+    // that flush's idbSet (bytes captured from the pre-restore `db`) could still be pending when
+    // we swap `db` and write below, and land in IndexedDB AFTER our write — silently putting the
+    // old database back. dbGeneration (bumped just below, before we ever touch `db`) is the
+    // remaining backstop for the narrower gap between this wait and the swap.
+    await waitForSaveIdle();
+    dbGeneration++;
     const SQL = await initSqljs();
     const rawBytes = Array.isArray(data.db) ? new Uint8Array(data.db) : data.db;
     const newDb = new SQL.Database(rawBytes);
@@ -1231,6 +1296,16 @@
       throw e;
     }
     try { previousDb.close(); } catch (_) {}
+    // 4b: restore must REPLACE the upload set, not merge into it — an attachment removed from the
+    // facility's data before this backup was taken (or never present in it) must not survive the
+    // restore just because some earlier database left its blob sitting in IndexedDB. Delete every
+    // uploads:* entry the incoming backup doesn't carry before writing the ones it does.
+    const backupUploadNames = new Set(Object.keys(data.uploads || {}));
+    const existingUploads = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+    for (const { key } of existingUploads) {
+      const name = key.slice((UPLOAD_KEY + ':').length);
+      if (!backupUploadNames.has(name)) await idbDelete(key);
+    }
     for (const [name, entry] of Object.entries(data.uploads || {})) {
       if (entry && typeof entry === 'object' && typeof entry.data === 'string') {
         await idbSet(UPLOAD_KEY + ':' + name, base64ToBlob(entry));
@@ -1248,9 +1323,13 @@
      storageKey `files.path` already holds for kind='upload' rows. */
   async function saveUpload(name, blob) { await idbSet(UPLOAD_KEY + ':' + name, blob); }
   async function getUpload(name) { return idbGet(UPLOAD_KEY + ':' + name); }
+  // Propagates a failure instead of swallowing it (previously: caught, logged, and silently
+  // returned success) — a caller that awaits this and reports "removed"/"deleted" while the blob
+  // is still sitting in IndexedDB is lying to the user. Every caller now awaits this AFTER its own
+  // row-delete transaction commits and catches the rejection to toast rather than assume success.
   async function deleteUpload(name) {
     if (!name) return;
-    try { await idbDelete(UPLOAD_KEY + ':' + name); } catch (e) { console.error('deleteUpload failed', e); }
+    await idbDelete(UPLOAD_KEY + ':' + name);
   }
   async function deleteUploads(names) {
     for (const name of names || []) await deleteUpload(name);
@@ -1869,7 +1948,7 @@
   }
 
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
-  function clearAllData() {
+  async function clearAllData() {
     assertWritable();
     db.exec(`
       DELETE FROM project_people;
@@ -1901,9 +1980,10 @@
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     // M9: every attachment blob this database ever held is now orphaned (its `files` row is
     // gone above) — without this they lingered in IndexedDB forever and kept shipping inside
-    // every future backup. Fire-and-forget: callers never await clearAllData(), and a failure
-    // here leaves at most a harmless orphaned blob, never blocks the row deletes above.
-    deleteAllUploads();
+    // every future backup. clearAllData() is now async specifically so callers CAN await this —
+    // a caller that reports "cleared" before the blobs actually finish deleting would let a user
+    // re-seed/reload while stale uploads are still being wiped underneath them.
+    await deleteAllUploads();
     markDirty();
   }
 
@@ -1995,7 +2075,7 @@
     return mid;
   }
 
-  function seedSampleData({ force = false } = {}) {
+  async function seedSampleData({ force = false } = {}) {
     // Hard refusal, deliberately placed as the first statement of the destructive function itself
     // rather than left to whatever calls it. A check at the call site only makes the call
     // *currently unused* outside the sandbox; a guard here makes the destructive path itself
@@ -2015,7 +2095,7 @@
     // demo database, never a real facility's.
     if (!force && hasAnyDataLocal()) return true;
 
-    clearAllData();
+    await clearAllData();
 
     // Demo dates are relative to the day the sample data is loaded, so the dataset never reads as
     // stale history and always lands inside the Reports screen's default range (the current year).
@@ -2513,7 +2593,11 @@
   // so app.js's helper isn't available here to call. Used only to decide whether an unforced
   // seedSampleData() call should skip re-seeding a sandbox that already has rows.
   function hasAnyDataLocal() {
-    const r = row('SELECT (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) as c');
+    const r = row(`SELECT
+      (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) +
+      (SELECT COUNT(*) FROM meetings) + (SELECT COUNT(*) FROM milestones) + (SELECT COUNT(*) FROM grants) +
+      (SELECT COUNT(*) FROM service_entries) + (SELECT COUNT(*) FROM project_outputs) + (SELECT COUNT(*) FROM files)
+      as c`);
     return !!(r && r.c);
   }
 

@@ -451,22 +451,19 @@
         scrollEl.scrollTop = target;
       }
       // Resource Timeline: a chip's box can be too narrow for its full "emoji + time + name" label
-      // (a short booking is only a few percent of a day column wide) — Views.calEvChipHtml already
-      // marked every such chip with data-tl-time as a fallback. Swap to that short label wherever
-      // the full one actually overflows its box; this runs synchronously right after the DOM is
-      // inserted, so nothing visibly flashes the overflowing state first.
-      document.querySelectorAll('.cal-tl-daycell .ev[data-tl-time]').forEach((el) => {
-        if (el.scrollWidth > el.clientWidth + 0.5) {
-          const t = el.getAttribute('data-tl-time');
-          el.textContent = '';
-          el.append('📅 ');
-          const span = document.createElement('span');
-          span.className = 'mono';
-          span.style.fontSize = '10px';
-          span.textContent = t;
-          el.appendChild(span);
-          el.classList.add('ev-compact');
-        }
+      // (a short booking is only a few percent of a day column wide) — Views.calEvChipHtml renders
+      // all three label tiers (full / compact-time / icon-only) into every such chip, CSS shows
+      // only the "full" tier by default, and this measures (never estimates) which tier actually
+      // fits the chip's real, unwidened box, falling through compact -> icon-only as needed. Runs
+      // synchronously right after the DOM is inserted, so nothing visibly flashes the overflowing
+      // state first. The chip still expands to show its full label on :hover/:focus-visible (CSS),
+      // so a narrow chip is never permanently illegible, just compact until pointed at.
+      document.querySelectorAll('.cal-tl-daycell .ev').forEach((el) => {
+        el.classList.remove('lbl-compact', 'lbl-icon');
+        if (el.scrollWidth <= el.clientWidth + 0.5) return; // full label already fits
+        el.classList.add('lbl-compact');
+        if (el.scrollWidth <= el.clientWidth + 0.5) return; // compact "time" label fits
+        el.classList.add('lbl-icon');
       });
     }
 
@@ -588,7 +585,7 @@
       const handleFresh = () => {
         const proceed = async () => {
           savePref();
-          DB.clearAllData();
+          await DB.clearAllData();
           UI.closeDim(modalDim);
           route('dashboard');
           UI.toast('All facility data cleared.');
@@ -625,8 +622,17 @@
     }, () => { runAfterChoice(); }); // dismissing the welcome modal (outside click) still shows the notice
   }
 
+  // Every persisted data table, not just the three "top-level" ones — a database holding only
+  // bookings, milestones, grants, service entries, research outputs or attached files (e.g. all
+  // projects/people/instruments were themselves deleted, or a very targeted import) is not empty:
+  // it still has history worth a pre-restore safety backup and a real auto-backup, both of which
+  // this function gates. Missing that meant such a database silently skipped both.
   function hasAnyData() {
-    const r = DB.row('SELECT (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) as c');
+    const r = DB.row(`SELECT
+      (SELECT COUNT(*) FROM projects) + (SELECT COUNT(*) FROM people) + (SELECT COUNT(*) FROM instruments) +
+      (SELECT COUNT(*) FROM meetings) + (SELECT COUNT(*) FROM milestones) + (SELECT COUNT(*) FROM grants) +
+      (SELECT COUNT(*) FROM service_entries) + (SELECT COUNT(*) FROM project_outputs) + (SELECT COUNT(*) FROM files)
+      as c`);
     return !!(r && r.c);
   }
 
@@ -1072,7 +1078,7 @@
     // asked BEFORE the call — it is the only way to tell a first open from a return visit, and
     // the tour should only take over the screen on a first open.
     const demoFirstOpen = window.IS_DEMO && !hasAnyData();
-    if (window.IS_DEMO) DB.seedSampleData();
+    if (window.IS_DEMO) await DB.seedSampleData();
 
     renderShell();
     wireGlobal();
@@ -1227,9 +1233,9 @@
         // Surfaced from the demo banner (showDemoBanner), not from Settings — this data-act
         // only ever fires inside a demo tab, where DB.seedSampleData({ force: true }) is
         // allowed to actually re-seed over existing sandbox data.
-        UI.confirmModal('Reset Sandbox?', 'This restores the demo sandbox to its original sample data. Anything you changed here will be lost. This does not affect your real facility records.', { danger: true, confirmText: 'Reset Sandbox' }).then((yes) => {
+        UI.confirmModal('Reset Sandbox?', 'This restores the demo sandbox to its original sample data. Anything you changed here will be lost. This does not affect your real facility records.', { danger: true, confirmText: 'Reset Sandbox' }).then(async (yes) => {
           if (yes) {
-            DB.seedSampleData({ force: true });
+            await DB.seedSampleData({ force: true });
             refresh();
             UI.toast('Demo sandbox reset to its original sample data.');
           }
@@ -1237,9 +1243,9 @@
         return;
       }
       case 'clear-data': {
-        UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and bookings? This cannot be undone.', { danger: true, confirmText: 'Delete Everything' }).then((yes) => {
+        UI.confirmModal('Clear All Facility Data', 'Are you sure you want to delete all projects, people, instruments, milestones, and bookings? This cannot be undone.', { danger: true, confirmText: 'Delete Everything' }).then(async (yes) => {
           if (yes) {
-            DB.clearAllData();
+            await DB.clearAllData();
             refresh();
             UI.toast('All facility data cleared.');
           }
@@ -1725,7 +1731,19 @@
         DB.run('DELETE FROM project_outputs WHERE project_id=?', [pid]);
         DB.run('DELETE FROM projects WHERE id=?', [pid]);
       });
-      if (uploadPaths.length) DB.deleteUploads(uploadPaths);
+      // Awaited AFTER the transaction commits (blob cleanup isn't part of the SQL transaction and
+      // must never run inside DB.transaction()) — and awaited, not fire-and-forget, so a failure
+      // here is reported rather than silently assumed away by the "deleted" toast below.
+      if (uploadPaths.length) {
+        try {
+          await DB.deleteUploads(uploadPaths);
+        } catch (e) {
+          console.error('deleteUploads failed', e);
+          UI.toast('Project deleted, but some of its attached files could not be fully cleared from local storage.', 'error');
+          route('projects');
+          return;
+        }
+      }
       UI.toast('Project deleted');
       route('projects');
       return;
@@ -3525,7 +3543,13 @@
     const title = m.querySelector('#bk-title').value.trim();
     if (!title) { UI.toast('Booking title required', 'error'); m.querySelector('#bk-title').classList.add('is-invalid'); return; }
 
-    const date = m.querySelector('#bk-date').value || UI.today();
+    // A blank date used to silently become today (UI.today()) — a facility scheduling a booking
+    // and clearing the date field by accident got a wrong, un-flagged date instead of a refusal.
+    // Same rule and same message as bookingEditSaveImpl's "Date is required" below, so clearing
+    // the date behaves identically whether the booking is new or being edited.
+    const dateEl = m.querySelector('#bk-date');
+    const date = dateEl ? dateEl.value : '';
+    if (!date) { UI.toast('Date is required', 'error'); if (dateEl) dateEl.classList.add('is-invalid'); return; }
     const start = m.querySelector('#bk-start').value || '';
     const end = m.querySelector('#bk-end').value || '';
     const projectVal = m.querySelector('#bk-project').value;
@@ -4309,8 +4333,20 @@
 
     DB.run('DELETE FROM files WHERE id=?', [id]);
     // M9: kind='link' rows have no blob (path is just the URL/share path itself, never an
-    // uploads: key) — only an actual upload has a blob in IndexedDB to clean up.
-    if (f.kind === 'upload' && f.path) DB.deleteUpload(f.path);
+    // uploads: key) — only an actual upload has a blob in IndexedDB to clean up. Awaited AFTER
+    // the row delete above (a sync write) so a failed blob cleanup never blocks or rolls back the
+    // record itself — but the toast/refresh below now wait on it too, so a failure here is
+    // reported honestly instead of assumed away.
+    if (f.kind === 'upload' && f.path) {
+      try {
+        await DB.deleteUpload(f.path);
+      } catch (e) {
+        console.error('deleteUpload failed', e);
+        UI.toast('Attachment record removed, but its file could not be fully cleared from local storage.', 'error');
+        refresh();
+        return;
+      }
+    }
     UI.toast('Attachment removed');
     refresh();
   }
@@ -4423,8 +4459,13 @@
     if (!taxEl) return;
     const taxPct = Number(taxEl.value) || 0;
     if (rejectOutOfPercentRange(taxPct, 'Tax %')) return;
-    DB.setConfig('tax_pct', taxPct);
-    DB.setConfig('currency', curEl.value.trim() || '$');
+    // Validated-all-or-nothing: both config keys are one logical save, so a mid-write failure
+    // (e.g. a storage error between the two setConfig calls) must never leave tax and currency
+    // out of sync with each other.
+    DB.transaction(() => {
+      DB.setConfig('tax_pct', taxPct);
+      DB.setConfig('currency', curEl.value.trim() || '$');
+    });
     UI.toast('Billing rates saved');
     refresh();
   }
@@ -4455,9 +4496,14 @@
     for (const inp of inputs) {
       if (rejectOutOfPercentRange(Number(inp.value) || 0, `${inp.dataset.org} discount %`)) return;
     }
-    inputs.forEach((inp) => DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0));
-    document.querySelectorAll('.group-tier-select').forEach((sel) => {
-      DB.setGroupTier(sel.dataset.org, sel.value ? Number(sel.value) : null);
+    // Validated-all-or-nothing: every lab's discount AND tier assignment is one save from the
+    // admin's point of view (one button), so a failure partway through must not leave some labs
+    // written and others not.
+    DB.transaction(() => {
+      inputs.forEach((inp) => DB.setGroupDiscount(inp.dataset.org, Number(inp.value) || 0));
+      document.querySelectorAll('.group-tier-select').forEach((sel) => {
+        DB.setGroupTier(sel.dataset.org, sel.value ? Number(sel.value) : null);
+      });
     });
     UI.toast('Group discounts & tiers saved');
     refresh();
@@ -4482,16 +4528,21 @@
       if (!pctEl) continue;
       if (rejectOutOfPercentRange(pctEl.value, `"${category}" staff %`)) return;
     }
-    rowEls.forEach((rowEl) => {
-      const category = rowEl.dataset.category;
-      if (!category) return;
-      const pctEl = rowEl.querySelector('.cat-staff-pct');
-      const reqEl = rowEl.querySelector('.cat-requires-staff');
-      const followEl = rowEl.querySelector('.cat-follow-assisted');
-      DB.setCategoryPolicy(category, {
-        staff_pct: pctEl ? Number(pctEl.value) || 0 : 100,
-        requires_staff: !!(reqEl && reqEl.checked),
-        follow_assisted: !!(followEl && followEl.checked)
+    // Validated-all-or-nothing: every category's policy is written by one button, so a failure
+    // partway through must not leave some categories saved and others still holding their old
+    // policy — the whole-form validation above already promises "all or nothing" to the admin.
+    DB.transaction(() => {
+      rowEls.forEach((rowEl) => {
+        const category = rowEl.dataset.category;
+        if (!category) return;
+        const pctEl = rowEl.querySelector('.cat-staff-pct');
+        const reqEl = rowEl.querySelector('.cat-requires-staff');
+        const followEl = rowEl.querySelector('.cat-follow-assisted');
+        DB.setCategoryPolicy(category, {
+          staff_pct: pctEl ? Number(pctEl.value) || 0 : 100,
+          requires_staff: !!(reqEl && reqEl.checked),
+          follow_assisted: !!(followEl && followEl.checked)
+        });
       });
     });
     UI.toast('Category billing policies saved');

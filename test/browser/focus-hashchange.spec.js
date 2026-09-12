@@ -69,22 +69,23 @@ describe('focus after a hashchange route', { skip }, () => {
     assert.equal(await page.evaluate(() => document.activeElement.id), 'people-search', 'renderView\'s existing focus-restore keeps focus in the live search box on every keystroke — applyRoute\'s heading-focus must never run for a same-screen refresh');
   });
 
-  test('an open modal keeps its own focus — a background route change never yanks focus into the heading', async () => {
+  test('a route change while a modal is open closes it (M8/U2) and lands focus on the new heading', async () => {
     await page.evaluate(() => location.hash = '#/people');
     await page.waitForTimeout(300);
     await page.click('[data-act="add-person"]');
     await page.waitForTimeout(250);
-    const before = await page.evaluate(() => document.activeElement && document.activeElement.id);
-    // Simulate a route change firing while the modal is still open (e.g. a stray hashchange) —
-    // moveFocusToNewScreen must see the open .modal-dim and leave the modal's focus alone.
+    assert.ok(await page.evaluate(() => !!document.querySelector('.modal-dim')), 'expected the Add Person modal to actually be open before navigating away');
+
+    // A route change (hashchange) closes every open modal (M8/U2, see modals.spec.js) rather than
+    // orphaning it — so this must ALWAYS be observable, not merely "if the modal happens to still
+    // be open". A conditional assertion here would quietly stop testing anything the moment the
+    // modal-close fix landed, which is exactly what happened before this fix.
     await page.evaluate(() => { location.hash = '#/instruments'; });
     await page.waitForTimeout(300);
-    const stillModalOpen = await page.evaluate(() => !!document.querySelector('.modal-dim'));
-    if (stillModalOpen) {
-      const after = await page.evaluate(() => document.activeElement && document.activeElement.tagName);
-      assert.notEqual(after, undefined);
-      assert.equal(await page.evaluate(() => document.activeElement === document.getElementById('page-title')), false, 'focus must not jump to the heading while a modal is open');
-    }
-    await page.evaluate(() => { const dim = document.querySelector('.modal-dim'); if (dim) dim.remove(); });
+
+    assert.equal(await page.evaluate(() => !!document.querySelector('.modal-dim')), false, 'the modal must be closed after the route change, not left orphaned open');
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), false, 'focus must not be left on document.body after the route change');
+    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'page-title', 'focus must land on the new screen\'s heading, exactly as an ordinary (no-modal) route change does');
+    assert.equal(await page.evaluate(() => document.getElementById('page-title').textContent), 'Core Instruments');
   });
 });

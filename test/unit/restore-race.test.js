@@ -1,0 +1,239 @@
+/* restore-race.test.js — item 4 (adversarial review of PR #44), parts (b) and (c):
+ *
+ * (c) A flush already scheduled (or in flight) against the OLD database must never persist AFTER
+ * restoreBackup() has swapped in and written the restored one — otherwise the stale old-database
+ * bytes silently land in IndexedDB after the restore, undoing it. restoreBackup() now waits for
+ * any in-flight save to finish before swapping `db`, and bumps a generation counter a flush
+ * checks before it ever writes, so a flush that was merely SCHEDULED (not yet started) when the
+ * restore ran is a no-op once it does fire.
+ *
+ * (b) restoreBackup() must REPLACE the upload set, not merge into it: an attachment blob left
+ * over from the pre-restore database must not survive a restore whose backup doesn't carry it.
+ *
+ * Uses the same minimal fake IndexedDB as autosave.test.js (one 'kv' store, resolving on
+ * tx.oncomplete/onerror — see db.js's idbSet/idbDelete) rather than memoryMode, because memoryMode
+ * writes synchronously and cannot reproduce a race that depends on a debounced timer firing after
+ * an async restore.
+ */
+'use strict';
+
+const { test, describe, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { loadApp, REPO } = require('./helpers/load-module');
+
+// `gate`, when set to a pending Promise, holds every put() from completing until that promise
+// resolves — lets a test pause a write mid-flight at a moment it controls precisely, rather than
+// guessing with setTimeout delays. `onPutStart(key)` fires the instant a put() call begins (before
+// it waits on the gate), so a test can know exactly when a paused write is in flight.
+function makeFakeIndexedDB() {
+  const store = new Map();
+  let gate = null;
+  let onPutStart = null;
+  const dbHandle = {
+    objectStoreNames: { contains: () => true },
+    createObjectStore: () => {},
+    transaction(_name, _mode) {
+      const tx = {};
+      const storeApi = {
+        get(key) {
+          // idbGet (unlike idbSet/idbDelete) still resolves via req.onsuccess, not tx.oncomplete
+          // — see db.js's idbGet, which this fix left unchanged.
+          const req = {};
+          queueMicrotask(() => {
+            req.result = store.has(key) ? { k: key, v: store.get(key) } : undefined;
+            if (req.onsuccess) req.onsuccess();
+            if (tx.oncomplete) tx.oncomplete();
+          });
+          return req;
+        },
+        put(entry) {
+          const finish = () => { store.set(entry.k, entry.v); if (tx.oncomplete) tx.oncomplete(); };
+          if (gate) {
+            // The gate holds exactly the NEXT put() call, then clears itself — so a second put()
+            // (e.g. restoreBackup's own write, arriving while the first is still paused) is NOT
+            // also silently held hostage by the same gate, which would make every write pause
+            // together and hide whichever one a fix does or doesn't make wait for the other.
+            const g = gate;
+            gate = null;
+            if (onPutStart) onPutStart(entry.k);
+            g.then(finish);
+          } else {
+            if (onPutStart) onPutStart(entry.k);
+            queueMicrotask(finish);
+          }
+          return {};
+        },
+        delete(key) {
+          queueMicrotask(() => {
+            store.delete(key);
+            if (tx.oncomplete) tx.oncomplete();
+          });
+          return {};
+        },
+        openCursor() {
+          const req = {};
+          const fire = () => { if (req.onsuccess) req.onsuccess({ target: { result: req.result } }); };
+          queueMicrotask(() => {
+            const keys = [...store.keys()];
+            let i = 0;
+            (function step() {
+              if (i >= keys.length) { req.result = null; fire(); return; }
+              const k = keys[i++];
+              req.result = { key: k, value: store.get(k), continue: step };
+              fire();
+            })();
+          });
+          return req;
+        },
+      };
+      tx.objectStore = () => storeApi;
+      return tx;
+    },
+  };
+  return {
+    store,
+    open() {
+      const req = {};
+      queueMicrotask(() => {
+        req.result = dbHandle;
+        if (req.onupgradeneeded) req.onupgradeneeded({ target: { result: dbHandle } });
+        if (req.onsuccess) req.onsuccess();
+      });
+      return req;
+    },
+    setGate(p) { gate = p; },
+    setOnPutStart(fn) { onPutStart = fn; },
+  };
+}
+
+describe('restoreBackup: races with the autosave debounce, and replaces the upload set', () => {
+  let restoreGlobals = [];
+  afterEach(() => {
+    for (const fn of restoreGlobals) fn();
+    restoreGlobals = [];
+  });
+
+  async function bootFakeApp() {
+    const savedBC = globalThis.BroadcastChannel;
+    delete globalThis.BroadcastChannel;
+    restoreGlobals.push(() => { globalThis.BroadcastChannel = savedBC; });
+
+    const fake = makeFakeIndexedDB();
+    globalThis.indexedDB = { open: (...args) => fake.open(...args) };
+    restoreGlobals.push(() => { delete globalThis.indexedDB; });
+
+    const app = loadApp(['consts', 'db', 'ui']);
+    globalThis.initSqlJs = require(path.join(REPO, 'libs', 'sql-asm.js'));
+    globalThis.App = { onSaving() {}, onSaved() {}, onSaveFailed() {}, onMultiTabState() {} };
+    restoreGlobals.push(() => { delete globalThis.App; });
+
+    const status = await app.DB.boot();
+    assert.equal(status.persistent, true);
+    return { app, fake };
+  }
+
+  test('(c) restoreBackup waits for an IN-FLIGHT autosave write (old bytes already captured) before it swaps and writes the restored database', async () => {
+    const { app, fake } = await bootFakeApp();
+    const { DB } = app;
+
+    // Gate every put() so the autosave triggered below gets its write REQUEST accepted (its bytes
+    // already captured from the OLD database by db.js's flush(), via currentBytes()) but held from
+    // actually completing — reproducing the exact hazard item 4c describes: a save already in
+    // flight with stale bytes, racing restoreBackup's own write.
+    let releaseGate;
+    const gate = new Promise((resolve) => { releaseGate = resolve; });
+    fake.setGate(gate);
+    let putStarted = null;
+    let resolvePutStarted;
+    const putStartedPromise = new Promise((resolve) => { resolvePutStarted = resolve; });
+    fake.setOnPutStart((key) => { putStarted = key; resolvePutStarted(); });
+
+    // Dirty the OLD database — arms the 400ms autosave timer. Once it fires, flush() captures
+    // OLD-database bytes and calls idbSet, which is now gated (paused) above.
+    DB.run("INSERT INTO projects (title, code, status) VALUES ('Stale','P-STALE','Active')");
+    await putStartedPromise; // the stale flush's write is now in flight, paused on the gate
+    assert.equal(putStarted, 'core.db', 'the paused write must be the autosave writing core.db');
+
+    // Build a DIFFERENT, already-valid backup off a second, freshly-booted database.
+    const donor = loadApp(['consts', 'db', 'ui']);
+    await donor.DB.boot();
+    donor.DB.run("INSERT INTO projects (title, code, status) VALUES ('Restored','P-RESTORED','Active')");
+    const restoredBytes = Array.from(donor.DB.currentBytes());
+
+    // Kick off the restore WHILE the stale write is still paused on the gate. Do not await yet —
+    // if restoreBackup correctly waits for the in-flight save (waitForSaveIdle), this promise
+    // cannot resolve until the gate is released below.
+    const restorePromise = DB.restoreBackup({ kind: 'core-facility-backup', version: 2, created: new Date().toISOString(), demo: false, db: restoredBytes, uploads: {} });
+
+    let restoreSettled = false;
+    restorePromise.then(() => { restoreSettled = true; });
+    // Give restoreBackup's own non-gated async work (inspectBackupCandidate opening a scratch
+    // SQL.Database, etc.) real time to run to the point where it's blocked on the gated write —
+    // it cannot get any further than that no matter how long we wait here, since the gate is
+    // still held.
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(restoreSettled, false, 'restoreBackup must not have completed yet — the stale write it needs to wait for is still paused on the gate');
+    assert.equal(fake.store.has('core.db'), false, 'nothing must have been written to IndexedDB yet — neither the stale write nor the restore has completed');
+
+    // Release the paused stale write. It completes first (with OLD bytes); THEN restoreBackup's
+    // own wait resolves and it proceeds to swap `db` and write the RESTORED bytes.
+    releaseGate();
+    await restorePromise;
+
+    assert.ok(DB.row("SELECT id FROM projects WHERE code='P-RESTORED'"), 'the live db must be the restored one after restoreBackup resolves');
+
+    const SQL = await globalThis.initSqlJs();
+    const persisted = new SQL.Database(new Uint8Array(fake.store.get('core.db')));
+    const persistedHasRestored = persisted.exec("SELECT COUNT(*) FROM projects WHERE code='P-RESTORED'")[0].values[0][0];
+    const persistedHasStale = persisted.exec("SELECT COUNT(*) FROM projects WHERE code='P-STALE'")[0].values[0][0];
+    persisted.close();
+    assert.equal(persistedHasRestored, 1, 'IndexedDB must end up holding the RESTORED database — the stale (already in-flight) write must not have landed AFTER it');
+    assert.equal(persistedHasStale, 0, 'the stale pre-restore edit must never appear in the persisted database');
+  });
+
+  test('(b) restoring a backup with no uploads deletes every upload the live database had, not just adds none', async () => {
+    const { app } = await bootFakeApp();
+    const { DB } = app;
+
+    await DB.saveUpload('old-file.bin', new Blob(['hello']));
+    assert.ok(await DB.getUpload('old-file.bin'), 'sanity: the upload exists before restore');
+
+    const donor = loadApp(['consts', 'db', 'ui']);
+    await donor.DB.boot();
+    const restoredBytes = Array.from(donor.DB.currentBytes());
+
+    await DB.restoreBackup({ kind: 'core-facility-backup', version: 2, created: new Date().toISOString(), demo: false, db: restoredBytes, uploads: {} });
+
+    const stillThere = await DB.getUpload('old-file.bin');
+    assert.equal(stillThere, undefined, 'an upload absent from the backup must be deleted by the restore, not left behind');
+  });
+
+  test('(b) restoring a backup replaces the upload set: a name the backup DOES carry survives, one it does not is gone', async () => {
+    const { app } = await bootFakeApp();
+    const { DB } = app;
+
+    await DB.saveUpload('keep-me.bin', new Blob(['keep']));
+    await DB.saveUpload('drop-me.bin', new Blob(['drop']));
+
+    const donor = loadApp(['consts', 'db', 'ui']);
+    await donor.DB.boot();
+    const restoredBytes = Array.from(donor.DB.currentBytes());
+
+    // The backup carries ITS OWN version of 'keep-me.bin' (different content) but nothing named
+    // 'drop-me.bin' — restoring must end up with exactly the backup's upload set.
+    const b64 = Buffer.from('replaced-content').toString('base64');
+    await DB.restoreBackup({
+      kind: 'core-facility-backup', version: 2, created: new Date().toISOString(), demo: false,
+      db: restoredBytes,
+      uploads: { 'keep-me.bin': { type: 'application/octet-stream', data: b64 } },
+    });
+
+    const dropped = await DB.getUpload('drop-me.bin');
+    assert.equal(dropped, undefined, "'drop-me.bin' was not in the backup and must be gone after restore");
+    const kept = await DB.getUpload('keep-me.bin');
+    assert.ok(kept, "'keep-me.bin' was in the backup and must exist after restore");
+    const text = await kept.text();
+    assert.equal(text, 'replaced-content', "the restored blob's content must be the BACKUP's version, not the pre-restore one");
+  });
+});

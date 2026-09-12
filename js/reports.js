@@ -877,12 +877,29 @@
     // Deliberately UNBOUNDED (no from/to) — same reasoning as loadFirstInstrumentUserDates: to
     // know a project's TRUE first booking/output, the whole history must be visible, not just
     // whatever falls inside the report's selected range.
-    return memo(facts, 'projectFunnelFacts', () => DB.rows(`
-      SELECT pr.id, pr.status, pr.is_archived, pr.created_at, pr.end_date, pr.archived_at,
-        (SELECT MIN(mt.date) FROM meetings mt WHERE mt.project_id = pr.id AND mt.is_cancelled = 0) AS first_booking_date,
-        (SELECT MIN(${DB.outputEffDate('po')})
-           FROM project_outputs po WHERE po.project_id = pr.id) AS first_output_date
-      FROM projects pr`));
+    return memo(facts, 'projectFunnelFacts', () => {
+      const projects = DB.rows(`
+        SELECT pr.id, pr.status, pr.is_archived, pr.created_at, pr.end_date, pr.archived_at,
+          (SELECT MIN(mt.date) FROM meetings mt WHERE mt.project_id = pr.id AND mt.is_cancelled = 0) AS first_booking_date
+        FROM projects pr`);
+      // first_output_date used to come from SQL's MIN(DB.outputEffDate('po')), whose blank-date
+      // fallback is `date(po.created_at)` — a UTC calendar day (see outputEffDate's own comment:
+      // "Ordering only", which this median comparison is not). At a UTC+ offset, an undated output
+      // logged in the last few hours of the local day fell one day EARLIER in UTC, so an undated
+      // output's effective date could read as before the very booking that produced it — the same
+      // class of bug issue #14 fixed for a plain date column, here hitting a timestamp fallback
+      // instead. Computed here in JS instead, through utcTimestampToLocalDay, so this median uses
+      // the same local calendar day every other funnel stage already does.
+      const outputRows = DB.rows('SELECT project_id, date, created_at FROM project_outputs');
+      const firstOutputByProject = new Map();
+      outputRows.forEach((o) => {
+        const eff = (o.date && String(o.date).trim() !== '') ? o.date : utcTimestampToLocalDay(o.created_at);
+        if (!eff) return;
+        const cur = firstOutputByProject.get(o.project_id);
+        if (!cur || eff < cur) firstOutputByProject.set(o.project_id, eff);
+      });
+      return projects.map((p) => ({ ...p, first_output_date: firstOutputByProject.get(p.id) || null }));
+    });
   }
   // updated_at is a UTC timestamp (`datetime('now')`, see db.js), while `from`/`to` are local
   // calendar-day strings the user actually picked. SQL's `date(updated_at)` only truncates the
