@@ -563,12 +563,24 @@
     return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
   }
 
-  /* ---------------- Autosave indicator ---------------- */
+  /* ---------------- Autosave indicator ----------------
+     'error' and 'readonly' are additions for H2/H3: a failed autosave (surfaced by
+     App.onSaveFailed) and a tab that has lost the multi-tab write race (App.onMultiTabState)
+     each need their own persistent, visibly-different state here — the dot used to only ever be
+     able to say "Saving…" or "Saved", so a failed save silently stuck at "Saving…" forever
+     with nothing to tell a user their edits weren't being written at all. */
   function setSavedState(state) {
     const el = document.getElementById('saved-state');
     if (!el) return;
-    el.className = 'saved-dot' + (state === 'pending' ? ' pending' : '');
-    el.querySelector('.txt').textContent = state === 'pending' ? 'Saving…' : 'Saved';
+    el.className = 'saved-dot' + (state === 'pending' ? ' pending' : state === 'error' ? ' error' : state === 'readonly' ? ' readonly' : '');
+    const label = state === 'pending' ? 'Saving…' : state === 'error' ? 'Save Failed' : state === 'readonly' ? 'Read-Only' : 'Saved';
+    el.querySelector('.txt').textContent = label;
+    const tip = state === 'error'
+      ? 'Your last change failed to save to this browser. It will keep retrying automatically.'
+      : state === 'readonly'
+        ? 'This database is already open in another browser tab. Changes made here will not be saved.'
+        : 'Your changes save automatically to this browser';
+    el.setAttribute('data-tooltip', tip);
   }
 
   /* ---------------- Helpers ---------------- */

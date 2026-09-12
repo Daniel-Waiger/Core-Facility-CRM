@@ -16,6 +16,23 @@
     get autoBackupFolderStatus() { return autoBackupFolderStatus; },
     onSaving() { UI.setSavedState('pending'); },
     onSaved() { UI.setSavedState('saved'); },
+    // H3: an autosave rejection used to be swallowed by a console.error only — no toast, no
+    // change to the saved-dot, and nothing ever retried it. Now the dot shows the failure
+    // persistently (it stays until a save actually succeeds) and a toast calls it out once; the
+    // retry itself lives in db.js (dirty stays true, so the next markDirty() tries again).
+    onSaveFailed() {
+      UI.setSavedState('error');
+      UI.toast('Your last change could not be saved to this browser. It will keep retrying.', 'error');
+    },
+    // H2: told by DB's multi-tab guard that a second tab has this same database open. `readOnly`
+    // tabs never call idbSet (see db.js flush()), so only one tab ever persists at a time — this
+    // just labels which one this tab is, so the state is never silent.
+    onMultiTabState(readOnly) {
+      UI.setSavedState(readOnly ? 'readonly' : 'saved');
+      if (readOnly) {
+        UI.toast('This database is already open in another tab. This tab is read-only — changes here will not be saved.', 'error');
+      }
+    },
     syncCategoryBillingHints: syncCategoryBillingHints,
   };
 
@@ -642,7 +659,6 @@
 
     if (kind === 'auto') {
       const wroteSilently = await tryWriteSilentBackup(filename, json);
-      UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
       if (wroteSilently) {
         // The JSON backup landed silently — also drop a companion XLSX export into the same
         // folder. This is purely additive: if it fails for any reason (library not loaded, no
@@ -652,6 +668,9 @@
           const built = Exports && Exports.buildAllXlsxBlob ? Exports.buildAllXlsxBlob() : null;
           if (built) await tryWriteSilentBackup(`core-facility-export-${dateStamp}.xlsx`, built.blob);
         } catch (e) { console.error('silent auto XLSX export failed', e); }
+        // Stamped only once the backup this call promised is actually written — see below for
+        // why the fallback branch stamps at its own equivalent point instead of up here.
+        UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
         UI.toast('Automatic backup saved silently');
         return;
       }
@@ -664,6 +683,14 @@
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+    // Report §4 durability item 8: this used to be stamped BEFORE the silent-write attempt even
+    // resolved, so a failed/aborted silent write (or anything throwing between there and here)
+    // still marked today's automatic backup as done. There is no completion event for a
+    // synthesized <a download> click to await, so "the download was triggered" (right here,
+    // after buildBackup/tryWriteSilentBackup have already succeeded and the anchor has been
+    // clicked) is the closest this code can get to "the backup actually happened" — closer than
+    // stamping it up front before any of that had run.
+    if (kind === 'auto') UI.storage.setItem('last-auto-backup-at', new Date().toISOString());
     UI.toast(kind === 'auto' ? 'Automatic backup downloaded (set a silent backup folder in Settings to skip the download prompt)'
       : kind === 'pre-restore' ? 'Safety copy of current data downloaded before restoring'
       : 'Complete backup exported');
@@ -1531,9 +1558,15 @@
       // project_outputs carries a real ON DELETE CASCADE, but this branch only runs when
       // countProjectRefs already counted zero of them, so the explicit delete here is a no-op in
       // practice and purely the same belt-and-suspenders convention as the line above.
+      // Same for files/uploads (M9): refs.total===0 already implies refs.files===0, so this is a
+      // no-op today too, but reads the same as every other belt-and-suspenders delete here — and
+      // it's what actually cleans up if a future path ever lets refs.total be 0 with files present.
+      const uploadPaths = DB.rows("SELECT path FROM files WHERE project_id=? AND kind='upload'", [pid]).map((r) => r.path);
+      DB.run('DELETE FROM files WHERE project_id=?', [pid]);
       DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
       DB.run('DELETE FROM project_outputs WHERE project_id=?', [pid]);
       DB.run('DELETE FROM projects WHERE id=?', [pid]);
+      if (uploadPaths.length) DB.deleteUploads(uploadPaths);
       UI.toast('Project deleted');
       route('projects');
       return;
@@ -3878,18 +3911,29 @@
   }
 
   async function deleteFile(id) {
-    const f = DB.row('SELECT name FROM files WHERE id=?', [id]);
+    const f = DB.row('SELECT name, kind, path FROM files WHERE id=?', [id]);
     if (!f) return;
     const ok = await UI.confirmModal('Delete Attachment', `Delete "${esc(f.name)}"? This cannot be undone.`, { danger: true, confirmText: 'Delete' });
     if (!ok) return;
 
     DB.run('DELETE FROM files WHERE id=?', [id]);
+    // M9: kind='link' rows have no blob (path is just the URL/share path itself, never an
+    // uploads: key) — only an actual upload has a blob in IndexedDB to clean up.
+    if (f.kind === 'upload' && f.path) DB.deleteUpload(f.path);
     UI.toast('Attachment removed');
     refresh();
   }
 
   /* ---------------- Backup & Restore ---------------- */
   function doBackup() { return performBackupDownload('manual'); }
+
+  // Row-count line for the restore preview dialog — same five core tables inspectBackupCandidate
+  // requires to exist (H1), read either from the uploaded file's preview or the live database.
+  // confirmModal wraps its body in one <p>, so this stays inline (<br>, no block elements) rather
+  // than nested <div>s, which a browser would otherwise close that <p> early to make room for.
+  function restorePreviewLine(label, key, live, incoming) {
+    return `${esc(label)}: ${live.counts[key]} → ${incoming.counts[key]}`;
+  }
 
   async function doRestore() {
     const input = document.createElement('input');
@@ -3899,18 +3943,56 @@
       const f = input.files[0];
       if (!f) return;
       const text = await f.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        UI.toast('Restore failed: that file is not valid JSON.', 'error');
+        return;
+      }
+
+      // H1: validate BEFORE ever touching the live database or showing a confirm dialog that
+      // implies this file is usable. inspectBackupCandidate opens the bytes in a scratch
+      // database and throws with a user-facing message on anything short of every core table
+      // (projects/people/instruments/meetings/milestones) existing and being queryable.
+      let preview;
+      try {
+        preview = await DB.inspectBackupCandidate(data);
+      } catch (e) {
+        UI.toast('Restore failed: ' + e.message, 'error');
+        return;
+      }
+      // A demo-origin backup (buildBackup's `demo` marker — absent on pre-1.11 files, which are
+      // treated as real per the package brief) must never be restored into a real facility's
+      // data; the sandbox itself is free to accept either, since nothing there is real.
+      if (preview.demo && !window.IS_DEMO) {
+        UI.toast('Restore failed: this backup was exported from the demo sandbox and cannot be restored into real facility data.', 'error');
+        return;
+      }
+
+      const live = DB.liveSummary();
+      const previewRows = [
+        restorePreviewLine('Projects', 'projects', live, preview),
+        restorePreviewLine('People', 'people', live, preview),
+        restorePreviewLine('Instruments', 'instruments', live, preview),
+        restorePreviewLine('Bookings', 'meetings', live, preview),
+        restorePreviewLine('Milestones', 'milestones', live, preview),
+      ].join('<br>');
+      const meta = [
+        preview.created ? `backup created ${esc(String(preview.created).slice(0, 10))}` : '',
+        preview.newestBooking ? `newest booking ${esc(preview.newestBooking)}` : '',
+      ].filter(Boolean).join(', ');
+
       // Skip the safety copy when there's effectively nothing to lose — same emptiness check
       // the auto-backup skip uses (hasAnyData), so an empty/fresh DB doesn't produce a pointless
       // download or hold up the confirm dialog with a promise that has nothing to protect.
       const willSafetyBackup = hasAnyData();
-      const body = willSafetyBackup
-        ? 'Restoring a backup will replace your current database with the backup file. A safety copy of your current data will be downloaded first. Continue?'
-        : 'Restoring a backup will replace your current database with the backup file. Continue?';
+      const body = `Restoring will replace your current database with the uploaded file (current → backup):<br><br>${previewRows}${meta ? `<br><br>${esc(meta)}` : ''}<br><br>${willSafetyBackup ? 'A safety copy of your current data will be downloaded first. ' : ''}Continue?`;
       const ok = await UI.confirmModal('Restore Facility Backup', body, { danger: true, confirmText: 'Restore' });
       if (!ok) return;
       try {
         if (willSafetyBackup) await performBackupDownload('pre-restore');
-        await DB.restoreBackup(JSON.parse(text));
+        await DB.restoreBackup(data);
         UI.toast('Database restored successfully');
         route('projects');
       } catch (e) {

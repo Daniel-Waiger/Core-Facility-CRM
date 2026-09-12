@@ -210,6 +210,10 @@ body {
 .saved-dot { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 7px; }
 .saved-dot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
 .saved-dot.pending .dot { background: var(--warning); animation: pulse 1s infinite; }
+.saved-dot.error { color: var(--danger); }
+.saved-dot.error .dot { background: var(--danger); }
+.saved-dot.readonly { color: var(--warning); }
+.saved-dot.readonly .dot { background: var(--warning); }
 @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
 
 /* ---------- Aligned Cards & Grid System ---------- */

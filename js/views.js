@@ -1325,6 +1325,7 @@
     <div class="card mb-16" data-tour="settings-backup">
       <div class="card-title">${ic('folder')} Portable Data &amp; Backups</div>
       <div class="card-body">
+        ${global.DB.isReadOnly ? `<div class="row mb-8" style="background:var(--warning-soft);border-radius:8px;padding:8px 10px"><div class="grow small">${ic('alert')} This browser tab is read-only: this database is already open in another tab, so changes made here will not be saved. Close this tab, or use the other one instead.</div></div>` : ''}
         <div class="row mb-8">
           <div class="grow">
             <div style="font-weight:600">Single-File Backup &amp; Recovery</div>
