@@ -115,6 +115,14 @@ and phone-width layout.
 - **A required-field message now also outlines the field it refers to**, not only a toast in the
   corner. The "Category" label in the booking form no longer truncates to "Categ…": the "+ Add New"
   button beside it shortens to "+ Add" only when its column is too narrow for both.
+- **From the review of this release's own changes:** every dialog now carries a name a screen
+  reader announces; a booking's subtotal always equals the sum of the lines shown under it (it
+  could differ by a cent); Billing Rates, Group Discounts & Tiers and Category Billing save all
+  their fields or none; a new booking refuses a cleared date instead of silently using today; the
+  safety backup before a restore and the daily automatic backup are no longer skipped for a
+  facility whose data is only bookings, milestones, grants or service entries; an undated
+  research output logged late in the day lands on the right local day in the funnel; and on the
+  Timeline, back-to-back and untimed bookings no longer hide one another.
 - The manual: four pages still said "Load Sample Data"; the Backups chapter promised Word tables
   the export never had; the Reports chapter's "Try it" for the matrix promised a total that did not
   hold; the Instruments page said a Down instrument booked with no warning.
