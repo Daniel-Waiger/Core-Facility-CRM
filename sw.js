@@ -31,6 +31,7 @@ const PRECACHE_URLS = [
   './js/exports.js?v=1.11.0',
   './js/app.js?v=1.11.0',
   './libs/sql-asm.js',
+  './libs/fonts/OpenSans-Regular.ttf',
   './libs/xlsx.full.min.js',
   './libs/jspdf.umd.min.js',
   './libs/docx.iife.js'
