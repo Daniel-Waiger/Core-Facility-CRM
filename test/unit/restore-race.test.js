@@ -337,4 +337,55 @@ describe('restoreBackup: races with the autosave debounce, and replaces the uplo
     assert.equal(hasOrig, 1, 'IndexedDB must have been re-persisted with the ROLLED-BACK (original) database');
     assert.equal(hasRestored, 0, 'the restored database must not be what ended up persisted after a rollback');
   });
+
+  test('(C4-followups #2) a failing upload write on the 2nd of 3 uploads leaves the OLD upload set byte-identical, not just the db rolled back', async () => {
+    const { app, fake } = await bootFakeApp();
+    const { DB } = app;
+
+    // Three pre-existing uploads, all of which the incoming backup will also carry (under the
+    // same names, but with DIFFERENT content) — so the apply phase's write loop overwrites all
+    // three, in insertion order a.bin, b.bin, c.bin.
+    await DB.saveUpload('a.bin', new Blob(['old-a']));
+    await DB.saveUpload('b.bin', new Blob(['old-b']));
+    await DB.saveUpload('c.bin', new Blob(['old-c']));
+    DB.run("INSERT INTO projects (title, code, status) VALUES ('Original','P-ORIG','Active')");
+    await DB.flushNow();
+    const oldBytesBefore = {
+      a: await (await DB.getUpload('a.bin')).text(),
+      b: await (await DB.getUpload('b.bin')).text(),
+      c: await (await DB.getUpload('c.bin')).text(),
+    };
+
+    const donor = loadApp(['consts', 'db', 'ui']);
+    await donor.DB.boot();
+    donor.DB.run("INSERT INTO projects (title, code, status) VALUES ('Restored','P-RESTORED','Active')");
+    const restoredBytes = Array.from(donor.DB.currentBytes());
+
+    // Only the SECOND upload write (b.bin) fails — a.bin's write, if the apply phase does not
+    // hold the old blob first, has already landed with NEW content by the time the failure hits.
+    fake.setFailWhen((k) => k === 'uploads:b.bin');
+
+    await assert.rejects(
+      DB.restoreBackup({
+        kind: 'core-facility-backup', version: 2, created: new Date().toISOString(), demo: false,
+        db: restoredBytes,
+        uploads: {
+          'a.bin': { type: 'application/octet-stream', data: Buffer.from('new-a').toString('base64') },
+          'b.bin': { type: 'application/octet-stream', data: Buffer.from('new-b').toString('base64') },
+          'c.bin': { type: 'application/octet-stream', data: Buffer.from('new-c').toString('base64') },
+        },
+      }),
+      /simulated storage failure/,
+    );
+    fake.setFailWhen(null);
+
+    assert.ok(DB.row("SELECT id FROM projects WHERE code='P-ORIG'"), 'db must be rolled back to the pre-restore one');
+
+    const aAfter = await (await DB.getUpload('a.bin')).text();
+    const bAfter = await (await DB.getUpload('b.bin')).text();
+    const cAfter = await (await DB.getUpload('c.bin')).text();
+    assert.equal(aAfter, oldBytesBefore.a, "a.bin's write landed before the failure — a failed restore must put its OLD content back, not leave the new content standing");
+    assert.equal(bAfter, oldBytesBefore.b, 'b.bin never actually got the new content (its own write failed) — it must still read as the old content');
+    assert.equal(cAfter, oldBytesBefore.c, 'c.bin was never reached — it must be untouched');
+  });
 });
