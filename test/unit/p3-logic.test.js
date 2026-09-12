@@ -307,6 +307,99 @@ describe('M5: the legacy pricing-tier reseed runs at most once', () => {
   });
 });
 
+describe('G1: pricing-tier reseed also skips when the ONE-TIME FLAG ITSELF predates this fix', () => {
+  // The M5 describe block above proves the flag-based fix works once 'pricing_tiers_seeded' has
+  // been recorded. The gap CHANGELOG.md's "Known and deferred" #3 records is narrower: a REAL
+  // 1.10.2 install upgrading straight to this version has NEVER written that flag (it is new
+  // here), so if that facility had already deleted both default tiers before upgrading,
+  // `already.c` reads 0 exactly like a database that never had tiers — the flag alone cannot
+  // tell those two apart. migrate() now also checks for evidence a tier row once existed
+  // (sqlite_sequence.seq, group_tiers, instrument_tier_rates, meetings.tier_id) before reseeding.
+  //
+  // Each test below builds exactly that 1.10.2 shape: legacy overhead config still set (as it
+  // always is until a facility touches Settings > Billing Rates again), the flag row deleted (this
+  // database predates it), and pricing_tiers empty — then supplies exactly one piece of evidence
+  // that a tier row existed at some point, and proves it survives migrate() with the tiers still
+  // gone.
+  function preUpgradeState(DB) {
+    DB.run("DELETE FROM app_config WHERE key='pricing_tiers_seeded'");
+    DB.setConfig('overhead_internal', 20);
+    DB.setConfig('overhead_external', 50);
+    assert.equal(DB.row('SELECT COUNT(*) c FROM pricing_tiers').c, 0, 'test setup: pricing_tiers must start empty');
+  }
+
+  test('sqlite_sequence evidence: a tier was inserted (AUTOINCREMENT bumped the counter) and later deleted', async () => {
+    const { DB } = await freshDb();
+    preUpgradeState(DB);
+    // Simulate the ORIGINAL (pre-flag) seed that created these tiers, then the zero-ref Delete a
+    // user could reach from Settings — sqlite_sequence.seq stays bumped even though the rows
+    // themselves are gone (DELETE never resets an AUTOINCREMENT counter).
+    DB.run("INSERT INTO pricing_tiers (name, overhead_pct) VALUES ('Internal', 20)");
+    DB.run("INSERT INTO pricing_tiers (name, overhead_pct) VALUES ('External', 50)");
+    DB.run('DELETE FROM pricing_tiers');
+    assert.ok(DB.row("SELECT seq FROM sqlite_sequence WHERE name='pricing_tiers'").seq > 0,
+      'test setup: sqlite_sequence.seq must still be > 0 after the DELETE');
+
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup); // the first migrate() pass this database has ever run
+
+    assert.equal(DB.row('SELECT COUNT(*) c FROM pricing_tiers').c, 0,
+      'sqlite_sequence evidence must stop the legacy reseed even with the flag itself absent');
+  });
+
+  test('group_tiers evidence: a lab was assigned a tier that has since been deleted (tier_id carries no REFERENCES, so the row dangles)', async () => {
+    const { DB } = await freshDb();
+    preUpgradeState(DB);
+    DB.run("INSERT INTO group_tiers (org, tier_id) VALUES ('Bio Lab', 1)"); // tier 1 no longer exists
+
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup);
+
+    assert.equal(DB.row('SELECT COUNT(*) c FROM pricing_tiers').c, 0,
+      'a dangling group_tiers row must stop the legacy reseed');
+  });
+
+  test('instrument_tier_rates evidence: an instrument had a per-tier rate override for a tier that has since been deleted', async () => {
+    const { DB } = await freshDb();
+    const ids = seedFixture(DB);
+    preUpgradeState(DB);
+    DB.run('INSERT INTO instrument_tier_rates (instrument_id, tier_id, cost) VALUES (?, ?, ?)', [ids.scopeA, 1, 150]);
+
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup);
+
+    assert.equal(DB.row('SELECT COUNT(*) c FROM pricing_tiers').c, 0,
+      'a dangling instrument_tier_rates row must stop the legacy reseed');
+  });
+
+  test('meetings.tier_id evidence: a booking was priced with a tier that has since been deleted', async () => {
+    const { DB } = await freshDb();
+    const ids = seedFixture(DB);
+    preUpgradeState(DB);
+    DB.run("INSERT INTO meetings (project_id, title, date, tier_id) VALUES (?, 'Old Booking', '2025-01-01', 1)", [ids.liveProject]);
+
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup);
+
+    assert.equal(DB.row('SELECT COUNT(*) c FROM pricing_tiers').c, 0,
+      'a booking snapshot carrying a non-null tier_id must stop the legacy reseed');
+  });
+
+  test('control: with NO evidence at all (a database that genuinely never had tiers), the legacy reseed still runs — the fix must not become "never reseed"', async () => {
+    const { DB } = await freshDb();
+    preUpgradeState(DB);
+    // No sqlite_sequence row, no group_tiers/instrument_tier_rates/meetings.tier_id evidence —
+    // this really is a first-ever migrate() pass on a database that never had a pricing_tiers row.
+
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup);
+
+    const tiers = DB.rows('SELECT name FROM pricing_tiers ORDER BY name');
+    assert.deepEqual(tiers.map((t) => t.name), ['External', 'Internal'],
+      'with no evidence of a prior tier, the legacy Internal/External seed must still run exactly as before this fix');
+  });
+});
+
 describe('M9: countProjectRefs.billed follows the Project Costs rule', () => {
   test('a cancelled-and-waived booking counts as 0, not its stored total', async () => {
     const { DB } = await freshDb();

@@ -1114,15 +1114,24 @@
         // H2: a save attempted from a read-only tab throws (db.js's assertWritable already
         // shows the toast) rather than silently doing nothing — catch it here, the one place
         // every data-act click funnels through, so it never surfaces as an uncaught exception in
-        // the console instead of the toast the user already saw. Anything else rethrows: this is
-        // not a general error-swallower.
+        // the console instead of the toast the user already saw.
+        // G1: any OTHER exception (an FK violation, a stubbed/thrown save, a bug) used to escape
+        // uncaught — the modal stayed open with no explanation, or (worse) closed anyway leaving
+        // the visitor unsure whether the save happened. Every rebuild-join-rows saver now wraps
+        // its writes in DB.transaction(), so by the time an exception reaches here any partial
+        // write has already been rolled back (see DB.transaction's comment) — nothing is flagged
+        // dirty, so autosave can't persist a half-written record. handleActSafely funnels both the
+        // synchronous throw and the async .catch() through the same reporting so a saver written
+        // either way is covered identically; it deliberately leaves the modal open (no closeDim
+        // call here) so the visitor's input isn't lost and can be retried once whatever caused the
+        // error is fixed.
         try {
           const result = handleAct(act.dataset.act, act);
           if (result && typeof result.catch === 'function') {
-            result.catch((err) => { if (!err || !err.dbReadOnly) throw err; });
+            result.catch((err) => { handleActError(err); });
           }
         } catch (err) {
-          if (!err || !err.dbReadOnly) throw err;
+          handleActError(err);
         }
       }
     });
@@ -1148,6 +1157,19 @@
         sel.dataset.prev = sel.value;
       }
     });
+  }
+
+  // Single place wireGlobal's click handler routes every data-act exception through, sync or
+  // async. err.dbReadOnly is already toasted by DB.js's assertWritable — surfacing it again here
+  // would double the message, so it's swallowed silently exactly as before. Everything else is a
+  // genuine failure: log it for diagnosis and tell the visitor plainly that nothing was saved,
+  // in sentence case per CLAUDE.md (a toast is prose, not a control). The modal is left open on
+  // purpose — closing it would look like the save succeeded.
+  function handleActError(err) {
+    if (err && err.dbReadOnly) return;
+    console.error('Action failed:', err);
+    const message = (err && err.message) ? err.message : String(err);
+    UI.toast('Something went wrong and nothing was saved: ' + message, 'error');
   }
 
   function handleAct(act, el) {
@@ -1440,19 +1462,10 @@
     const pFirst = m.querySelector('#np-p-first').value.trim();
     const pLast = m.querySelector('#np-p-last').value.trim();
 
-    if (pFirst || pLast) {
-      const fullName = `${pFirst} ${pLast}`.trim();
-      const pType = m.querySelector('#np-p-type').value;
-      const pOrg = m.querySelector('#np-p-org').value.trim();
-      const pEmail = m.querySelector('#np-p-email').value.trim();
-
-      DB.run('INSERT INTO people (name, type, organization, email) VALUES (?,?,?,?)', [fullName, pType, pOrg, pEmail]);
-      const newPerson = DB.row('SELECT last_insert_rowid() as id');
-      if (newPerson) {
-        piId = newPerson.id;
-        UI.toast(`Registered ${fullName} (${pType})`);
-      }
-    }
+    const fullName = `${pFirst} ${pLast}`.trim();
+    const pType = m.querySelector('#np-p-type').value;
+    const pOrg = m.querySelector('#np-p-org').value.trim();
+    const pEmail = m.querySelector('#np-p-email').value.trim();
 
     const code = generateProjectCode();
     const status = m.querySelector('#np-status').value;
@@ -1468,21 +1481,38 @@
     const tags = m.querySelector('#np-tags').value.trim();
     const notes = m.querySelector('#np-notes').value.trim();
 
+    // G1: the inline "register a new person" insert, the project insert, and the new PI's
+    // project_people row are one save — if the project insert fails (e.g. a duplicate code), the
+    // person just registered above must not stick around as an orphan with no project attached to
+    // it. One transaction makes that atomic: any throw below rolls back every INSERT that ran so
+    // far, including the person, and leaves the database exactly as it was before Save was clicked.
+    let inserted, registeredPerson = false;
     try {
-      DB.run(`
-        INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes]
-      );
+      DB.transaction(() => {
+        if (pFirst || pLast) {
+          DB.run('INSERT INTO people (name, type, organization, email) VALUES (?,?,?,?)', [fullName, pType, pOrg, pEmail]);
+          const newPerson = DB.row('SELECT last_insert_rowid() as id');
+          if (newPerson) {
+            piId = newPerson.id;
+            registeredPerson = true;
+          }
+        }
+        DB.run(`
+          INSERT INTO projects (title, code, status, priority, pi_id, grant_id, modality, funding, sample, flags, start_date, end_date, tags, notes)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes]
+        );
+        inserted = DB.row('SELECT id FROM projects WHERE code=?', [code]);
+        if (piId && inserted) {
+          DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [inserted.id, piId, 'Principal Investigator']);
+        }
+      });
     } catch (e) {
       UI.toast('Could not create project: ' + (e.message || 'unknown error'), 'error');
       return;
     }
 
-    const inserted = DB.row('SELECT id FROM projects WHERE code=?', [code]);
-    if (piId && inserted) {
-      DB.run('INSERT OR IGNORE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [inserted.id, piId, 'Principal Investigator']);
-    }
+    if (registeredPerson) UI.toast(`Registered ${fullName} (${pType})`);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Project created successfully');
     route('project', inserted ? inserted.id : null);
@@ -1574,33 +1604,39 @@
     const tags = m.querySelector('#ep-tags').value.trim();
     const notes = m.querySelector('#ep-notes').value.trim();
 
+    // G1: the project row update and the two project_people rewrites below (clearing the old PI's
+    // role, upserting the new one) are one save — wrapped so a failure partway (say the UPDATE
+    // succeeds but a later step throws) can never leave the project record and its PI role rows
+    // disagreeing about who the PI is.
     try {
-      DB.run(`
-        UPDATE projects
-        SET title=?, code=?, status=?, priority=?, pi_id=?, grant_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
-        WHERE id=?`,
-        [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes, id]
-      );
+      DB.transaction(() => {
+        DB.run(`
+          UPDATE projects
+          SET title=?, code=?, status=?, priority=?, pi_id=?, grant_id=?, modality=?, funding=?, sample=?, flags=?, start_date=?, end_date=?, tags=?, notes=?, updated_at=datetime('now')
+          WHERE id=?`,
+          [title, code, status, priority, piId, grantId, modality, funding, sample, flags, start, end, tags, notes, id]
+        );
+
+        // The PI is tracked in two places: projects.pi_id (just written above) and a
+        // project_people row carrying the 'Principal Investigator' role. If the PI changed, the OLD
+        // PI's role row must be cleared — but only the role, not the person: if they hold some other
+        // role on this project too (added via "Add Team Member"), that membership stays. If the new
+        // PI was already a team member under a different role, an upsert (not INSERT OR IGNORE) is
+        // required or their role would silently stay whatever it was instead of becoming PI.
+        if (priorPiId && priorPiId !== piId) {
+          const oldRow = DB.row('SELECT role FROM project_people WHERE project_id=? AND person_id=?', [id, priorPiId]);
+          if (oldRow && oldRow.role === 'Principal Investigator') {
+            DB.run('DELETE FROM project_people WHERE project_id=? AND person_id=?', [id, priorPiId]);
+          }
+        }
+        if (piId) {
+          DB.run(`INSERT INTO project_people (project_id, person_id, role) VALUES (?,?,'Principal Investigator')
+                  ON CONFLICT(project_id, person_id) DO UPDATE SET role='Principal Investigator'`, [id, piId]);
+        }
+      });
     } catch (e) {
       UI.toast('Could not save project: ' + (e.message || 'unknown error'), 'error');
       return;
-    }
-
-    // The PI is tracked in two places: projects.pi_id (just written above) and a
-    // project_people row carrying the 'Principal Investigator' role. If the PI changed, the OLD
-    // PI's role row must be cleared — but only the role, not the person: if they hold some other
-    // role on this project too (added via "Add Team Member"), that membership stays. If the new
-    // PI was already a team member under a different role, an upsert (not INSERT OR IGNORE) is
-    // required or their role would silently stay whatever it was instead of becoming PI.
-    if (priorPiId && priorPiId !== piId) {
-      const oldRow = DB.row('SELECT role FROM project_people WHERE project_id=? AND person_id=?', [id, priorPiId]);
-      if (oldRow && oldRow.role === 'Principal Investigator') {
-        DB.run('DELETE FROM project_people WHERE project_id=? AND person_id=?', [id, priorPiId]);
-      }
-    }
-    if (piId) {
-      DB.run(`INSERT INTO project_people (project_id, person_id, role) VALUES (?,?,'Principal Investigator')
-              ON CONFLICT(project_id, person_id) DO UPDATE SET role='Principal Investigator'`, [id, piId]);
     }
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Project updated');
@@ -1645,10 +1681,15 @@
       // no-op today too, but reads the same as every other belt-and-suspenders delete here — and
       // it's what actually cleans up if a future path ever lets refs.total be 0 with files present.
       const uploadPaths = DB.rows("SELECT path FROM files WHERE project_id=? AND kind='upload'", [pid]).map((r) => r.path);
-      DB.run('DELETE FROM files WHERE project_id=?', [pid]);
-      DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
-      DB.run('DELETE FROM project_outputs WHERE project_id=?', [pid]);
-      DB.run('DELETE FROM projects WHERE id=?', [pid]);
+      // G1: the explicit child-row cleanup and the project row itself are one delete — see the
+      // belt-and-suspenders comments above for why these DELETEs exist at all even with cascade
+      // verified working.
+      DB.transaction(() => {
+        DB.run('DELETE FROM files WHERE project_id=?', [pid]);
+        DB.run('DELETE FROM service_entries WHERE project_id=?', [pid]);
+        DB.run('DELETE FROM project_outputs WHERE project_id=?', [pid]);
+        DB.run('DELETE FROM projects WHERE id=?', [pid]);
+      });
       if (uploadPaths.length) DB.deleteUploads(uploadPaths);
       UI.toast('Project deleted');
       route('projects');
@@ -1780,19 +1821,24 @@
     const status = m.querySelector('#ms-status').value;
     const note = m.querySelector('#ms-note').value.trim();
 
-    DB.run('INSERT INTO milestones (project_id, name, due_date, status, note) VALUES (?,?,?,?,?)', [pid, name, due, status, note]);
-    // DB.q1 reads back via stmt.getArray(), a method the bundled sql.js build's Statement
-    // prototype never exposes (only .get/.getAsObject/...) — it throws the moment it's called,
-    // which meant "Add Milestone" (like "Add Instrument" below) silently failed after the INSERT
-    // and before the owner/instrument join rows or the modal's own close ever ran. DB.row(...).id
-    // is the same last_insert_rowid() lookup every OTHER saver in this file already uses.
-    const mid = DB.row('SELECT last_insert_rowid() as id').id;
+    // G1: the milestone insert and its owner/instrument join rows are one save — if an owner or
+    // instrument insert throws partway (e.g. a stale chip referencing a since-deleted id), the
+    // milestone row itself must not survive half-assigned.
+    DB.transaction(() => {
+      DB.run('INSERT INTO milestones (project_id, name, due_date, status, note) VALUES (?,?,?,?,?)', [pid, name, due, status, note]);
+      // DB.q1 reads back via stmt.getArray(), a method the bundled sql.js build's Statement
+      // prototype never exposes (only .get/.getAsObject/...) — it throws the moment it's called,
+      // which meant "Add Milestone" (like "Add Instrument" below) silently failed after the INSERT
+      // and before the owner/instrument join rows or the modal's own close ever ran. DB.row(...).id
+      // is the same last_insert_rowid() lookup every OTHER saver in this file already uses.
+      const mid = DB.row('SELECT last_insert_rowid() as id').id;
 
-    const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
-    const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
+      const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
+      const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
 
-    owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [mid, oid]));
-    insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [mid, iid]));
+      owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [mid, oid]));
+      insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [mid, iid]));
+    });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Milestone added');
@@ -1843,16 +1889,21 @@
     const status = m.querySelector('#mse-status').value;
     const note = m.querySelector('#mse-note').value.trim();
 
-    DB.run("UPDATE milestones SET name=?, due_date=?, status=?, note=?, updated_at=datetime('now') WHERE id=?", [name, due, status, note, id]);
+    // G1: the update and the owner/instrument rebuild are one save — without this, a throw after
+    // the DELETEs but before every re-INSERT (e.g. a bad id from a stale chip) would leave the
+    // milestone with NO owners/instruments rather than either its old set or its new one.
+    DB.transaction(() => {
+      DB.run("UPDATE milestones SET name=?, due_date=?, status=?, note=?, updated_at=datetime('now') WHERE id=?", [name, due, status, note, id]);
 
-    DB.run('DELETE FROM milestone_owners WHERE milestone_id=?', [id]);
-    DB.run('DELETE FROM milestone_instruments WHERE milestone_id=?', [id]);
+      DB.run('DELETE FROM milestone_owners WHERE milestone_id=?', [id]);
+      DB.run('DELETE FROM milestone_instruments WHERE milestone_id=?', [id]);
 
-    const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
-    const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
+      const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
+      const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
 
-    owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [id, oid]));
-    insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [id, iid]));
+      owners.forEach((oid) => DB.run('INSERT OR IGNORE INTO milestone_owners (milestone_id, person_id) VALUES (?,?)', [id, oid]));
+      insts.forEach((iid) => DB.run('INSERT OR IGNORE INTO milestone_instruments (milestone_id, instrument_id) VALUES (?,?)', [id, iid]));
+    });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Milestone updated');
@@ -2012,14 +2063,19 @@
     // save") is only ever built from a name, so only a rename can leave it stale — read the name
     // as stored BEFORE this write to tell a real rename apart from an email/note/rate-only edit.
     const before = DB.row('SELECT name FROM people WHERE id=?', [id]);
-    DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
-    // people.name may have just changed — meetings.attendees is a denormalized copy of it, so
-    // every meeting this person is on must be recomputed from meeting_people or it goes stale.
-    // Gated on an actual rename (not just called unconditionally): a person with a long booking
-    // history costs one query per meeting they've ever attended, which is real work for zero
-    // benefit on an email/note/rate-only edit, where the attendees string could not have gone
-    // stale in the first place.
-    if (before && before.name !== name) DB.refreshAttendeesForPerson(id);
+    // G1: the name/field update and the attendees-string refresh across every meeting this person
+    // is on are one save — otherwise a throw partway through the refresh loop would leave some
+    // meetings.attendees strings updated to the new name and others still showing the old one.
+    DB.transaction(() => {
+      DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
+      // people.name may have just changed — meetings.attendees is a denormalized copy of it, so
+      // every meeting this person is on must be recomputed from meeting_people or it goes stale.
+      // Gated on an actual rename (not just called unconditionally): a person with a long booking
+      // history costs one query per meeting they've ever attended, which is real work for zero
+      // benefit on an email/note/rate-only edit, where the attendees string could not have gone
+      // stale in the first place.
+      if (before && before.name !== name) DB.refreshAttendeesForPerson(id);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Person updated');
     refresh();
@@ -2050,14 +2106,18 @@
       // a person with zero "real" refs can still hold either. Cascade would catch this too, but
       // the explicit delete is the belt-and-suspenders convention every other delete path here
       // follows.
-      DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
-      DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
-      // service_entries.person_id is a soft link (no REFERENCES) like instrument_staff/grant_users
-      // above — a person with zero "real" refs (countPersonRefs now counts entries too, so this
-      // branch is only reached when there genuinely are none) can't hold one, but the explicit
-      // clear is the same belt-and-suspenders convention every delete path here follows.
-      DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
-      DB.run('DELETE FROM people WHERE id=?', [id]);
+      // G1: wrapped so a throw partway through can't leave the person row gone with dangling
+      // instrument_staff/grant_users rows still pointing at the now-deleted id, or vice versa.
+      DB.transaction(() => {
+        DB.run('DELETE FROM instrument_staff WHERE person_id=?', [id]);
+        DB.run('DELETE FROM grant_users WHERE person_id=?', [id]);
+        // service_entries.person_id is a soft link (no REFERENCES) like instrument_staff/grant_users
+        // above — a person with zero "real" refs (countPersonRefs now counts entries too, so this
+        // branch is only reached when there genuinely are none) can't hold one, but the explicit
+        // clear is the same belt-and-suspenders convention every delete path here follows.
+        DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
+        DB.run('DELETE FROM people WHERE id=?', [id]);
+      });
       UI.toast('Person deleted');
       refresh();
       return;
@@ -2137,14 +2197,17 @@
     if (rejectNegative(cost, 'Cost') || rejectNegative(minDuration, 'Min Duration')
       || rejectNegative(maxDuration, 'Max Duration') || rejectNegative(minGap, 'Min Gap')
       || rejectNegative(minNotice, 'Min Notice')) return;
-    DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
-       cost, m.querySelector('#i-cost-unit').value || 'time',
-       minDuration, maxDuration, minGap, minNotice]);
-    // See the matching comment in msSave — DB.q1 relies on a Statement method this build of
-    // sql.js doesn't have and throws; DB.row(...).id is the same lookup every other saver uses.
-    const iid = DB.row('SELECT last_insert_rowid() as id').id;
-    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
+    // G1: the instrument insert and its supervisor join rows are one save.
+    DB.transaction(() => {
+      DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [name, m.querySelector('#i-kind').value, m.querySelector('#i-status').value, m.querySelector('#i-location').value.trim(), m.querySelector('#i-note').value.trim(),
+         cost, m.querySelector('#i-cost-unit').value || 'time',
+         minDuration, maxDuration, minGap, minNotice]);
+      // See the matching comment in msSave — DB.q1 relies on a Statement method this build of
+      // sql.js doesn't have and throws; DB.row(...).id is the same lookup every other saver uses.
+      const iid = DB.row('SELECT last_insert_rowid() as id').id;
+      readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument added');
     refresh();
@@ -2228,27 +2291,32 @@
     if (rejectNegative(cost, 'Cost') || rejectNegative(minDuration, 'Min Duration')
       || rejectNegative(maxDuration, 'Max Duration') || rejectNegative(minGap, 'Min Gap')
       || rejectNegative(minNotice, 'Min Notice')) return;
-    DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
-      [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
-       cost, m.querySelector('#ie-cost-unit').value || 'time',
-       minDuration, maxDuration, minGap, minNotice, id]);
-    DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
-    readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
     // Per-tier rate overrides — admin-gated, so these inputs simply don't exist in the DOM when
     // admin mode is off, and this loop is then a no-op that leaves any existing overrides alone
     // (unlike the supervisor picker above, this is NOT rebuilt-from-form on every save: a form
     // that never shows the override rows to a non-admin editor must not be read as "no overrides").
+    // Validated BEFORE any write below so a bad Tier Rate is refused with nothing written at all,
+    // same as the rejectNegative calls above it.
     const tierInputs = Array.from(m.querySelectorAll('.tier-rate-input'));
     for (const inp of tierInputs) {
       const v = inp.value.trim();
       if (v === '') continue;
       if (rejectNegative(Number(v) || 0, 'Tier Rate')) return;
     }
-    tierInputs.forEach((inp) => {
-      const tierId = Number(inp.dataset.tierId);
-      const v = inp.value.trim();
-      if (v === '') DB.deleteInstrumentTierRate(id, tierId);
-      else DB.setInstrumentTierRate(id, tierId, Number(v) || 0);
+    // G1: the instrument update, its supervisor rebuild, and the tier-rate overrides are one save.
+    DB.transaction(() => {
+      DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
+        [name, m.querySelector('#ie-kind').value, m.querySelector('#ie-status').value, m.querySelector('#ie-location').value.trim(), m.querySelector('#ie-note').value.trim(),
+         cost, m.querySelector('#ie-cost-unit').value || 'time',
+         minDuration, maxDuration, minGap, minNotice, id]);
+      DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+      readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [id, pid]));
+      tierInputs.forEach((inp) => {
+        const tierId = Number(inp.dataset.tierId);
+        const v = inp.value.trim();
+        if (v === '') DB.deleteInstrumentTierRate(id, tierId);
+        else DB.setInstrumentTierRate(id, tierId, Number(v) || 0);
+      });
     });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument updated');
@@ -2274,13 +2342,17 @@
       // db.js), so an instrument with zero "real" refs can still have either. Cascade would catch
       // this too, but the explicit delete is the belt-and-suspenders convention every other delete
       // path here follows.
-      DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
-      DB.run('DELETE FROM instrument_tier_rates WHERE instrument_id=?', [id]);
-      // service_entries.instrument_id is a soft link (no REFERENCES), same reasoning as above —
-      // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
-      // but the explicit clear is the same belt-and-suspenders convention as every other field here.
-      DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
-      DB.run('DELETE FROM instruments WHERE id=?', [id]);
+      // G1: wrapped so a throw partway through can't leave the instrument row gone with its
+      // supervisor/tier-rate rows (or the reverse) still dangling.
+      DB.transaction(() => {
+        DB.run('DELETE FROM instrument_staff WHERE instrument_id=?', [id]);
+        DB.run('DELETE FROM instrument_tier_rates WHERE instrument_id=?', [id]);
+        // service_entries.instrument_id is a soft link (no REFERENCES), same reasoning as above —
+        // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
+        // but the explicit clear is the same belt-and-suspenders convention as every other field here.
+        DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
+        DB.run('DELETE FROM instruments WHERE id=?', [id]);
+      });
       UI.toast('Instrument deleted');
       refresh();
       return;
@@ -3515,7 +3587,11 @@
       }
     }
 
-    dates.forEach((d) => insertBookingRow(d));
+    // G1: every occurrence's insert + its people/instrument/staff join rows are one save — the
+    // conflict pre-check above already made every occurrence individually safe to insert, so the
+    // only way this loop can now fail is a genuine error (bad row, thrown save), and a repeating
+    // booking must not create some occurrences and silently drop the rest of them.
+    DB.transaction(() => { dates.forEach((d) => insertBookingRow(d)); });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast(dates.length > 1 ? `${dates.length} bookings created` : 'Booking saved');
@@ -3707,36 +3783,41 @@
     );
     const pricedChanged = UI.bookingPricedInputsChanged(before, after);
 
-    DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
-              discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
-              tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
-      [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct,
-       pricedChanged ? bom.subtotal : stored.subtotal,
-       pricedChanged ? bom.beforeTax : stored.total_before_tax,
-       pricedChanged ? bom.total : stored.total_cost,
-       category,
-       pricedChanged ? bom.tierId : stored.tier_id,
-       pricedChanged ? bom.tierOverheadPct : stored.tier_overhead_pct,
-       pricedChanged ? bom.categoryStaffPct : stored.category_staff_pct,
-       id]);
+    // G1: the meetings row update and the attendees/line-item rebuild below are one save — a throw
+    // partway (say after the DELETEs but before every line re-INSERT) must not leave the booking
+    // with its old total but no line rows to back it, or vice versa.
+    DB.transaction(() => {
+      DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
+                discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
+                tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
+        [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct,
+         pricedChanged ? bom.subtotal : stored.subtotal,
+         pricedChanged ? bom.beforeTax : stored.total_before_tax,
+         pricedChanged ? bom.total : stored.total_cost,
+         category,
+         pricedChanged ? bom.tierId : stored.tier_id,
+         pricedChanged ? bom.tierOverheadPct : stored.tier_overhead_pct,
+         pricedChanged ? bom.categoryStaffPct : stored.category_staff_pct,
+         id]);
 
-    // Attendees (who was there, not what it cost) always rebuild from the form regardless.
-    DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
-    ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [id, oid]));
+      // Attendees (who was there, not what it cost) always rebuild from the form regardless.
+      DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
+      ownerIds.forEach((oid) => DB.run('INSERT OR IGNORE INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [id, oid]));
 
-    // Line items only rebuild when a priced input actually changed — an unchanged selection keeps
-    // its exact stored line_cost rows, which is what actually freezes the total against a rate
-    // that moved elsewhere in the meantime (deleting and reinserting from CURRENT rates would
-    // silently reprice every line even though nothing on this form did).
-    if (pricedChanged) {
-      DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
-      DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
-      bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [id, line.id, line.amount || 0, line.line]));
-      bom.staffLines.forEach((line) => {
-        const win = m._bom.staffWindows[line.id] || {};
-        DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [id, line.id, win.start || '', win.end || '', line.line]);
-      });
-    }
+      // Line items only rebuild when a priced input actually changed — an unchanged selection keeps
+      // its exact stored line_cost rows, which is what actually freezes the total against a rate
+      // that moved elsewhere in the meantime (deleting and reinserting from CURRENT rates would
+      // silently reprice every line even though nothing on this form did).
+      if (pricedChanged) {
+        DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
+        DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
+        bom.instrumentLines.forEach((line) => DB.run('INSERT OR IGNORE INTO meeting_instruments (meeting_id, instrument_id, amount, line_cost) VALUES (?,?,?,?)', [id, line.id, line.amount || 0, line.line]));
+        bom.staffLines.forEach((line) => {
+          const win = m._bom.staffWindows[line.id] || {};
+          DB.run('INSERT OR IGNORE INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,?,?,?)', [id, line.id, win.start || '', win.end || '', line.line]);
+        });
+      }
+    });
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Booking updated');
@@ -3751,10 +3832,14 @@
     // codebase (verified empirically — see CLAUDE.md's cascading-deletes section): currentBytes()
     // reasserts PRAGMA foreign_keys after every export. The explicit deletes guard against any
     // future code path that exports without that reassert, silently turning cascades back off.
-    DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
-    DB.run('DELETE FROM meetings WHERE id=?', [id]);
+    // G1: wrapped so a throw partway through (say the meetings row itself fails) can't leave the
+    // join rows deleted with the meeting still sitting there orphaned from its own history.
+    DB.transaction(() => {
+      DB.run('DELETE FROM meeting_people WHERE meeting_id=?', [id]);
+      DB.run('DELETE FROM meeting_instruments WHERE meeting_id=?', [id]);
+      DB.run('DELETE FROM meeting_staff WHERE meeting_id=?', [id]);
+      DB.run('DELETE FROM meetings WHERE id=?', [id]);
+    });
   }
 
   // Has the session's intended start time passed? Cancelling before it means nothing was held;
@@ -4207,6 +4292,13 @@
   }
 
   async function doRestore() {
+    // Check the read-only guard before even opening the file picker — DB.restoreBackup() also
+    // refuses (see its own assertWritable() call), but there's no reason to make a visitor pick a
+    // file and step through the whole preview/confirm flow only to be refused at the very end.
+    if (DB.isReadOnly) {
+      UI.toast('This tab is read-only because the database is open in another tab.', 'error');
+      return;
+    }
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'application/json';
@@ -4267,7 +4359,9 @@
         UI.toast('Database restored successfully');
         route('projects');
       } catch (e) {
-        UI.toast('Restore failed: ' + e.message, 'error');
+        // DB.restoreBackup's own assertWritable() guard already shows the read-only toast — don't
+        // double it with a second "Restore failed: ..." message for the exact same reason.
+        if (!e || !e.dbReadOnly) UI.toast('Restore failed: ' + e.message, 'error');
       }
     };
     input.click();
@@ -4524,12 +4618,15 @@
     if (!name) { UI.toast('Grant name required', 'error'); return; }
     const number = m.querySelector('#g-number').value.trim();
     const note = m.querySelector('#g-note').value.trim();
-    DB.run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', [name, number, note]);
-    const inserted = DB.row('SELECT last_insert_rowid() as id');
-    const gid = inserted ? inserted.id : null;
-    if (gid) {
-      readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [gid, pid]));
-    }
+    // G1: the grant insert and its allowed-users join rows are one save.
+    DB.transaction(() => {
+      DB.run('INSERT INTO grants (name, number, note) VALUES (?,?,?)', [name, number, note]);
+      const inserted = DB.row('SELECT last_insert_rowid() as id');
+      const gid = inserted ? inserted.id : null;
+      if (gid) {
+        readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [gid, pid]));
+      }
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Grant added');
     refresh();
@@ -4563,11 +4660,14 @@
     if (!name) { UI.toast('Grant name required', 'error'); return; }
     const number = m.querySelector('#ge-number').value.trim();
     const note = m.querySelector('#ge-note').value.trim();
-    DB.run('UPDATE grants SET name=?, number=?, note=? WHERE id=?', [name, number, note, id]);
-    // Rebuilt from the picker every save, same as every other join table here — an allowed user
-    // filtered out of the form (retired-but-assigned excepted, see grantUserItems) is dropped.
-    DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
-    readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [id, pid]));
+    // G1: the grant update and the allowed-users rebuild are one save.
+    DB.transaction(() => {
+      DB.run('UPDATE grants SET name=?, number=?, note=? WHERE id=?', [name, number, note, id]);
+      // Rebuilt from the picker every save, same as every other join table here — an allowed user
+      // filtered out of the form (retired-but-assigned excepted, see grantUserItems) is dropped.
+      DB.run('DELETE FROM grant_users WHERE grant_id=?', [id]);
+      readTokenIds(m, 'grant-users').forEach((pid) => DB.run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [id, pid]));
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Grant updated');
     refresh();
@@ -4762,9 +4862,13 @@
     if (rejectNegative(qty, 'Quantity') || rejectNegative(rate, 'Rate')) return;
     const total = UI.round2(qty * rate);
 
-    DB.run(`INSERT INTO service_entries (project_id, grant_id, person_id, instrument_id, date, description, qty, unit, rate, total_cost)
-            VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total]);
+    // G1: a single-statement write, but wrapped like every other saver here so a partial write
+    // (and a flagged-dirty autosave of it) is never possible even as the entry gains more fields.
+    DB.transaction(() => {
+      DB.run(`INSERT INTO service_entries (project_id, grant_id, person_id, instrument_id, date, description, qty, unit, rate, total_cost)
+              VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total]);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Service entry saved');
     refresh();
@@ -4829,8 +4933,10 @@
     if (rejectNegative(qty, 'Quantity') || rejectNegative(rate, 'Rate')) return;
     const total = UI.round2(qty * rate);
 
-    DB.run(`UPDATE service_entries SET project_id=?, grant_id=?, person_id=?, instrument_id=?, date=?, description=?, qty=?, unit=?, rate=?, total_cost=? WHERE id=?`,
-      [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total, id]);
+    DB.transaction(() => {
+      DB.run(`UPDATE service_entries SET project_id=?, grant_id=?, person_id=?, instrument_id=?, date=?, description=?, qty=?, unit=?, rate=?, total_cost=? WHERE id=?`,
+        [projectId, grantId, personId, instrumentId, date, desc, qty, unit, rate, total, id]);
+    });
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Service entry updated');
     refresh();
