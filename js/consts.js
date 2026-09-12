@@ -1,5 +1,5 @@
 /* consts.js — shared vocabularies (keep in sync with UI) + the demo-sandbox flag */
-window.APP_VERSION = '1.10.2';
+window.APP_VERSION = '1.11.0';
 
 /* ---------------- Demo sandbox flag ----------------
    The demo dataset must never be able to touch a real facility's records, so it does not share

@@ -436,7 +436,11 @@ body {
    text length or how narrow the surrounding grid column is; the label ellipsizes instead of
    overlapping when a column is too tight for both. Selects below this header line up with
    sibling fields' plain-label selects in the same grid row regardless of column width. */
-.field-vocab-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 18px; }
+.field-vocab-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 18px; container-type: inline-size; }
+/* The "+ Add New" button keeps its full label (the manual and the nested dialog both call it
+   that); only when the field's column is too narrow for both the label and the button does the
+   word "New" drop, so a label such as "Category" is never ellipsised to "Categ…". */
+@container (max-width: 150px) { .field-vocab-head .vab-more { display: none; } }
 .field-vocab-head label { min-width: 0; flex: 1 1 auto; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .field-vocab-head .vocab-add-btn {
   flex: 0 0 auto; height: 16px; line-height: 1;

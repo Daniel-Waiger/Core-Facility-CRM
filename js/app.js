@@ -101,7 +101,7 @@
     <div class="field">
       <div class="field-vocab-head">
         <label title="${esc(label)}">${esc(label)}${required ? ' *' : ''}</label>
-        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add</button>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="vocab-add" data-cat="${category}" data-target="${id}" data-label="${esc(label)}" data-tooltip="Add a new ${esc(label)}">${ic('plus')} Add<span class="vab-more"> New</span></button>
       </div>
       <select class="input vocab-select" id="${id}" data-cat="${category}" data-label="${esc(label)}" data-prev="${esc(selected)}">
         <option value="">${placeholder}</option>
@@ -125,7 +125,7 @@
     <div class="field">
       <div class="field-vocab-head">
         <label>${esc(label)}</label>
-        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add</button>
+        <button type="button" class="btn btn-secondary btn-sm vocab-add-btn" data-act="list-add" data-target="${id}" data-title="${esc(modalTitle || label)}" data-cat="${esc(category || '')}" data-tooltip="Register a new ${esc(label)}">${ic('plus')} Add<span class="vab-more"> New</span></button>
       </div>
       <select class="input" id="${id}">
         <option value="">— None —</option>
