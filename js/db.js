@@ -801,7 +801,13 @@
       const tx = s.transaction('kv', 'readwrite');
       tx.objectStore('kv').put({ k: key, v: val });
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      // Item 4 follow-up (found while browser-testing item 4's fix): tx.error can be null/undefined
+      // for a transaction that failed WITHOUT an underlying request error (e.g. an explicit
+      // transaction.abort() call, as a real IndexedDB failure can look like) — rejecting with that
+      // bare null used to reach a caller's `catch (e) { ...e.message... }` and throw a SECOND,
+      // unrelated TypeError ("Cannot read properties of null") instead of the failure the caller
+      // was trying to report. Fall back to a real Error the same way onabort already does below.
+      tx.onerror = () => reject(tx.error || new Error('idbSet transaction failed'));
       tx.onabort = () => reject(tx.error || new Error('idbSet transaction aborted'));
     });
   }
@@ -812,7 +818,8 @@
       const tx = s.transaction('kv', 'readwrite');
       tx.objectStore('kv').delete(key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      // Same null-error fallback as idbSet's tx.onerror above.
+      tx.onerror = () => reject(tx.error || new Error('idbDelete transaction failed'));
       tx.onabort = () => reject(tx.error || new Error('idbDelete transaction aborted'));
     });
   }
@@ -1140,12 +1147,21 @@
     }
   }
 
+  // Item 3 (second review): flushNow() used to just call flush(), which returns immediately (a
+  // no-op) whenever a save is already `saving` — so an edit made WHILE that save is in flight
+  // (pendingDuringSave) had nothing to make it go out during a lifecycle event; it waited for the
+  // 400ms timer scheduleFlush() re-armed, which pagehide/beforeunload may not give time to fire.
+  // `currentFlushPromise` exposes the in-flight call's own promise (set right as `saving` flips
+  // true, cleared once that call's own await settles) so flushNow() can await it and then call
+  // flush() again for whatever landed during it — see flushNow() below.
+  let currentFlushPromise = null;
   async function flush() {
     if (!dirty) return;
     if (saving) return; // a save is already in flight; markDirty() already flagged pendingDuringSave
     if (multiTabGuard.isReadOnly()) return; // this tab lost the leader race — never persist over it
     const myGen = dbGeneration;
     saving = true;
+    const thisFlush = (async () => {
     try {
       if (myGen !== dbGeneration) {
         // A restore superseded this database between markDirty() scheduling us and us actually
@@ -1192,6 +1208,13 @@
     } finally {
       saving = false;
     }
+    })();
+    currentFlushPromise = thisFlush;
+    try {
+      await thisFlush;
+    } finally {
+      if (currentFlushPromise === thisFlush) currentFlushPromise = null;
+    }
   }
 
   // Flush immediately, skipping the remainder of the debounce — used when the tab is about to
@@ -1203,6 +1226,15 @@
   // prompt, it only gets a head start on the same save pagehide would otherwise trigger alone.
   function flushNow() {
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (saving && currentFlushPromise) {
+      // A save is already in flight (its snapshot was taken before this edit landed) — flush()
+      // itself would just return immediately here. Await the in-flight save, then call flush()
+      // again so whatever markDirty() flagged as pendingDuringSave goes out now, during this same
+      // lifecycle event, instead of waiting on a debounce timer the event may not allow to fire.
+      // Not awaited by callers that don't need to (the event handlers below fire-and-forget this),
+      // but the returned promise lets a caller/test wait for the real end-to-end completion.
+      return currentFlushPromise.then(() => flush(), () => flush());
+    }
     return flush();
   }
   if (typeof global.addEventListener === 'function') {
@@ -1331,6 +1363,28 @@
     // Validates BEFORE anything below touches the live `db` or IndexedDB — see
     // inspectBackupCandidate's comment. A throw here leaves the live handle exactly as it was.
     const preview = await inspectBackupCandidate(data);
+
+    // Second-review item 1: this used to validate each upload entry (`typeof entry.data ===
+    // 'string'`) INSIDE the apply loop below, which ran AFTER old uploads had already been
+    // deleted and the SQL database already swapped in and persisted — so a malformed entry
+    // (`{}`, or a `data` string that isn't valid base64) left the restore half-applied: new
+    // database, old uploads gone, new uploads short by whatever failed to decode. Decode every
+    // entry into a Blob here, before the db swap or any IndexedDB delete — a malformed entry now
+    // rejects the WHOLE restore, with the live database and upload set untouched.
+    const uploadBlobs = new Map();
+    for (const [name, entry] of Object.entries(data.uploads || {})) {
+      if (!entry || typeof entry !== 'object' || typeof entry.data !== 'string') {
+        throw new Error(`Not a valid backup file — the attached file "${name}" is malformed.`);
+      }
+      let blob;
+      try {
+        blob = base64ToBlob(entry);
+      } catch (e) {
+        throw new Error(`Not a valid backup file — the attached file "${name}" could not be decoded.`);
+      }
+      uploadBlobs.set(name, blob);
+    }
+
     // All async prep — engine init and parsing the incoming bytes into a standalone Database —
     // happens BEFORE waitForSaveIdle() is even called, specifically so that once that wait
     // resolves, the generation bump and the `db` swap below run with NOTHING async in between.
@@ -1374,22 +1428,37 @@
       try { newDb.close(); } catch (_) {}
       throw e;
     }
-    try { previousDb.close(); } catch (_) {}
+    // previousDb is kept OPEN (not closed yet) past this point — if the upload apply below fails,
+    // the rollback branch needs it live to re-export and re-persist as the working database again.
     // 4b: restore must REPLACE the upload set, not merge into it — an attachment removed from the
     // facility's data before this backup was taken (or never present in it) must not survive the
     // restore just because some earlier database left its blob sitting in IndexedDB. Delete every
-    // uploads:* entry the incoming backup doesn't carry before writing the ones it does.
-    const backupUploadNames = new Set(Object.keys(data.uploads || {}));
-    const existingUploads = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
-    for (const { key } of existingUploads) {
-      const name = key.slice((UPLOAD_KEY + ':').length);
-      if (!backupUploadNames.has(name)) await idbDelete(key);
-    }
-    for (const [name, entry] of Object.entries(data.uploads || {})) {
-      if (entry && typeof entry === 'object' && typeof entry.data === 'string') {
-        await idbSet(UPLOAD_KEY + ':' + name, base64ToBlob(entry));
+    // uploads:* entry the incoming backup doesn't carry before writing the ones it does. Every
+    // entry was already decoded and validated above, so nothing here can fail on malformed input —
+    // only a genuine IndexedDB error (a full/blocked store) reaches the catch below.
+    try {
+      const backupUploadNames = new Set(uploadBlobs.keys());
+      const existingUploads = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+      for (const { key } of existingUploads) {
+        const name = key.slice((UPLOAD_KEY + ':').length);
+        if (!backupUploadNames.has(name)) await idbDelete(key);
       }
+      for (const [name, blob] of uploadBlobs) {
+        await idbSet(UPLOAD_KEY + ':' + name, blob);
+      }
+    } catch (e) {
+      // Roll back rather than leave the SQL database restored with the upload set only half
+      // applied: put previousDb back as the live database, re-persist IT (bumping the generation
+      // again so any lingering flush targeting the now-abandoned newDb is dropped, same guard as
+      // the swap above), and rethrow so doRestore reports the failure honestly instead of the
+      // toast in app.js claiming "Database restored successfully" over a half-done restore.
+      db = previousDb;
+      dbGeneration++;
+      try { await withDeadline(idbSet(DB_KEY, currentBytes()), SAVE_IDLE_TIMEOUT_MS, e); } catch (_) { /* best effort re-persist; the original error is what we throw */ }
+      try { newDb.close(); } catch (_) {}
+      throw e;
     }
+    try { previousDb.close(); } catch (_) {}
     return preview;
   }
 
@@ -1415,11 +1484,13 @@
   }
   // Every uploaded blob, regardless of which project or file row it belonged to — used by Clear
   // All Data, which wipes every table and so must also wipe every attachment.
+  // Item 4 (second review): this used to catch-and-log a failure here and resolve successfully
+  // anyway, so clearAllData() (which awaits this) reported "cleared" while blobs were still
+  // sitting in IndexedDB. Let a rejection propagate — callers now decide how to report it rather
+  // than being lied to about the outcome.
   async function deleteAllUploads() {
-    try {
-      const entries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
-      for (const { key } of entries) await idbDelete(key);
-    } catch (e) { console.error('deleteAllUploads failed', e); }
+    const entries = await idbGetAllWithPrefix(UPLOAD_KEY + ':');
+    for (const { key } of entries) await idbDelete(key);
   }
 
   /* ---------------- Silent auto-backup folder handle (IndexedDB) ---------------- */
@@ -2706,6 +2777,7 @@
     get isDemo() { return !!global.IS_DEMO; },
     currentBytes,
     markDirty,
+    flushNow,
     get isReadOnly() { return multiTabGuard.isReadOnly(); },
     buildBackup,
     restoreBackup,

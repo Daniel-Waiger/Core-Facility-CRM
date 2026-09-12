@@ -30,6 +30,7 @@ function makeFakeIndexedDB() {
   const store = new Map();
   let gate = null;
   let onPutStart = null;
+  let failWhen = null; // (key) => bool — makes the matching put() reject via tx.onerror instead of committing
   const dbHandle = {
     objectStoreNames: { contains: () => true },
     createObjectStore: () => {},
@@ -49,6 +50,14 @@ function makeFakeIndexedDB() {
         },
         put(entry) {
           const finish = () => { store.set(entry.k, entry.v); if (tx.oncomplete) tx.oncomplete(); };
+          if (failWhen && failWhen(entry.k)) {
+            if (onPutStart) onPutStart(entry.k);
+            queueMicrotask(() => {
+              tx.error = new Error('simulated storage failure');
+              if (tx.onerror) tx.onerror();
+            });
+            return {};
+          }
           if (gate) {
             // The gate holds exactly the NEXT put() call, then clears itself — so a second put()
             // (e.g. restoreBackup's own write, arriving while the first is still paused) is NOT
@@ -104,6 +113,7 @@ function makeFakeIndexedDB() {
     },
     setGate(p) { gate = p; },
     setOnPutStart(fn) { onPutStart = fn; },
+    setFailWhen(fn) { failWhen = fn; },
   };
 }
 
@@ -235,5 +245,96 @@ describe('restoreBackup: races with the autosave debounce, and replaces the uplo
     assert.ok(kept, "'keep-me.bin' was in the backup and must exist after restore");
     const text = await kept.text();
     assert.equal(text, 'replaced-content', "the restored blob's content must be the BACKUP's version, not the pre-restore one");
+  });
+
+  test('(1) a malformed upload entry ({}) rejects the whole restore BEFORE anything is touched — old uploads and the live db survive untouched', async () => {
+    const { app } = await bootFakeApp();
+    const { DB } = app;
+
+    await DB.saveUpload('old-file.bin', new Blob(['still-here']));
+    DB.run("INSERT INTO projects (title, code, status) VALUES ('Original','P-ORIG','Active')");
+
+    const donor = loadApp(['consts', 'db', 'ui']);
+    await donor.DB.boot();
+    donor.DB.run("INSERT INTO projects (title, code, status) VALUES ('Restored','P-RESTORED','Active')");
+    const restoredBytes = Array.from(donor.DB.currentBytes());
+
+    await assert.rejects(
+      DB.restoreBackup({
+        kind: 'core-facility-backup', version: 2, created: new Date().toISOString(), demo: false,
+        db: restoredBytes,
+        uploads: { 'bad.bin': {} }, // no `.data` string — malformed
+      }),
+      /malformed/,
+    );
+
+    assert.ok(DB.row("SELECT id FROM projects WHERE code='P-ORIG'"), 'the live db must be entirely untouched by a rejected restore');
+    assert.equal(DB.row("SELECT id FROM projects WHERE code='P-RESTORED'"), null, 'the (invalid) backup must never have been swapped in');
+    const stillThere = await DB.getUpload('old-file.bin');
+    assert.ok(stillThere, 'a pre-existing upload must survive a restore that gets rejected for a malformed entry — nothing should have been deleted yet');
+  });
+
+  test('(1) an upload entry with data that is not valid base64 rejects the whole restore before any deletion or db swap', async () => {
+    const { app } = await bootFakeApp();
+    const { DB } = app;
+
+    await DB.saveUpload('old-file.bin', new Blob(['still-here']));
+    DB.run("INSERT INTO projects (title, code, status) VALUES ('Original','P-ORIG','Active')");
+
+    const donor = loadApp(['consts', 'db', 'ui']);
+    await donor.DB.boot();
+    const restoredBytes = Array.from(donor.DB.currentBytes());
+
+    await assert.rejects(
+      DB.restoreBackup({
+        kind: 'core-facility-backup', version: 2, created: new Date().toISOString(), demo: false,
+        db: restoredBytes,
+        uploads: { 'bad.bin': { type: 'application/octet-stream', data: '***not base64***' } },
+      }),
+      /could not be decoded/,
+    );
+
+    assert.ok(DB.row("SELECT id FROM projects WHERE code='P-ORIG'"), 'the live db must be entirely untouched');
+    const stillThere = await DB.getUpload('old-file.bin');
+    assert.ok(stillThere, 'nothing must have been deleted before the malformed entry was caught');
+  });
+
+  test('(1) a failing upload write AFTER the db swap rolls back: previousDb is restored as live and re-persisted', async () => {
+    const { app, fake } = await bootFakeApp();
+    const { DB } = app;
+
+    await DB.saveUpload('keep-me.bin', new Blob(['keep']));
+    DB.run("INSERT INTO projects (title, code, status) VALUES ('Original','P-ORIG','Active')");
+
+    const donor = loadApp(['consts', 'db', 'ui']);
+    await donor.DB.boot();
+    donor.DB.run("INSERT INTO projects (title, code, status) VALUES ('Restored','P-RESTORED','Active')");
+    const restoredBytes = Array.from(donor.DB.currentBytes());
+
+    const b64 = Buffer.from('new-content').toString('base64');
+    // Make ONLY the upload write itself fail (not the db-swap's own idbSet, which put()s
+    // 'core.db' earlier in the same restore) — a genuine post-swap IndexedDB failure.
+    fake.setFailWhen((k) => String(k).startsWith('uploads:'));
+
+    await assert.rejects(
+      DB.restoreBackup({
+        kind: 'core-facility-backup', version: 2, created: new Date().toISOString(), demo: false,
+        db: restoredBytes,
+        uploads: { 'keep-me.bin': { type: 'application/octet-stream', data: b64 } },
+      }),
+      /simulated storage failure/,
+    );
+    fake.setFailWhen(null);
+
+    assert.ok(DB.row("SELECT id FROM projects WHERE code='P-ORIG'"), 'db must have been rolled back to the pre-restore one, live in memory');
+    assert.equal(DB.row("SELECT id FROM projects WHERE code='P-RESTORED'"), null, 'the restored db must not remain live after rollback');
+
+    const SQL = await globalThis.initSqlJs();
+    const persisted = new SQL.Database(new Uint8Array(fake.store.get('core.db')));
+    const hasOrig = persisted.exec("SELECT COUNT(*) FROM projects WHERE code='P-ORIG'")[0].values[0][0];
+    const hasRestored = persisted.exec("SELECT COUNT(*) FROM projects WHERE code='P-RESTORED'")[0].values[0][0];
+    persisted.close();
+    assert.equal(hasOrig, 1, 'IndexedDB must have been re-persisted with the ROLLED-BACK (original) database');
+    assert.equal(hasRestored, 0, 'the restored database must not be what ended up persisted after a rollback');
   });
 });
