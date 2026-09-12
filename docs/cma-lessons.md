@@ -189,4 +189,18 @@ A lesson that just restates an architecture rule should be deleted — point at
   seen again in a different section of the same run — restating it here would be a duplicate; this
   entry exists only to note it recurred, not to re-explain it.
 
+## Rendering claims (2026-09-12)
+
+- **A rendered page image is not evidence for right-to-left text.** The bundled `libs/jspdf.umd.min.js`
+  ships its own bidi engine, so a mixed English/Hebrew line is already reordered by jsPDF; an
+  app-side pre-reversal cancels it and the name draws scrambled — yet the executor "confirmed" the
+  feature by looking at the rendered page, whose viewer re-applies bidi and hides the fault. Verify
+  glyph order on the PDF content stream (PyMuPDF `get_texttrace()` x-origins), never on a picture.
+  Only a base-RTL line, which jsPDF leaves in logical order, needs reversing (`pdfBidiReverse`).
+
+- **Executor worktrees may fork from `main`, not from the branch head.** Three packages in one run
+  started from a stale base and then "verified" claims about code that only existed on the branch
+  (one concluded a rename had never happened). Tell every executor the exact head SHA and make it
+  `git reset --hard` there before reading anything.
+
 <!-- cma:append-here -->

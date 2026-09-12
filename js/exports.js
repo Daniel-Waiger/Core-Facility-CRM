@@ -292,13 +292,17 @@
     }
     return false; // no strong (directional) character found — digits/punctuation only
   }
+  // The bundled jsPDF ships its own bidi engine, and it handles a MIXED line (an English label
+  // with a Hebrew name in it) correctly on its own — but it leaves a line that is predominantly
+  // right-to-left in logical order, which draws backwards. So this helper only touches lines whose
+  // base direction is RTL; for a base-LTR line it must be a no-op, or the two reorderings cancel
+  // each other and the name comes out scrambled. Verified on glyph x-origins in the content
+  // stream, not on a rendered image (a viewer re-applies bidi and would hide the error).
   function pdfBidiReverse(s) {
     if (!PDF_RTL_RE.test(s)) return s;
-    if (pdfBaseIsRtl(s)) {
-      const reversed = s.split('').reverse().join('');
-      return reversed.replace(PDF_LTR_RUN_RE, (run) => run.split('').reverse().join(''));
-    }
-    return s.replace(PDF_RTL_RUN_RE, (run) => run.split('').reverse().join(''));
+    if (!pdfBaseIsRtl(s)) return s;
+    const reversed = s.split('').reverse().join('');
+    return reversed.replace(PDF_LTR_RUN_RE, (run) => run.split('').reverse().join(''));
   }
 
   // Runs fn() with the doc's font temporarily switched to the multi-script font when `text` needs

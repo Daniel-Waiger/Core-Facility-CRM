@@ -99,6 +99,14 @@
      compute* function below), so behavior and return values are identical to before this file
      had a facts bundle at all — this is purely reuse across calls that opt in by sharing one. */
   function makeFacts(from, to) { return { from, to, _cache: {} }; }
+  // Every compute* entry point goes through this: a bundle is bound to one (from, to) range, and
+  // reusing it for another would silently return the other period's numbers — the one class of
+  // error a report must never make — so refuse rather than guess.
+  function useFacts(facts, from, to) {
+    if (!facts) return makeFacts(from, to);
+    if (facts.from !== from || facts.to !== to) throw new Error(`Reports facts bundle is for ${facts.from}..${facts.to}, not ${from}..${to}`);
+    return facts;
+  }
   function memo(facts, key, fn) {
     if (!facts) return fn();
     const cache = facts._cache || (facts._cache = {});
@@ -283,7 +291,7 @@
      ================================================================================ */
   function computeInstrumentRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'instrumentRows', () => {
       const meetings = annotateMeetings(loadMeetingsInRange(from, to, facts), facts);
       const lines = loadInstrumentLines(from, to, facts);
@@ -316,7 +324,7 @@
      ================================================================================ */
   function computeStaffRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'staffRows', () => {
       const meetings = annotateMeetings(loadMeetingsInRange(from, to, facts), facts);
       const lines = loadStaffLines(from, to, facts);
@@ -366,7 +374,7 @@
   const NO_INSTRUMENT_KEY = '__no_instrument__';
   function computeStaffInstrumentMatrix(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'staffInstrumentMatrix', () => {
       const meetings = annotateMeetings(loadMeetingsInRange(from, to, facts), facts);
       const instrumentLines = loadInstrumentLines(from, to, facts);
@@ -430,7 +438,7 @@
      ================================================================================ */
   function computeProjectRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'projectRows', () => computeProjectRowsImpl(from, to, facts));
   }
   function computeProjectRowsImpl(from, to, facts) {
@@ -491,7 +499,7 @@
      ================================================================================ */
   function computeServiceEntryRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'serviceEntryRows', () => {
       const rows = loadServiceEntriesInRange(from, to, facts).map((r) => {
         const moneyCounts = !(r.is_cancelled && !r.billing_retained);
@@ -512,7 +520,7 @@
      total but contributes no instrument row — nothing to attribute it to there. */
   function computeConsultRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'consultRows', () => {
       const allMeetings = loadMeetingsInRange(from, to, facts);
       const consults = allMeetings.filter((m) => m.category === 'consult' && !m.is_cancelled);
@@ -563,7 +571,7 @@
      ================================================================================ */
   function computeStewardshipRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'stewardshipRows', () => {
       // Reuse — passing `facts` along means these hit the memoized result from an EARLIER call in
       // the same render/export (render() and exportReportsXlsx both compute instrument/consult
@@ -662,7 +670,7 @@
      decision, not a second aggregation path that could drift from this one. */
   function computeBreadthRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'breadthRows', () => computeBreadthRowsImpl(from, to, facts));
   }
   function computeBreadthRowsImpl(from, to, facts) {
@@ -761,7 +769,7 @@
      not a start/end time, so there are no hours to attribute; see the returned footnote text. */
   function computeActivityMixRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'activityMixRows', () => computeActivityMixRowsImpl(from, to, facts));
   }
   function computeActivityMixRowsImpl(from, to, facts) {
@@ -948,7 +956,7 @@
   }
   function computeFunnelRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'funnelRows', () => computeFunnelRowsImpl(from, to, facts));
   }
   function computeFunnelRowsImpl(from, to, facts) {
@@ -1192,7 +1200,7 @@
      applied per-row instead of summed into a total. */
   function computeBookingRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     return memo(facts, 'bookingRows', () => computeBookingRowsImpl(from, to, facts));
   }
   function computeBookingRowsImpl(from, to, facts) {
@@ -1490,7 +1498,7 @@
     const entity = spec && spec.entity;
     const def = ENTITY_DEFS[entity];
     if (!def) return { entity, columns: [], rows: [], notes: [] };
-    facts = facts || makeFacts(from, to);
+    facts = useFacts(facts, from, to);
     const requested = new Set((spec.columns || []).filter((k) => def.columns.some((c) => c.key === k)));
     def.columns.forEach((c) => { if (c.required) requested.add(c.key); });
     const columns = def.columns.filter((c) => requested.has(c.key));

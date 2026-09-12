@@ -39,10 +39,9 @@ and phone-width layout.
 - **Saves are all-or-nothing.** Every save that writes more than one thing at once — a booking and
   its attendees, instruments and staff; a milestone and its owners; a project and its PI; an
   instrument and its supervisors and rates; a grant and its people — now either lands completely
-  or not at all. If something goes wrong midway the app says so ("Something went wrong and nothing
-  was saved") and leaves the dialog open with your input, instead of failing silently with a
-  half-written record.
-- **Reports & Utilization is about four times faster** on a large booking history: the screen
+  or not at all. If something goes wrong midway the app says so and leaves the dialog open with
+  your input, instead of failing silently with a half-written record.
+- **Reports & Utilization is three to four times faster** on a large booking history: the screen
   reads the period's bookings once and every card works from that, and typing a date waits for a
   short pause instead of recalculating on each keystroke.
 - **A saved booking's cost stays exactly as billed** unless something that affects price changes

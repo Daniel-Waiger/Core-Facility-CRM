@@ -215,12 +215,14 @@ describe('PDF font (G3): a Hebrew name is bidi-reversed for jsPDF, and the multi
     assert.equal(Exports._pdfBidiReverse(latinOnly), latinOnly, 'a pure-Latin/digit string must be returned unchanged');
   });
 
-  test('_pdfBidiReverse only reverses the embedded Hebrew run in an English sentence, leaving the labels and their order untouched', () => {
+  test('_pdfBidiReverse leaves a base-left-to-right line untouched, Hebrew run included, because jsPDF's own bidi engine reorders mixed lines', () => {
     // Regression case: exportPdf's own summary line is exactly this shape —
-    // "Principal Investigator: <Hebrew name>   |   Funding: —   |   Modality: —". A first pass at
-    // this helper reversed the WHOLE line whenever it contained any RTL character at all, which
-    // moved "Principal Investigator:" to the far end of the line — confirmed by actually rendering
-    // a PDF with this line and reading the page image, not by inspecting the string alone.
+    // "Principal Investigator: <Hebrew name>   |   Funding: —   |   Modality: —". The bundled
+    // jsPDF (libs/jspdf.umd.min.js, __bidiEngine__) already reorders a mixed line correctly, so a
+    // pre-reversal of the Hebrew run here cancels it out and the name draws scrambled. That was
+    // measured on glyph x-origins in the PDF content stream — a rendered image is NOT evidence
+    // for bidi, because the viewer re-applies bidi and hides the error. Only a line whose base
+    // direction is right-to-left (which jsPDF leaves in logical order) may be reversed.
     const app = loadApp(['consts', 'db', 'ui', 'views', 'reports', 'exports']);
     const Exports = app.Exports;
     const piName = 'שרה כהן'; // שרה כהן
@@ -230,9 +232,8 @@ describe('PDF font (G3): a Hebrew name is bidi-reversed for jsPDF, and the multi
     assert.ok(out.startsWith('Principal Investigator: '), `the English label must stay first and un-reversed, got: "${out}"`);
     assert.ok(out.includes('   |   Funding: '), 'the surrounding structure/order must be untouched');
     assert.ok(out.includes('   |   Modality: '), 'the surrounding structure/order must be untouched');
-    // The embedded Hebrew run itself must have its own character order reversed.
-    const nameReversed = piName.split('').reverse().join('');
-    assert.ok(out.includes(nameReversed), `the embedded Hebrew name itself must still be reversed into visual order, got: "${out}"`);
+    // The embedded Hebrew run must be left in logical order for jsPDF's engine to place.
+    assert.equal(out, line, 'a base-LTR line must come back byte-for-byte identical');
   });
 
   test('exportPdf registers the custom font on the jsPDF document once the (stubbed) font fetch resolves', async () => {
