@@ -19,7 +19,8 @@ and phone-width layout.
 - **A second browser tab on the same data is read-only.** Two tabs used to race each other and
   whichever saved last silently won. A second tab now shows a banner on every screen, refuses to
   save, and if the tab that was saving is closed, the other one reloads from the last save before
-  taking over — so it can never overwrite a save it never saw.
+  taking over — so it can never overwrite a save it never saw. Restoring a backup is refused in a
+  read-only tab for the same reason.
 - **Booking an instrument marked Maintenance or Down now warns you** — live while filling in the
   form, and with a confirmation before the booking is saved. It never blocks the booking.
 - **A Notes sheet in the facility-wide spreadsheet export**, matching the Reports export,
@@ -29,8 +30,21 @@ and phone-width layout.
   so a row's Subtotal → Before Tax → Total math can be checked without the app open. The last
   money column is now labelled "Charged Total" so a waived cancellation's zero does not read as a
   broken calculation. Existing columns keep their meaning.
+- **The PDF project report renders Hebrew, Cyrillic and Greek.** A Hebrew PI or lab name used to
+  print as garbage because the built-in PDF font only knows Western Latin. The report now embeds
+  Open Sans (shipped with the app, so it works offline too) and draws right-to-left names in
+  reading order. Arabic script is not covered by that font.
 
 ### Changed
+- **Saves are all-or-nothing.** Every save that writes more than one thing at once — a booking and
+  its attendees, instruments and staff; a milestone and its owners; a project and its PI; an
+  instrument and its supervisors and rates; a grant and its people — now either lands completely
+  or not at all. If something goes wrong midway the app says so ("Something went wrong and nothing
+  was saved") and leaves the dialog open with your input, instead of failing silently with a
+  half-written record.
+- **Reports & Utilization is about four times faster** on a large booking history: the screen
+  reads the period's bookings once and every card works from that, and typing a date waits for a
+  short pause instead of recalculating on each keystroke.
 - **A saved booking's cost stays exactly as billed** unless something that affects price changes
   (instruments, staff time, times, discount, category, or the assigned lab/tier). Editing only the
   notes or next steps no longer silently reprices it at today's rates. Stored money is rounded to
@@ -84,8 +98,7 @@ and phone-width layout.
 - **The facility-wide spreadsheet omitted "(Retired)"** on the Milestones and Bookings & Costs
   sheets, unlike every other export. **Word and PDF reports printed unrounded money** with no
   currency, and printed a waived cancellation's full charge where the spreadsheet showed zero. The
-  PDF also used two symbols its built-in font cannot draw. (Hebrew and other non-Latin names in the
-  PDF remain unsupported — noted in the manual; embedding a font is a separate piece of work.)
+  PDF also used two symbols its built-in font cannot draw.
 - **A project or milestone created late at night landed in the wrong month** in the Reports funnel
   at the facility's own clock — the issue #14 class of bug, in a timestamp this time. A lab name
   with a trailing space counted twice toward "New Labs Onboarded".
@@ -95,7 +108,9 @@ and phone-width layout.
   buttons no longer run off the right edge; row action buttons are big enough to tap; long email
   addresses wrap instead of being cut off; faint text (table headings, dates, hints) now meets the
   accessibility contrast guideline in both themes. The week view opens at 07:00 instead of
-  midnight, and a two-hour booking on the Timeline is no longer a sliver a few pixels wide.
+  midnight, and a short booking on the Timeline shows its start time instead of shrinking to a
+  sliver showing only an icon. Today's Agenda's card is titled "Bookings Today", since it lists every
+  category of booking.
 - **Custom status values and a person's role were rendered without escaping** in a few places, as
   was the instrument name in the new Maintenance/Down confirmation. Both are now displayed safely.
 - **A required-field message now also outlines the field it refers to**, not only a toast in the
@@ -106,11 +121,11 @@ and phone-width layout.
   hold; the Instruments page said a Down instrument booked with no warning.
 
 ### Known and deferred
-- Saves are still not wrapped in database transactions, so an error midway through a multi-step
-  save can leave a record half-written; dialogs now surface such errors instead of hiding them.
-- Reports recompute every card on each date change (roughly two seconds at 5,000 bookings).
-- A facility that already deleted the default pricing tiers on 1.10.2 will see them return once
-  more on the first load of this version, then stay deleted.
+- The PDF's right-to-left handling is a targeted fix for the names and notes this report draws,
+  not a full text engine, and the embedded font has no Arabic glyphs, so Arabic text still does
+  not display correctly (unchanged from before).
+- The facility-wide spreadsheet's Bookings & Costs sheet still runs one name lookup per row for
+  instruments and staff, so "Export All" on a very large history takes a couple of seconds.
 
 ## [1.10.2] — 2026-09-10
 
