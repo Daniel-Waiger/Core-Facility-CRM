@@ -116,16 +116,61 @@
      need to close the dim themselves should get it via `m.closest('.modal-dim')` or the `dim`
      param onMount receives, not by assuming the return value IS the dim (that mismatch used to
      leave the blurred backdrop stuck on screen after a promise-based modal like confirmModal
-     resolved — the inner card was removed but the outer overlay never was). */
+     resolved — the inner card was removed but the outer overlay never was).
+
+     Modals can stack (a nested "+ Add New" opened from inside another form, a confirm on top of
+     an edit dialog, …). `topModal()`/`topDim()` are the one place that answers "which modal is
+     the user actually looking at right now" — every save/run function in app.js reads its form
+     fields off `UI.topModal()` rather than the first `.modal` in the DOM, which would silently be
+     whichever modal happened to open FIRST (e.g. Today's Agenda) instead of whatever is on top of
+     it (e.g. Edit Booking opened from that agenda). */
+  function topDim() {
+    const dims = document.querySelectorAll('.modal-dim');
+    return dims.length ? dims[dims.length - 1] : null;
+  }
+  function topModal() {
+    const dim = topDim();
+    return dim ? dim.querySelector('.modal') : null;
+  }
+  // Closes every open modal, topmost first, so each one's stored `_prevFocus` restores focus in
+  // the right order (ending on whatever had focus before the FIRST modal opened). Used when the
+  // app navigates out from under an open modal (hashchange, a nested `data-goto`) — a draft in a
+  // modal is deliberately abandoned in that case, since the record it was bound to may no longer
+  // be the one on screen.
+  function closeAllModals() {
+    const dims = [...document.querySelectorAll('.modal-dim')];
+    for (let i = dims.length - 1; i >= 0; i--) closeDim(dims[i]);
+  }
+
+  // Elements a modal can usefully move focus to/trap Tab between. Excludes disabled controls and
+  // negative-tabindex elements (those are programmatically focusable but deliberately skipped in
+  // tab order elsewhere in the app).
+  const FOCUSABLE_SEL = 'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), ' +
+    'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+  function focusableIn(container) {
+    return [...container.querySelectorAll(FOCUSABLE_SEL)].filter((el) => el.offsetParent !== null || el === document.activeElement);
+  }
+  // Moves focus to the first focusable field in `m` — the first form field for an ordinary
+  // dialog, or (confirmModal's DOM order puts it first) the Cancel button on a confirm dialog,
+  // which is deliberately "the safe way out" for a danger dialog. Callers with a more specific
+  // idea of what should be focused (a search box, a freshly-added row) call `.focus()` themselves
+  // afterward from their `onMount`, which simply overrides this.
+  function focusFirstIn(m) {
+    const first = focusableIn(m)[0];
+    if (first) { try { first.focus(); } catch (_) {} }
+  }
   function openModal(html, onMount, onOutsideClick) {
     const dim = document.createElement('div');
     dim.className = 'modal-dim';
-    dim.innerHTML = `<div class="modal">${html}</div>`;
+    dim.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
     document.body.appendChild(dim);
     const m = dim.querySelector('.modal');
     // Stash the dismissal handler so Esc can reuse the exact outside-click semantics
     // (important for promise-based modals like confirmModal, which resolve on dismissal).
     dim._onDismiss = onOutsideClick || null;
+    // Captured BEFORE we move focus into the modal, so closeDim can put it back afterward.
+    dim._prevFocus = document.activeElement;
+    focusFirstIn(m);
     if (onMount) onMount(m, dim);
     dim.addEventListener('click', (e) => {
       if (e.target !== dim) return;
@@ -134,7 +179,14 @@
     });
     return m;
   }
-  function closeDim(dim) { if (dim) dim.remove(); }
+  function closeDim(dim) {
+    if (!dim) return;
+    const prev = dim._prevFocus;
+    dim.remove();
+    if (prev && document.body.contains(prev) && typeof prev.focus === 'function') {
+      try { prev.focus(); } catch (_) {}
+    }
+  }
 
   /* ---------------- Global keyboard shortcuts ----------------
      Esc closes the topmost modal (reusing its dismissal handler so promise-based modals
@@ -146,9 +198,8 @@
   }
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const dims = document.querySelectorAll('.modal-dim');
-      if (!dims.length) return;
-      const dim = dims[dims.length - 1]; // topmost
+      const dim = topDim();
+      if (!dim) return;
       const onDismiss = dim._onDismiss;
       closeDim(dim);
       if (onDismiss) onDismiss();
@@ -161,6 +212,35 @@
         || document.getElementById('people-search')
         || document.getElementById('inst-search');
       if (box) { e.preventDefault(); box.focus(); box.select && box.select(); }
+    }
+    if (e.key === 'Tab') {
+      const dim = topDim();
+      if (!dim) return; // no modal open: ordinary page Tab order
+      const m = dim.querySelector('.modal');
+      const focusable = focusableIn(m);
+      if (!focusable.length) { e.preventDefault(); return; }
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      // Trap Tab/Shift+Tab inside the topmost modal. If focus is already at an edge, wrap instead
+      // of letting it escape to whatever's underneath; if focus has somehow ended up OUTSIDE the
+      // modal entirely (shouldn't happen, but don't leave the user stuck on the dimmed page
+      // behind a danger confirm), pull it back in rather than let Tab do nothing useful.
+      if (!m.contains(active)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      return;
+    }
+    if (e.key === 'Enter') {
+      const el = e.target;
+      if (el.tagName === 'TEXTAREA' || el.isContentEditable) return;      // never hijack multi-line input
+      if (el.closest && el.closest('.token-picker')) return;              // filtering/picking, not submitting
+      const isSingleLineInput = el.tagName === 'INPUT' &&
+        !['checkbox', 'radio', 'file', 'button', 'submit', 'reset', 'range', 'color'].includes(el.type);
+      if (!isSingleLineInput && el.tagName !== 'SELECT') return;
+      const dim = topDim();
+      if (!dim || !dim.contains(el)) return;
+      const primary = dim.querySelector('.modal .foot .btn-primary');
+      if (primary && !primary.disabled) { e.preventDefault(); primary.click(); }
     }
   });
 
@@ -721,6 +801,9 @@
     updateThemeToggleButtons,
     openModal,
     closeDim,
+    closeAllModals,
+    topModal,
+    topDim,
     confirmModal,
     startTour,
     stopTour,

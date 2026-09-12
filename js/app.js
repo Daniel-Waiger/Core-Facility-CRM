@@ -295,6 +295,11 @@
   }
 
   function onHashChange() {
+    // A route change makes every open modal stale — a booking/milestone dialog bound to whatever
+    // project the previous screen was on, or an id that only made sense there. Rather than let a
+    // save silently write against the wrong (or a now-null) context, close them: any draft is
+    // abandoned, deliberately, the same way it would be if the user had just closed the tab.
+    UI.closeAllModals();
     const parsed = parseHash(location.hash);
     if (!parsed) { location.replace('#/dashboard'); return; }
     if (parsed.name === 'project' && !DB.row('SELECT id FROM projects WHERE id=?', [parsed.id])) {
@@ -1015,9 +1020,10 @@
     document.addEventListener('click', (e) => {
       const goto = e.target.closest('[data-goto]');
       if (goto && !e.target.closest('[data-act]')) {
-        // If inside a modal, close modal when navigating to a project
-        const openModalDim = document.querySelector('.modal-dim');
-        if (openModalDim) UI.closeDim(openModalDim);
+        // Close every open modal (not just the first one in the DOM, which — with a modal opened
+        // from inside another modal, e.g. Today's Agenda -> Edit Booking -> "data-goto" a project
+        // link — would leave the topmost one stuck open floating over the newly-routed screen).
+        UI.closeAllModals();
         route(goto.dataset.goto, goto.dataset.id);
         return;
       }
@@ -1329,7 +1335,7 @@
   }
 
   function npSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const title = m.querySelector('#np-title').value.trim();
     if (!title) { UI.toast('Project title is required', 'error'); m.querySelector('#np-title').classList.add('is-invalid'); return; }
 
@@ -1452,7 +1458,7 @@
   }
 
   function epSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const title = m.querySelector('#ep-title').value.trim();
     if (!title) { UI.toast('Title is required', 'error'); m.querySelector('#ep-title').classList.add('is-invalid'); return; }
 
@@ -1638,7 +1644,7 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="ms-save">Add Milestone</button>
+        <button class="btn btn-primary" data-act="ms-save" data-project-id="${ctx.project}">Add Milestone</button>
       </div>`, (m) => {
       m.querySelectorAll('[data-owner]').forEach((c) => (c.onclick = () => c.classList.toggle('on')));
       m.querySelectorAll('[data-inst]').forEach((c) => (c.onclick = () => c.classList.toggle('on')));
@@ -1646,17 +1652,25 @@
   }
 
   function msSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#ms-name').value.trim();
     if (!name) { UI.toast('Milestone title required', 'error'); m.querySelector('#ms-name').classList.add('is-invalid'); return; }
 
-    const pid = ctx.project;
+    // Bound to whichever project was current when this modal was OPENED, not whatever ctx.project
+    // reads now — the route can only have changed away since then if the modal survived navigation,
+    // and it can't (hashchange closes every open modal; see onHashChange).
+    const pid = Number(m.querySelector('[data-act="ms-save"]').dataset.projectId) || ctx.project;
     const due = m.querySelector('#ms-due').value || null;
     const status = m.querySelector('#ms-status').value;
     const note = m.querySelector('#ms-note').value.trim();
 
     DB.run('INSERT INTO milestones (project_id, name, due_date, status, note) VALUES (?,?,?,?,?)', [pid, name, due, status, note]);
-    const mid = DB.q1('SELECT last_insert_rowid()')[0];
+    // DB.q1 reads back via stmt.getArray(), a method the bundled sql.js build's Statement
+    // prototype never exposes (only .get/.getAsObject/...) — it throws the moment it's called,
+    // which meant "Add Milestone" (like "Add Instrument" below) silently failed after the INSERT
+    // and before the owner/instrument join rows or the modal's own close ever ran. DB.row(...).id
+    // is the same last_insert_rowid() lookup every OTHER saver in this file already uses.
+    const mid = DB.row('SELECT last_insert_rowid() as id').id;
 
     const owners = [...m.querySelectorAll('[data-owner].on')].map((c) => Number(c.dataset.owner));
     const insts = [...m.querySelectorAll('[data-inst].on')].map((c) => Number(c.dataset.inst));
@@ -1705,7 +1719,7 @@
   }
 
   function msEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#mse-name').value.trim();
     if (!name) { UI.toast('Milestone title required', 'error'); m.querySelector('#mse-name').classList.add('is-invalid'); return; }
 
@@ -1807,8 +1821,7 @@
   function pSave() {
     // addPerson() can be opened stacked on another modal (e.g. the booking form) — operate on
     // the TOPMOST modal, not the first one in the DOM.
-    const dims = document.querySelectorAll('.modal-dim');
-    const m = dims[dims.length - 1].querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#p-name').value.trim();
     if (!name) { UI.toast('Name required', 'error'); m.querySelector('#p-name').classList.add('is-invalid'); return; }
     const type = m.querySelector('#p-type').value;
@@ -1865,7 +1878,7 @@
   }
 
   function pEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#pe-name').value.trim();
     if (!name) { UI.toast('Name required', 'error'); m.querySelector('#pe-name').classList.add('is-invalid'); return; }
     const type = m.querySelector('#pe-type').value;
@@ -1983,7 +1996,7 @@
   }
 
   function iSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#i-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); m.querySelector('#i-name').classList.add('is-invalid'); return; }
     DB.run('INSERT INTO instruments (name, kind, status, location, note, cost, cost_unit, min_duration_mins, max_duration_mins, min_gap_mins, min_notice_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
@@ -1991,7 +2004,9 @@
        Number(m.querySelector('#i-cost').value) || 0, m.querySelector('#i-cost-unit').value || 'time',
        Number(m.querySelector('#i-min-duration').value) || 0, Number(m.querySelector('#i-max-duration').value) || 0,
        Number(m.querySelector('#i-min-gap').value) || 0, Number(m.querySelector('#i-min-notice').value) || 0]);
-    const iid = DB.q1('SELECT last_insert_rowid()')[0];
+    // See the matching comment in msSave — DB.q1 relies on a Statement method this build of
+    // sql.js doesn't have and throws; DB.row(...).id is the same lookup every other saver uses.
+    const iid = DB.row('SELECT last_insert_rowid() as id').id;
     readTokenIds(m, 'supervisor').forEach((pid) => DB.run('INSERT OR IGNORE INTO instrument_staff (instrument_id, person_id) VALUES (?,?)', [iid, pid]));
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument added');
@@ -2065,7 +2080,7 @@
   }
 
   function iEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#ie-name').value.trim();
     if (!name) { UI.toast('Instrument name required', 'error'); m.querySelector('#ie-name').classList.add('is-invalid'); return; }
     DB.run('UPDATE instruments SET name=?, kind=?, status=?, location=?, note=?, cost=?, cost_unit=?, min_duration_mins=?, max_duration_mins=?, min_gap_mins=?, min_notice_hours=? WHERE id=?',
@@ -2170,17 +2185,19 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="app-person-save" ${!available.length ? 'disabled' : ''}>Add Member</button>
+        <button class="btn btn-primary" data-act="app-person-save" data-project-id="${ctx.project}" ${!available.length ? 'disabled' : ''}>Add Member</button>
       </div>`);
   }
 
   function appPersonSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const personId = Number(m.querySelector('#app-person-id').value);
     if (!personId) { UI.toast('Please select a person', 'error'); return; }
     const role = m.querySelector('#app-person-role').value.trim();
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const projectId = Number(m.querySelector('[data-act="app-person-save"]').dataset.projectId) || ctx.project;
 
-    DB.run('INSERT OR REPLACE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [ctx.project, personId, role]);
+    DB.run('INSERT OR REPLACE INTO project_people (project_id, person_id, role) VALUES (?,?,?)', [projectId, personId, role]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Team member added');
     refresh();
@@ -2213,14 +2230,16 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="app-inst-save">Assign Instrument</button>
+        <button class="btn btn-primary" data-act="app-inst-save" data-project-id="${ctx.project}">Assign Instrument</button>
       </div>`);
   }
 
   function appInstSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const instId = Number(m.querySelector('#app-inst-id').value);
-    DB.run('INSERT OR IGNORE INTO project_instruments (project_id, instrument_id) VALUES (?,?)', [ctx.project, instId]);
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const projectId = Number(m.querySelector('[data-act="app-inst-save"]').dataset.projectId) || ctx.project;
+    DB.run('INSERT OR IGNORE INTO project_instruments (project_id, instrument_id) VALUES (?,?)', [projectId, instId]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Instrument assigned');
     refresh();
@@ -2531,7 +2550,7 @@
      modal (which itself has a "+ Add New" lab picker) and drops the result straight into the
      People picker as a selected badge, so several new people can be added in a row. */
   function bookingAddPerson() {
-    const bookingModal = document.querySelector('.modal-dim:last-of-type .modal') || document.querySelector('.modal');
+    const bookingModal = UI.topModal();
     addPerson((newPersonId) => {
       if (newPersonId == null) return;
       const p = DB.row('SELECT id, name, type, organization, department FROM people WHERE id=?', [newPersonId]);
@@ -3186,7 +3205,7 @@
   }
 
   function bookingSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const title = m.querySelector('#bk-title').value.trim();
     if (!title) { UI.toast('Booking title required', 'error'); m.querySelector('#bk-title').classList.add('is-invalid'); return; }
 
@@ -3346,7 +3365,7 @@
   }
 
   function bookingEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const title = m.querySelector('#bke-title').value.trim();
     if (!title) { UI.toast('Title required', 'error'); m.querySelector('#bke-title').classList.add('is-invalid'); return; }
 
@@ -3638,8 +3657,7 @@
     // cancelBooking refreshes the page underneath; close the edit modal if it acted.
     const mt = DB.row('SELECT is_cancelled FROM meetings WHERE id=?', [id]);
     if (!mt || mt.is_cancelled) {
-      const dim = document.querySelector('.modal-dim');
-      if (dim) UI.closeDim(dim);
+      UI.closeDim(UI.topDim());
     }
   }
 
@@ -3653,17 +3671,19 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="kv-save">Add Field</button>
+        <button class="btn btn-primary" data-act="kv-save" data-project-id="${ctx.project}">Add Field</button>
       </div>`);
   }
 
   function kvSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const k = m.querySelector('#kv-k').value.trim();
     const v = m.querySelector('#kv-v').value.trim();
     if (!k || !v) { UI.toast('Both field name and value are required', 'error'); return; }
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const projectId = Number(m.querySelector('[data-act="kv-save"]').dataset.projectId) || ctx.project;
 
-    DB.run('INSERT INTO kv (project_id, key, value) VALUES (?,?,?)', [ctx.project, k, v]);
+    DB.run('INSERT INTO kv (project_id, key, value) VALUES (?,?,?)', [projectId, k, v]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Field added');
     refresh();
@@ -3686,7 +3706,7 @@
   }
 
   function kvEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const k = m.querySelector('#kve-k').value.trim();
     const v = m.querySelector('#kve-v').value.trim();
     if (!k || !v) { UI.toast('Both field name and value are required', 'error'); return; }
@@ -3729,7 +3749,7 @@
   }
 
   function outputSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const projectId = Number(m.querySelector('[data-act="output-save"]').dataset.projectId) || ctx.project;
     const type = m.querySelector('#out-type').value.trim();
     const title = m.querySelector('#out-title').value.trim();
@@ -3765,7 +3785,7 @@
   }
 
   function outputEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const type = m.querySelector('#oute-type').value.trim();
     const title = m.querySelector('#oute-title').value.trim();
     const reference = m.querySelector('#oute-ref').value.trim();
@@ -3808,15 +3828,16 @@
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
-        <button class="btn btn-primary" data-act="f-save">Save Attachment</button>
+        <button class="btn btn-primary" data-act="f-save" data-project-id="${ctx.project}">Save Attachment</button>
       </div>`);
   }
 
   async function fSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const fileInput = m.querySelector('#f-file');
     const link = m.querySelector('#f-link').value.trim();
-    const pid = ctx.project;
+    // Bound to the project this modal was opened for, not whatever ctx.project reads now.
+    const pid = Number(m.querySelector('[data-act="f-save"]').dataset.projectId) || ctx.project;
 
     if (fileInput.files.length) {
       const f = fileInput.files[0];
@@ -4124,7 +4145,7 @@
   }
 
   function gSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#g-name').value.trim();
     if (!name) { UI.toast('Grant name required', 'error'); return; }
     const number = m.querySelector('#g-number').value.trim();
@@ -4163,7 +4184,7 @@
   }
 
   function gEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#ge-name').value.trim();
     if (!name) { UI.toast('Grant name required', 'error'); return; }
     const number = m.querySelector('#ge-number').value.trim();
@@ -4349,7 +4370,7 @@
   }
 
   function seSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const desc = m.querySelector('#se-desc').value.trim();
     if (!desc) { UI.toast('Description required', 'error'); return; }
     const date = m.querySelector('#se-date').value || UI.today();
@@ -4413,7 +4434,7 @@
   }
 
   function seEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const desc = m.querySelector('#see-desc').value.trim();
     if (!desc) { UI.toast('Description required', 'error'); return; }
     // Same default as seSave: a NULL date would drop out of Reports' date-range filters
@@ -4622,7 +4643,7 @@
   }
 
   function repCustomRun() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     if (!m) return;
     const spec = currentCustomReportSpec(m);
     saveCustomReportPrefs(spec.entity, spec.columns);
@@ -4632,7 +4653,7 @@
   }
 
   function repCustomExport() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     if (!m) return;
     const spec = currentCustomReportSpec(m);
     saveCustomReportPrefs(spec.entity, spec.columns);
@@ -4669,7 +4690,7 @@
   }
 
   function ptSave() {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#pt-name').value.trim();
     if (!name) { UI.toast('Tier name required', 'error'); return; }
     const pct = Number(m.querySelector('#pt-pct').value) || 0;
@@ -4696,7 +4717,7 @@
   }
 
   function ptEditSave(id) {
-    const m = document.querySelector('.modal');
+    const m = UI.topModal();
     const name = m.querySelector('#pte-name').value.trim();
     if (!name) { UI.toast('Tier name required', 'error'); return; }
     const pct = Number(m.querySelector('#pte-pct').value) || 0;
