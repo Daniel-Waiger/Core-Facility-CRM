@@ -103,6 +103,12 @@
     if (!m.is_cancelled) return '';
     return m.billing_retained ? '  [CANCELLED — charge kept]' : '  [CANCELLED — charge waived]';
   }
+  // The one money rule, shared by the DOCX and PDF paths below (and identical to XLSX's `counts`
+  // everywhere it appears): a row's charge still counts unless it was BOTH cancelled AND waived.
+  // R4: DOCX/PDF used to print the raw stored total_cost unconditionally, so a waived-cancelled
+  // booking/entry showed its full original price here while the XLSX export (and the app's own
+  // Project Costs view) already showed 0 for the same row — this closes that drift.
+  function moneyCounts(row) { return !(row.is_cancelled && !row.billing_retained); }
   function htmlToPlainText(html) {
     let s = '';
     (function walk(node) {
@@ -453,7 +459,7 @@
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
         if (m.total_cost) {
           if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id)}`, italics: true }));
-          children.push(new Paragraph({ text: `Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, bold: true }));
+          children.push(new Paragraph({ text: `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, bold: true }));
         }
       });
     } else {
@@ -468,7 +474,7 @@
         if (e.person_name) children.push(new Paragraph({ text: `Staff: ${UI.retiredName(e.person_name, e.person_retired)}`, italics: true }));
         if (e.instrument_name) children.push(new Paragraph({ text: `Instrument: ${UI.retiredName(e.instrument_name, e.instrument_retired)}`, italics: true }));
         if (e.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(e)}`, italics: true }));
-        children.push(new Paragraph({ text: `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${e.rate || 0}   |   Total: ${e.total_cost || 0}`, bold: true }));
+        children.push(new Paragraph({ text: `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, bold: true }));
       });
     } else {
       children.push(new Paragraph({ text: 'No service entries recorded.' }));
@@ -569,7 +575,10 @@
     y += 6;
     pdf.text(`Principal Investigator: ${d.p.pi_name || '—'}   |   Funding: ${d.p.funding || '—'}   |   Modality: ${d.p.modality || '—'}`, margin + 4, y);
     y += 6;
-    pdf.text(`Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} → ${UI.fmtDate(d.p.end_date)}`, margin + 4, y);
+    // R6: '→' (U+2192) is outside WinAnsi, the only encoding jsPDF's built-in Helvetica supports —
+    // it silently renders as a blank/garbled glyph, unlike the DOCX path just above (a real
+    // Word/LibreOffice font renders it fine, so that one keeps the arrow). ASCII "to" instead.
+    pdf.text(`Sample: ${d.p.sample || '—'}   |   Timeline: ${UI.fmtDate(d.p.start_date)} to ${UI.fmtDate(d.p.end_date)}`, margin + 4, y);
     y += 6;
     pdf.text(`Grant: ${grantLabelFor(d.p)}`, margin + 4, y);
     y += 12;
@@ -593,7 +602,10 @@
         checkPage(12);
         // Derive from the shared UI.msStatusLabel map (not a hand-rolled ternary) so a
         // facility-added status shows its own label here instead of silently reading "PENDING".
-        const statusPrefix = `[${m.status === 'done' ? '✓ ' : ''}${UI.msStatusLabel(m.status).toUpperCase()}]`;
+        // R6: '✓' (U+2713) is also outside WinAnsi and unrenderable here (see the '→' fix above)
+        // — dropped rather than replaced with an ASCII stand-in, since UI.msStatusLabel already
+        // spells out "DONE" right after it, so the checkmark was pure decoration, not information.
+        const statusPrefix = `[${UI.msStatusLabel(m.status).toUpperCase()}]`;
         pdf.setFont('helvetica', 'bold');
         pdf.text(`${statusPrefix} ${m.name}`, margin, y);
         pdf.setFont('helvetica', 'normal');
@@ -703,7 +715,7 @@
           }
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
-          pdf.text(`Cost: Subtotal ${m.subtotal || 0}, Before Tax ${m.total_before_tax || 0}, Total ${m.total_cost}`, margin + 4, y);
+          pdf.text(`Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
@@ -735,7 +747,7 @@
         }
         checkPage(6);
         pdf.setFont('helvetica', 'bold');
-        pdf.text(`Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${e.rate || 0}   |   Total: ${e.total_cost || 0}`, margin + 4, y);
+        pdf.text(`Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, margin + 4, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         y += 2;
@@ -835,8 +847,8 @@
     const msRows = [['Project Code', 'Project', 'Milestone', 'Status', 'Due Date', 'Owners', 'Instruments', 'Notes']];
     DB.rows(`
       SELECT m.*, p.code as project_code, p.title as project_title,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_owners mo JOIN people pe ON pe.id = mo.person_id WHERE mo.milestone_id = m.id) as owners,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM milestone_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.milestone_id = m.id) as instruments
       FROM milestones m JOIN projects p ON p.id = m.project_id
       ORDER BY p.code ASC, m.due_date IS NULL, m.due_date ASC, m.id ASC`).forEach((m) => {
       msRows.push([m.project_code, m.project_title, m.name, m.status, m.due_date || '—', m.owners || '—', m.instruments || '—', m.note || '']);
@@ -890,12 +902,28 @@
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
     // computeBookingBOM in app.js at the time the booking was saved).
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Before Tax', 'Total Cost']];
+    //
+    // R7: this sheet used to have no way to check the Subtotal -> Before Tax -> Total Cost
+    // arithmetic for a given row — the two percentages that bridge those columns weren't exported
+    // anywhere. Adding "Overhead %" and "Effective Tax %" closes that without touching the meaning
+    // of any existing column (Subtotal/Before Tax/Total Cost are exactly what they always were):
+    //   - Overhead % is the tier percent SNAPSHOTTED onto the booking at save time
+    //     (meetings.tier_overhead_pct) — the actual number applied, not today's tier setting. It
+    //     reads blank for a booking priced via the legacy Internal+External fallback (no tier
+    //     assigned), because that resolved percent was never itself snapshotted onto the row — see
+    //     resolveOverheadForOrg in db.js — so it cannot be reconstructed after the fact; this gap is
+    //     disclosed via the Notes-equivalent comment inline below rather than guessed at.
+    //   - Effective Tax % is DERIVED from the two already-stored totals (total_cost / before_tax),
+    //     not read from today's Settings tax rate — so it stays correct even if the facility's tax
+    //     rate has since changed. It reads blank when Before Tax is 0 (nothing to divide by) or the
+    //     booking's charge was waived (counts=false below) — a waived Total Cost is deliberately 0
+    //     by policy, not a tax outcome, so a percentage there would be meaningless.
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Total Cost']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired,
-             (SELECT GROUP_CONCAT(i.name, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
-             (SELECT GROUP_CONCAT(pe.name, ', ') FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = mt.id) as staff
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id WHERE mi.meeting_id = mt.id) as instruments,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = mt.id) as staff
       FROM meetings mt
       LEFT JOIN projects p ON p.id = mt.project_id
       LEFT JOIN grants g ON g.id = mt.grant_id
@@ -903,16 +931,19 @@
       // A waived cancellation contributes 0 to the Total Cost column so the column sums to what
       // the facility actually bills; the Status column says why.
       const counts = !(m.is_cancelled && !m.billing_retained);
+      const beforeTax = m.total_before_tax || 0;
+      const overheadPct = m.tier_overhead_pct == null ? '' : round2(m.tier_overhead_pct);
+      const effectiveTaxPct = (counts && beforeTax > 0) ? round2((((m.total_cost || 0) / beforeTax) - 1) * 100) : '';
       bcRows.push([
         m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
-        m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0
+        overheadPct, beforeTax, effectiveTaxPct, counts ? (m.total_cost || 0) : 0
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     // Sheet 7: Service Entries (roadmap 2.3) — standalone billable work outside any booking,
@@ -1016,8 +1047,11 @@
       ['Money rule (Revenue / Total Cost columns)'],
       ["A booking's charge still counts unless it was BOTH cancelled AND the charge was waived. So a cancelled-but-charged booking still contributes revenue even though it contributes zero occupied hours — the facility got paid for a slot nobody used."],
       [''],
+      ['"Line Charges" columns (Instrument Utilisation / Facility Staff Time sheets)'],
+      ['Line Charges is the sum of each booking\'s raw instrument- or staff-time line, BEFORE that booking\'s group/manual discount, overhead, or tax is applied (those are computed once per whole booking, not per line). It will not match a project\'s Total Cost on the Projects & Groups sheet, which is after all three — the two numbers are answering different questions ("what did this line cost before anything was applied to it" vs. "what did the facility actually bill for the booking").'],
+      [''],
       ['Staff x Instrument attribution'],
-      ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total.'],
+      ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total. A booking with no instrument line at all (a pure consult/sync) still has real staff hours, so those are grouped under a "No Instrument" row rather than dropped from this sheet.'],
       [''],
       ['Instrument stewardship scorecard'],
       ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. Omitted on purpose (need data this app does not track yet): trained-user pool trend and downtime share.'],
@@ -1046,7 +1080,7 @@
     XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
 
     // Sheet 2: Instrument utilization
-    const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Billed Revenue', 'Share of Total Hours %']];
+    const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Line Charges', 'Share of Total Hours %']];
     instr.rows.forEach((r) => {
       instrRows.push([UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), round2(r.sharePct)]);
     });
@@ -1059,7 +1093,7 @@
     XLSX.utils.book_append_sheet(wb, wsInstr, 'Instrument Utilisation');
 
     // Sheet 3: Facility staff time
-    const staffRows = [['Staff Member', 'Sessions', 'Raw Hours', 'Billed Hours', 'Staff Revenue']];
+    const staffRows = [['Staff Member', 'Sessions', 'Raw Hours', 'Billed Hours', 'Line Charges']];
     staff.rows.forEach((r) => {
       staffRows.push([UI.retiredName(r.name, r.retired), r.sessions, round2(r.rawHours), round2(r.billHours), round2(r.revenue)]);
     });

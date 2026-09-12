@@ -179,3 +179,86 @@ describe('aggregation: retired people / archived projects DO appear in reports',
     assert.equal(row.cost, 75);
   });
 });
+
+describe('aggregation (R2): Staff x Instrument matrix must sum back to the person\'s Card 2 total', () => {
+  test('a staff member with one multi-instrument booking AND one instrument-less booking: matrix row sums to rawHours', async () => {
+    const { DB, Reports } = await freshApp();
+    const { sam, scopeA, prepB, liveProject } = seedFixture(DB);
+
+    // Booking 1: 2 hours, two instruments — Sam's real time is 2h, split 1h/1h across them.
+    DB.run("INSERT INTO meetings (project_id, title, date, start_time, end_time) VALUES (?, 'Two-instrument', '2026-09-01','09:00','11:00')", [liveProject]);
+    const m1 = DB.row('SELECT last_insert_rowid() as id').id;
+    DB.run('INSERT INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [m1, scopeA]);
+    DB.run('INSERT INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [m1, prepB]);
+    DB.run("INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time) VALUES (?,?,'','')", [m1, sam]);
+
+    // Booking 2: 1.5 hours, NO instrument line at all (a pure consult) — before the R2 fix, this
+    // booking's staff hours were silently dropped from the matrix entirely (`if (!insts.length)
+    // return;`), so the matrix undercounted Sam's true total.
+    DB.run("INSERT INTO meetings (project_id, title, date, start_time, end_time, category) VALUES (?, 'Consult', '2026-09-02','09:00','10:30', 'consult')", [liveProject]);
+    const m2 = DB.row('SELECT last_insert_rowid() as id').id;
+    DB.run("INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time) VALUES (?,?,'','')", [m2, sam]);
+
+    const staff = Reports.computeStaffRows('2026-09-01', '2026-09-30');
+    const samRow = staff.rows.find((r) => r.id === sam);
+    assert.ok(samRow);
+    assert.equal(samRow.rawHours, 3.5, 'sanity check: Card 2 total is 2h + 1.5h = 3.5h');
+
+    const matrix = Reports.computeStaffInstrumentMatrix('2026-09-01', '2026-09-30');
+    let attributed = 0;
+    matrix.cells.forEach((c) => { if (c.personId === sam) attributed += c.attributedHours; });
+    assert.equal(attributed, samRow.rawHours, 'the matrix row must sum back to the person\'s true rawHours total — the footnote\'s explicit promise');
+
+    // The instrument-less booking's hours must land under a "No Instrument" bucket, not vanish.
+    const noInstCol = matrix.instrumentList.find((i) => i.name === 'No Instrument');
+    assert.ok(noInstCol, 'a "No Instrument" column must exist for staff time on a booking with no instrument line');
+    const noInstCell = matrix.cells.get(sam + '::' + noInstCol.id);
+    assert.ok(noInstCell, 'Sam must have a cell under the No Instrument column');
+    assert.equal(noInstCell.attributedHours, 1.5);
+    assert.equal(noInstCell.sessions, 1);
+    // "No Instrument" sorts last, same precedent as computeActivityMixRows' "(uncategorized)".
+    assert.equal(matrix.instrumentList[matrix.instrumentList.length - 1].name, 'No Instrument');
+  });
+});
+
+describe('aggregation (R5): created_at/updated_at/archived_at are UTC — must be compared as LOCAL calendar days', () => {
+  test('a project created at 22:30 UTC on Aug 31 counts in September at Asia/Jerusalem (UTC+3)', async () => {
+    assert.equal(process.env.TZ, 'Asia/Jerusalem', 'this test is meaningless outside a UTC+ timezone — see CLAUDE.md');
+    const { DB, Reports } = await freshApp();
+    // Deliberately NOT seedFixture here: its projects/milestones have no explicit created_at, so
+    // they default to `datetime('now')` — i.e. the REAL current date — which could itself land
+    // inside whatever September/August range this test picks and make the counts below ambiguous.
+    // A single project with an explicit historical created_at keeps this test's counts exact.
+
+    // 2026-08-31 22:30:00 UTC is 2026-09-01 01:30 local at Asia/Jerusalem (UTC+3) — a human filing
+    // this under "August" (as a raw slice(0,10) of the UTC string would) gets the wrong month.
+    DB.run("INSERT INTO projects (title, code, status, created_at) VALUES ('Late night', 'P-9', 'Active', '2026-08-31 22:30:00')");
+    const pid = DB.row('SELECT last_insert_rowid() as id').id;
+    DB.run("INSERT INTO milestones (project_id, name, status, updated_at) VALUES (?, 'MS-late', 'pending', '2026-08-31 22:30:00')", [pid]);
+
+    const sep = Reports.computeFunnelRows('2026-09-01', '2026-09-30');
+    const aug = Reports.computeFunnelRows('2026-08-01', '2026-08-31');
+    const stageCount = (result, key) => result.stages.find((s) => s.key === key).count;
+
+    assert.equal(stageCount(sep, 'created'), 1, 'the project must count as created in September, its true LOCAL calendar day');
+    assert.equal(stageCount(aug, 'created'), 0, 'and must NOT count in August, which is only its UTC calendar day');
+    assert.equal(stageCount(sep, 'milestones'), 1, 'the milestone edit must count in September for the same reason');
+    assert.equal(stageCount(aug, 'milestones'), 0);
+  });
+});
+
+describe('aggregation (R7): "New Labs" trims group_org, same as every distinct-lab count', () => {
+  test('a lab name with only a trailing-space variant is not double-counted as two labs', async () => {
+    const { DB, Reports } = await freshApp();
+    seedFixture(DB);
+
+    DB.run("INSERT INTO meetings (title, date, start_time, end_time, group_org) VALUES ('L1', '2026-05-03','09:00','10:00','Zeta Lab')");
+    DB.run("INSERT INTO meetings (title, date, start_time, end_time, group_org) VALUES ('L2', '2026-05-04','09:00','10:00','Zeta Lab ')"); // trailing space
+
+    const breadth = Reports.computeBreadthRows('2026-05-01', '2026-05-31');
+    const may = breadth.periodRows.find((r) => r.period === '2026-05');
+    assert.ok(may);
+    assert.equal(may.distinctLabs, 1, 'sanity check: the two bookings are already treated as the same lab for the distinct-labs count');
+    assert.equal(may.newLabs, 1, '"New Labs" must count the untrimmed and trimmed spellings as the SAME lab\'s first-ever booking, not two');
+  });
+});

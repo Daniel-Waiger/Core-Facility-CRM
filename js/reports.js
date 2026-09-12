@@ -39,7 +39,8 @@
   const ic = UI.icon;
 
   /* ---------------- Range state ----------------
-     Either bound may be '' (unbounded). Defaults to the current calendar year, per spec. */
+     Either bound may be '' (unbounded). Defaults to the current calendar year, so the screen
+     shows something useful the moment it opens. */
   let state = { from: '', to: '' };
   (function initDefaultRange() {
     const y = new Date().getFullYear();
@@ -203,12 +204,19 @@
      selected range was its FIRST EVER, the query must see the facility's entire booking history.
      Feeds countNewInRange (the reusable helper already built for 3.2) below, bucketed by the
      PERIOD of each lab's first-ever date rather than a single in/out-of-range count. */
+  // TRIMMED, same as every distinct-lab count elsewhere in this file (labsByPeriod/labsByInstrument
+  // both key on `(m.group_org || '').trim()`) — grouping on the raw column here let 'Zeta Lab' and
+  // 'Zeta Lab ' (trailing space) count as two different labs with two different "first ever"
+  // dates, so a lab could appear as "new" a second time under its own untrimmed duplicate even
+  // though computeBreadthRows' distinct-lab counts already merge the two. Trimming both the GROUP
+  // BY key and the selected column keeps this loader's notion of "a lab" identical to every other
+  // lab-counting query in this file.
   function loadFirstLabDates() {
     return DB.rows(`
-      SELECT group_org, MIN(date) AS first_date
+      SELECT TRIM(group_org) AS group_org, MIN(date) AS first_date
       FROM meetings
       WHERE is_cancelled = 0 AND TRIM(COALESCE(group_org, '')) != ''
-      GROUP BY group_org`);
+      GROUP BY TRIM(group_org)`);
   }
   function loadStaffLines(from, to) {
     // meeting_staff always names a facility-staff assignee, but a person's is_staff flag could in
@@ -310,6 +318,14 @@
      that booking's staff hours divided evenly across however many instruments were on it, so
      the column sums back to the person's true raw-hours total from Card 2.
      ================================================================================ */
+  // Sentinel instrument id for staff time on an instrument-less booking (a pure consult/sync with
+  // no instrument line) — a string so it can never collide with a real (numeric) instrument_id.
+  // Without this bucket, computeStaffInstrumentMatrix used to `return` early on such a booking
+  // (see the removed early-out below), which silently dropped that booking's staff hours from the
+  // matrix entirely — so a person's row here summed to LESS than their true rawHours total on
+  // Card 2, breaking the on-screen and Notes-sheet footnote's promise that the matrix always sums
+  // back to that total. Bucketing those hours under "No Instrument" instead keeps the promise true.
+  const NO_INSTRUMENT_KEY = '__no_instrument__';
   function computeStaffInstrumentMatrix(from, to) {
     if (from === undefined) { from = state.from; to = state.to; }
     const meetings = annotateMeetings(loadMeetingsInRange(from, to));
@@ -332,17 +348,20 @@
     staffLines.forEach((ln) => {
       const mm = meetings.get(ln.meeting_id);
       if (!mm || !mm.occupancyCounts) return; // matrix is a workload view — cancelled bookings didn't happen
+      // A booking with no instrument line (a pure consult/sync) still has real staff hours to
+      // attribute — bucket them under the single "No Instrument" column rather than dropping the
+      // booking from the matrix, so this person's row still sums to their Card 2 rawHours total.
       const insts = instrumentsByMeeting.get(ln.meeting_id) || [];
-      if (!insts.length) return; // a booking with no instrument line has nothing to attribute here
+      const attributeTo = insts.length ? insts : [{ id: NO_INSTRUMENT_KEY, name: 'No Instrument', retired: false }];
 
       const rawHours = (ln.start_time && ln.end_time) ? UI.hoursBetween(ln.start_time, ln.end_time) : mm.bookingHours;
       // The even split: one staff member's real hours on THIS booking, shared equally across
       // however many instruments that booking touched, so summing this column for a person
       // reproduces their true raw-hours total from the Facility staff time card.
-      const perInstrumentHours = rawHours / insts.length;
+      const perInstrumentHours = rawHours / attributeTo.length;
 
       staffMeta.set(ln.person_id, { name: ln.person_name, retired: !!ln.person_retired });
-      insts.forEach((inst) => {
+      attributeTo.forEach((inst) => {
         instrumentMeta.set(inst.id, { name: inst.name, retired: inst.retired });
         const key = ln.person_id + '::' + inst.id;
         let cell = cells.get(key);
@@ -354,8 +373,14 @@
 
     const staffList = Array.from(staffMeta.entries()).map(([id, v]) => ({ id, name: v.name, retired: v.retired }))
       .sort((a, b) => a.name.localeCompare(b.name));
+    // "No Instrument" sorted last, same precedent as computeActivityMixRows' "(uncategorized)"
+    // bucket — real instrument names lead the matrix, the catch-all column reads as an appendix.
     const instrumentList = Array.from(instrumentMeta.entries()).map(([id, v]) => ({ id, name: v.name, retired: v.retired }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        if (a.id === NO_INSTRUMENT_KEY) return 1;
+        if (b.id === NO_INSTRUMENT_KEY) return -1;
+        return a.name.localeCompare(b.name);
+      });
     return { staffList, instrumentList, cells };
   }
 
@@ -786,10 +811,18 @@
            FROM project_outputs po WHERE po.project_id = pr.id) AS first_output_date
       FROM projects pr`);
   }
+  // updated_at is a UTC timestamp (`datetime('now')`, see db.js), while `from`/`to` are local
+  // calendar-day strings the user actually picked. SQL's `date(updated_at)` only truncates the
+  // string to its first 10 characters — it does NOT convert UTC to local time — so it silently
+  // compares a UTC calendar day against a local-day range. At a UTC+ offset (this app's own
+  // required test timezone, Asia/Jerusalem) that mis-files any edit made in the last few hours of
+  // the local day into "yesterday" as far as this filter is concerned — the same class of bug as
+  // issue #14, just against a timestamp column instead of a date column. Filtering in JS instead,
+  // via utcTimestampToLocalDay (below), fixes that: the comparison always happens against the
+  // local calendar day the edit actually landed on.
   function loadMilestoneUpdatesInRange(from, to) {
-    return DB.rows(`
-      SELECT id FROM milestones
-      WHERE (? = '' OR date(updated_at) >= ?) AND (? = '' OR date(updated_at) <= ?)`, rangeParams(from, to));
+    return DB.rows('SELECT id, updated_at FROM milestones')
+      .filter((r) => dateInRange(utcTimestampToLocalDay(r.updated_at), from, to));
   }
   function loadOutputsInRange(from, to) {
     return DB.rows(`
@@ -801,9 +834,28 @@
         AND (? = '' OR ${DB.outputEffDate('po')} <= ?)
       ORDER BY eff_date DESC, po.id DESC`, rangeParams(from, to));
   }
+  // created_at/updated_at/archived_at are all written via `datetime('now')` (see db.js), which is
+  // a UTC instant, formatted 'YYYY-MM-DD HH:MM:SS' with NO timezone marker — unlike every other
+  // date in this file, which is a plain LOCAL calendar day the user actually typed into a date
+  // picker. Just slicing the first 10 characters off one of these (as this file used to, and as
+  // SQL's own `date(...)` does) reads its UTC calendar day, not its local one — at a UTC+ offset
+  // (this app's own required test timezone) an event in the last few hours of the local day comes
+  // out dated "tomorrow" in UTC, so it silently sorts into the wrong local day/month/year. Fixed
+  // the same way CLAUDE.md's date rules fix the opposite direction (UI.fmtDate appends a bare
+  // local time to force local parsing): reparse the stored string as an explicit UTC instant by
+  // appending 'Z', then read that instant's LOCAL calendar fields via UI.ymd (never toISOString,
+  // which would just undo the fix by re-describing the instant in UTC again).
+  function utcTimestampToLocalDay(ts) {
+    if (!ts) return '';
+    const d = new Date(String(ts).replace(' ', 'T') + 'Z');
+    if (isNaN(d.getTime())) return String(ts).slice(0, 10); // not a parseable timestamp — fall back rather than throw
+    return UI.ymd(d);
+  }
   // 'YYYY-MM-DD' (or a longer datetime string, sliced) in-range check — '' on either bound means
   // unbounded, mirroring RANGE_SQL's own '' = unbounded convention above, just in plain JS for
-  // per-project date facts that aren't worth a round-trip to SQL.
+  // per-project date facts that aren't worth a round-trip to SQL. Callers pass a UTC timestamp
+  // through utcTimestampToLocalDay first (created_at/archived_at); a plain local date column
+  // (first_booking_date, end_date, first_output_date, ...) is already safe to slice as-is.
   function dateInRange(dateStr, from, to) {
     if (!dateStr) return false;
     const d = String(dateStr).slice(0, 10);
@@ -833,10 +885,17 @@
     // Stage 1 — reuse computeConsultRows verbatim; see its own header for the cancellation rule.
     const consultCount = computeConsultRows(from, to).totalConsults;
 
-    const facts = loadProjectFunnelFacts();
+    // created_at/archived_at are UTC timestamps; pre-convert both to the local calendar day they
+    // actually fall on (see utcTimestampToLocalDay) ONCE per project here, so every later use below
+    // (stage 2, stage 5's proxy date, and median 1) reads the same corrected value rather than
+    // re-deriving it — and never accidentally reads the raw UTC string by mistake.
+    const facts = loadProjectFunnelFacts().map((f) => Object.assign({}, f, {
+      created_local: utcTimestampToLocalDay(f.created_at),
+      archived_local: f.archived_at ? utcTimestampToLocalDay(f.archived_at) : ''
+    }));
 
-    // Stage 2 — project created, by created_at's date part.
-    const createdIn = facts.filter((f) => dateInRange(f.created_at, from, to));
+    // Stage 2 — project created, by created_at's LOCAL calendar day (see created_local above).
+    const createdIn = facts.filter((f) => dateInRange(f.created_local, from, to));
 
     // Stage 3 — active (first booking), by the project's true (unbounded) first non-cancelled
     // booking date.
@@ -850,7 +909,7 @@
     facts.forEach((f) => {
       const isCompleted = f.status === 'Completed' || !!f.is_archived;
       if (!isCompleted) return;
-      const proxyDate = f.end_date || (f.is_archived ? f.archived_at : '') || '';
+      const proxyDate = f.end_date || (f.is_archived ? f.archived_local : '') || '';
       if (proxyDate) {
         if (dateInRange(proxyDate, from, to)) completedCount += 1;
       } else if (unbounded) {
@@ -871,7 +930,7 @@
     const createdToActiveDeltas = [];
     createdIn.forEach((f) => {
       if (!f.first_booking_date) return; // no booking at all yet — nothing to measure
-      const delta = daysBetweenDates(f.created_at, f.first_booking_date);
+      const delta = daysBetweenDates(f.created_local, f.first_booking_date);
       if (delta == null) return;
       if (delta < 0) { createdToActiveNegative += 1; return; }
       createdToActiveDeltas.push(delta);
@@ -1149,26 +1208,36 @@
   const ENTITY_DEFS = {
     instrument: {
       label: 'Instrument Utilization',
-      notes: [],
+      // R1 disclosure: "Line Charges" is a sum of raw meeting_instruments.line_cost snapshots —
+      // priced BEFORE the booking's group/manual discount, overhead, and tax are applied (those
+      // are a whole-booking calculation, not a per-line one — see computeBookingBOM in ui.js). It
+      // will not match a project's Total Cost, which is post-discount/overhead/tax. Renamed from
+      // "Billed Revenue" (which implied the opposite) rather than leaving the old name with just a
+      // footnote, since a column a reader copies straight into their own spreadsheet carries no
+      // footnote with it — the name itself needs to say what it is.
+      notes: ['"Line Charges" is each instrument\'s raw booking line-cost total, before any group/manual discount, overhead, or tax is applied at the whole-booking level — it will not match a project\'s Total Cost (see Projects & Groups), which is after all three.'],
       buildRows: (from, to) => computeInstrumentRows(from, to).rows,
       columns: [
         ccol('name', 'Instrument', 'text', (r) => UI.retiredName(r.name, r.retired)),
         ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
         ccol('hours', 'Booked Hours', 'hours', (r) => r.hours),
-        ccol('revenue', 'Billed Revenue', 'money', (r) => r.revenue),
+        ccol('revenue', 'Line Charges', 'money', (r) => r.revenue),
         ccol('sharePct', 'Share of Total Hours %', 'number', (r) => Math.round(r.sharePct * 100) / 100)
       ]
     },
     staff: {
       label: 'Staff Time',
-      notes: [],
+      // Same disclosure as the instrument entity above, for meeting_staff.line_cost — staff lines
+      // are never discounted, but a booking's overhead/tax is still applied to the whole booking
+      // total, not reflected in this per-line figure.
+      notes: ['"Line Charges" is each staff member\'s raw booking line-cost total, before the booking\'s overhead or tax is applied at the whole-booking level — it will not match a project\'s Total Cost (see Projects & Groups).'],
       buildRows: (from, to) => computeStaffRows(from, to).rows,
       columns: [
         ccol('name', 'Staff Member', 'text', (r) => UI.retiredName(r.name, r.retired)),
         ccol('sessions', 'Sessions', 'number', (r) => r.sessions),
         ccol('rawHours', 'Raw Hours', 'hours', (r) => r.rawHours),
         ccol('billHours', 'Billed Hours', 'hours', (r) => r.billHours),
-        ccol('revenue', 'Staff Revenue', 'money', (r) => r.revenue)
+        ccol('revenue', 'Line Charges', 'money', (r) => r.revenue)
       ]
     },
     projects: {
@@ -1415,7 +1484,7 @@
       <div class="mb-16">${chartUtilization(instr.rows)}</div>
       <div class="tbl-wrap">
         <table class="tbl">
-          <thead><tr><th>Instrument</th><th>Bookings</th><th>Booked Hours</th><th>Billed Revenue</th><th>Share of Total Hours</th></tr></thead>
+          <thead><tr><th>Instrument</th><th>Bookings</th><th>Booked Hours</th><th>Line Charges</th><th>Share of Total Hours</th></tr></thead>
           <tbody>
             ${instr.rows.map((r) => `
               <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1428,7 +1497,7 @@
           </tbody>
         </table>
       </div>`}
-      <div class="faint small mt-8">Bookings and hours exclude cancelled bookings entirely (a cancelled booking releases its slot). Billed revenue follows the same rule used everywhere else in the app: a cancelled booking's charge still counts only if it was retained rather than waived.</div>
+      <div class="faint small mt-8">Bookings and hours exclude cancelled bookings entirely (a cancelled booking releases its slot). Line Charges follows the same cancellation rule used everywhere else in the app: a cancelled booking's charge still counts only if it was retained rather than waived. It's the raw instrument-charge line for each booking, though — before that booking's group/manual discount, overhead, and tax are applied — so it will not match a project's Total Cost on the Projects &amp; Groups card, which is after all three.</div>
     </div>
 
     <div class="card mb-16">
@@ -1436,7 +1505,7 @@
       ${!staff.rows.length ? global.Views.emptyState('users', 'No staff time in this range', 'Widen the date range or assign facility staff to bookings.') : `
       <div class="tbl-wrap">
         <table class="tbl">
-          <thead><tr><th>Staff Member</th><th>Sessions</th><th>Raw Hours</th><th>Billed Hours</th><th>Staff Revenue</th></tr></thead>
+          <thead><tr><th>Staff Member</th><th>Sessions</th><th>Raw Hours</th><th>Billed Hours</th><th>Line Charges</th></tr></thead>
           <tbody>
             ${staff.rows.map((r) => `
               <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1449,7 +1518,7 @@
           </tbody>
         </table>
       </div>`}
-      <div class="faint small mt-8">Raw hours are the actual time booked (a blank per-staff window on a booking means "the whole booking window", not zero). Billed hours apply the same 1-hour floor / round-up-to-the-hour rule as the booking cost calculator, which is why they can be higher than raw hours.</div>
+      <div class="faint small mt-8">Raw hours are the actual time booked (a blank per-staff window on a booking means "the whole booking window", not zero). Billed hours apply the same 1-hour floor / round-up-to-the-hour rule as the booking cost calculator, which is why they can be higher than raw hours. Line Charges is the raw staff-time line for each booking, before that booking's overhead or tax is applied — it will not match a project's Total Cost on the Projects &amp; Groups card.</div>
     </div>
 
     <div class="card mb-16">
@@ -1471,7 +1540,7 @@
           </tbody>
         </table>
       </div>`}
-      <div class="faint small mt-8">Sessions count bookings unsplit — the number that actually answers "which instruments do I spend my time on". Attributed hours divide that booking's staff hours evenly across every instrument on it, purely so the column sums back to the person's true total in the Facility staff time card above; the underlying sample runs were mostly parallel, so this split is a bookkeeping convenience, not a claim about which instrument the time "really" belongs to.</div>
+      <div class="faint small mt-8">Sessions count bookings unsplit — the number that actually answers "which instruments do I spend my time on". Attributed hours divide that booking's staff hours evenly across every instrument on it, purely so the column sums back to the person's true total in the Facility staff time card above; the underlying sample runs were mostly parallel, so this split is a bookkeeping convenience, not a claim about which instrument the time "really" belongs to. A booking with no instrument line (a pure consult/sync) still has real staff hours, so those are grouped under a "No Instrument" column — without it, that time would be missing from this table even though it counts on the Facility staff time card.</div>
     </div>
 
     <div class="card mb-16">
