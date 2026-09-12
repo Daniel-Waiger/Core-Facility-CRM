@@ -191,28 +191,53 @@ describe('exports (#7): facility-wide XLSX carries a Notes sheet, appended last'
 });
 
 describe('PDF font (G3): a Hebrew name is bidi-reversed for jsPDF, and the multi-script font is registered lazily', () => {
-  test('_pdfBidiReverse reverses a Hebrew run into visual order but leaves an embedded digit run and a pure-Latin string untouched', async () => {
+  test('_pdfBidiReverse (item 6, revised): a base-RTL line is JUST the plain whole-string reversal — no separate embedded-run fix-up', async () => {
     const app = await freshApp();
     const { Exports } = app;
 
-    // "שלום 123 עולם" (Shalom 123 Olam) — two Hebrew words around an embedded number, exactly the
-    // "embedded digits/Latin runs stay in order" case the helper must handle, not just a bare
-    // full-string reversal (which would also flip the digits to "321").
+    // Item 6 (second review) investigated further than the reported regex bug: pdfBidiReverse used
+    // to follow the whole-string reversal with a second pass that manually un-reversed each
+    // embedded LTR/digit run — and that pass's regex had a real bug (a boundary space got swept
+    // into the run and glued it to the neighbouring RTL word). But fixing the regex is not the
+    // right fix: a REAL PDF generated with the bundled jsPDF + the app's own multi-script font and
+    // inspected via PyMuPDF glyph x-origins (get_texttrace — never a rendered image, see
+    // docs/cma-lessons.md) shows that jsPDF's OWN __bidiEngine__ independently restores an embedded
+    // LTR/digit run's reading order whenever the string it's given contains RTL characters — so
+    // handing it a string whose run was ALREADY manually un-reversed makes jsPDF un-reverse it a
+    // SECOND time, and the digits come out backwards on the actual page regardless of the regex.
+    // See scratchpad item6-*.js/.pdf for the generating scripts and raw PyMuPDF output this is
+    // based on. The correct fix is therefore to do NOTHING beyond the plain whole-string reversal
+    // for a base-RTL line — this test pins that down at the pdfBidiReverse level; the actual glyph
+    // order jsPDF then produces is exercised by the real-PDF test further below.
     const input = 'שלום 123 עולם';
     const out = Exports._pdfBidiReverse(input);
-    assert.ok(out.includes('123'), `an embedded digit run must stay in reading order, got: "${out}"`);
-    assert.ok(!out.includes('321'), `an embedded digit run must not come out reversed, got: "${out}"`);
-    // Each Hebrew word's own character order must be flipped (logical -> visual order) — check
-    // the first word ("שלום") comes out with its own characters reversed, computed rather than
-    // hand-transcribed so a right-to-left string in the test source can't itself be miskeyed.
-    const firstWord = 'שלום';
-    const firstWordReversed = firstWord.split('').reverse().join('');
-    assert.ok(out.includes(firstWordReversed), `a Hebrew run must have its own character order reversed, got: "${out}"`);
+    assert.equal(out, input.split('').reverse().join(''), `a base-RTL line must be EXACTLY the plain character-by-character reversal, nothing more, got: "${out}"`);
 
     // A string with nothing to reorder (no RTL characters) must come back byte-for-byte identical
     // — the helper must not touch Latin/digit-only strings at all.
     const latinOnly = 'Extended CAR-T Time-Lapse Re-acquisition 2026';
     assert.equal(Exports._pdfBidiReverse(latinOnly), latinOnly, 'a pure-Latin/digit string must be returned unchanged');
+  });
+
+  test('_pdfBidiReverse (item 7): a line starting with Greek, Cyrillic, or an accented Latin name followed by Hebrew is treated as base LTR, not reversed wholesale', () => {
+    const app = loadApp(['consts', 'db', 'ui', 'views', 'reports', 'exports']);
+    const { Exports } = app;
+    const hebrewName = 'שרה כהן';
+
+    // An accented Latin name (Latin-1 Supplement, outside plain ASCII A-Z) starting the line.
+    const accented = `René Müller: ${hebrewName}`;
+    const outAccented = Exports._pdfBidiReverse(accented);
+    assert.equal(outAccented, accented, 'a line whose first strong character is accented Latin must be treated as base-LTR (untouched) — jsPDF\'s own engine handles the embedded Hebrew run');
+
+    // A Greek name starting the line.
+    const greek = `Δημήτρης Παπαδόπουλος: ${hebrewName}`;
+    const outGreek = Exports._pdfBidiReverse(greek);
+    assert.equal(outGreek, greek, 'a line whose first strong character is Greek must be treated as base-LTR (untouched)');
+
+    // A Cyrillic name starting the line.
+    const cyrillic = `Дмитрий Иванов: ${hebrewName}`;
+    const outCyrillic = Exports._pdfBidiReverse(cyrillic);
+    assert.equal(outCyrillic, cyrillic, 'a line whose first strong character is Cyrillic must be treated as base-LTR (untouched)');
   });
 
   test('_pdfBidiReverse leaves a base-left-to-right line untouched, Hebrew run included, because the bundled jsPDF bidi engine reorders mixed lines', () => {

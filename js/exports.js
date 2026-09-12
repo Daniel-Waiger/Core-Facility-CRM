@@ -283,11 +283,38 @@
   // A single interior space is allowed inside an RTL run (so "שרה כהן", a first+last name, reverses
   // as one two-word unit) without extending the run across a genuinely non-RTL boundary.
   const PDF_RTL_RUN_RE = /[\u0591-\u07FF](?:[\u0591-\u07FF ]*[\u0591-\u07FF])?/g;
-  const PDF_LTR_RUN_RE = /[0-9A-Za-z .,\-/@:_'"()]+/g;
+  // Item 6 (second review) \u2014 investigated further than the reported bug: pdfBidiReverse used to
+  // follow the whole-string reversal with `reversed.replace(PDF_LTR_RUN_RE, run =>
+  // run.split('').reverse().join(''))`, manually un-reversing each embedded LTR/digit run back into
+  // reading order. That regex had a real bug (a boundary space got swept into the run and glued the
+  // run to the neighbouring RTL word), but fixing the regex alone does not fix the actual PDF: the
+  // bundled jsPDF's own __bidiEngine__ ALSO detects an embedded LTR/digit run inside a string that
+  // contains RTL characters and restores ITS reading order on its own \u2014 independent of, and without
+  // knowledge of, whatever this function already did to the string. Handing jsPDF a string whose
+  // embedded run was already manually un-reversed made jsPDF un-reverse it a SECOND time, so the
+  // digits/Latin text drawn on the actual page came out backwards again regardless of the regex.
+  // Verified empirically on glyph x-origins in a real generated PDF (PyMuPDF get_texttrace, per
+  // docs/cma-lessons.md's "a rendered image is not evidence for bidi"), across digits, multi-word
+  // Latin phrases, money ("$1,234.56"), and an email address: jsPDF's own engine restores every one
+  // of these correctly, and MORE completely than the old regex's fixed character class ever could
+  // (multi-word phrases in particular \u2014 the regex only ever allowed a single interior space). A
+  // pure-RTL string with no embedded LTR run (checked the same way) is NOT touched further by jsPDF,
+  // matching this function's existing "leaves it in logical order" behavior for that case. So the
+  // correct fix removes the manual run un-reversal entirely for a base-RTL line: jsPDF's own engine
+  // already does this job, correctly, given the plain whole-string reversal below.
+  // Item 7 (second review): this only recognized plain ASCII Latin (/[A-Za-z]/) as a strong LTR
+  // character. A line whose first strong character is Latin-1/Latin Extended (an accented name —
+  // "Rene", "Muller"), Greek or Cyrillic fell through to the RTL branch below on nothing but a
+  // later Hebrew/Arabic character, and the WHOLE line got reversed wholesale — scrambling the very
+  // Latin/Greek/Cyrillic name that should have stayed in reading order at the front of the line.
+  // Widened to cover exactly the scripts this app's own bundled font (preparePdfFont, above) can
+  // draw and that read left-to-right: Latin (ASCII + Latin-1 Supplement + Latin Extended-A/B),
+  // Greek, and Cyrillic.
+  const PDF_STRONG_LTR_RE = /[A-Za-zÀ-ʯͰ-ϿЀ-ӿ]/;
   function pdfBaseIsRtl(s) {
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
-      if (/[A-Za-z]/.test(c)) return false;
+      if (PDF_STRONG_LTR_RE.test(c)) return false;
       if (PDF_RTL_RE.test(c)) return true;
     }
     return false; // no strong (directional) character found — digits/punctuation only
@@ -298,11 +325,16 @@
   // base direction is RTL; for a base-LTR line it must be a no-op, or the two reorderings cancel
   // each other and the name comes out scrambled. Verified on glyph x-origins in the content
   // stream, not on a rendered image (a viewer re-applies bidi and would hide the error).
+  //
+  // A plain whole-string character reversal is ALL a base-RTL line needs here — see the item 6
+  // comment above PDF_RTL_RUN_RE for why an additional manual pass to "restore" an embedded LTR/
+  // digit run's reading order is not just unnecessary but actively wrong: jsPDF's own engine
+  // already restores that run's reading order on its own once it sees RTL characters in the string,
+  // so doing it here too un-reverses it a second time and the run is drawn backwards on the page.
   function pdfBidiReverse(s) {
     if (!PDF_RTL_RE.test(s)) return s;
     if (!pdfBaseIsRtl(s)) return s;
-    const reversed = s.split('').reverse().join('');
-    return reversed.replace(PDF_LTR_RUN_RE, (run) => run.split('').reverse().join(''));
+    return s.split('').reverse().join('');
   }
 
   // Runs fn() with the doc's font temporarily switched to the multi-script font when `text` needs
