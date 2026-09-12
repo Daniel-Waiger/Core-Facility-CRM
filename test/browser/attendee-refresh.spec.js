@@ -14,7 +14,7 @@
 
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript } = require('./helpers/browser');
+const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript, waitForAppReady } = require('./helpers/browser');
 
 const playwright = tryRequirePlaywright();
 const skip = playwright ? false : 'Playwright is not installed — see test/README.md (unit tests need nothing)';
@@ -30,7 +30,7 @@ describe('attendee refresh on person rename', { skip }, () => {
     await ctx.addInitScript(setFlagScript('admin-mode', '1'));
     page = await ctx.newPage();
     await page.goto(srv.base + '/index.html?demo=1');
-    await page.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(page);
     await page.waitForTimeout(1500);
     await page.evaluate(() => window.UI && UI.stopTour && UI.stopTour());
 

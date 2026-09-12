@@ -13,7 +13,7 @@
 
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN } = require('./helpers/browser');
+const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, waitForAppReady } = require('./helpers/browser');
 
 const playwright = tryRequirePlaywright();
 const skip = playwright ? false : 'Playwright is not installed — see test/README.md (unit tests need nothing)';
@@ -38,7 +38,7 @@ describe('touch: People table Email cell wraps instead of ellipsis-truncating', 
     await ctx.addInitScript(QUIET_FIRST_RUN);
     const page = await ctx.newPage();
     await page.goto(srv.base + '/index.html?demo=1');
-    await page.waitForFunction(() => window.DB && window.App);
+    await waitForAppReady(page);
     await page.waitForTimeout(1200);
     await page.evaluate(() => window.UI && UI.stopTour && UI.stopTour());
     await page.evaluate((email) => {

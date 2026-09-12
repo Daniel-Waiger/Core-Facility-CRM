@@ -15,7 +15,7 @@
 
 const { test, describe, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript } = require('./helpers/browser');
+const { tryRequirePlaywright, chromiumLaunchOptions, startServer, QUIET_FIRST_RUN, setFlagScript, waitForAppReady } = require('./helpers/browser');
 
 const playwright = tryRequirePlaywright();
 const skip = playwright ? false : 'Playwright is not installed — see test/README.md (unit tests need nothing)';
@@ -33,7 +33,7 @@ describe('modal stacking: topmost-modal saves, focus, Enter, and hashchange clea
     page.on('pageerror', (e) => { throw e; });
 
     await page.goto(srv.base + '/index.html?demo=1');
-    await page.waitForFunction(() => window.DB && window.App && window.UI);
+    await waitForAppReady(page);
     await page.waitForTimeout(1500);
     await page.evaluate(() => window.UI.stopTour && window.UI.stopTour());
   });
