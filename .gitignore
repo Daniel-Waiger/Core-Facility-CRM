@@ -17,3 +17,7 @@ outreach/
 
 # Node modules (only ever present if a contributor installs Playwright for test/browser/)
 node_modules/
+
+# University IT proposal, BookitLab comparison, email drafts: private, kept only in the
+# facility's Google Drive folder, never in this public repository
+docs/proposal/
