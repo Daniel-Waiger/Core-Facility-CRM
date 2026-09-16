@@ -3357,34 +3357,13 @@
     return !!(r && r.c);
   }
 
-  // The "effective date" of a research output: its own `date` when set, else the
-  // calendar day it was logged. `project_outputs.date` is OPTIONAL and the UI
-  // falls back to `created_at` when it is blank, so every ordering and range
-  // filter must use this expression -- otherwise a blank-dated output sorts to
-  // the bottom of a list that displays it with a recent timestamp.
-  //
-  // It lives here, not in reports.js, because views.js loads first and needs it
-  // too. One definition is what stops the funnel, the project screen and the
-  // three export paths from quietly disagreeing about the same rows -- the same
-  // reasoning that keeps UI.billableStaffHours out of app.js and reports.js.
-  //
-  // Same UTC/local caveat the funnel already documents: created_at is a UTC
-  // timestamp while `date` is a local calendar day, so at UTC+ offsets the
-  // fallback can read one day early. Ordering only, and strictly better than
-  // sorting every undated row last.
-  function outputEffDate(alias) {
-    const a = alias ? alias + '.' : '';
-    return `CASE WHEN TRIM(COALESCE(${a}date,'')) != '' THEN ${a}date ELSE date(${a}created_at) END`;
-  }
-
-  // The JS-side, LOCAL-calendar-day-correct counterpart to outputEffDate above: takes a
-  // {date, created_at} row (a project_outputs row, or anything shaped like one) and returns the
-  // same "effective date", but with the blank-date fallback computed as a local calendar day
-  // instead of outputEffDate's SQL `date(created_at)`, which is a UTC calendar day and can read
-  // one day early at a UTC+ offset. Any caller that displays or ORDERs BY the effective date
-  // (not just uses it inside a WHERE alongside other SQL) needs this one instead — see
-  // CLAUDE.md's "Dates are local calendar days, never UTC instants". Delegates to
-  // UI.outputEffectiveDate, the single shared implementation (also used directly by reports.js).
+  // The "effective date" of a research output row ({date, created_at}): its own `date` when set,
+  // else the LOCAL calendar day it was logged. `project_outputs.date` is OPTIONAL, so every
+  // ordering, display and export of research outputs must use this one rule — otherwise a
+  // blank-dated output sorts to the bottom of a list that displays it with a recent date.
+  // Computed in JS, never as SQL `date(created_at)`: that is the UTC calendar day and reads one
+  // day early at a UTC+ offset (CLAUDE.md, "Dates are local calendar days, never UTC instants").
+  // Delegates to UI.outputEffectiveDate, the single shared implementation reports.js also uses.
   function outputEffectiveDate(row) {
     return global.UI.outputEffectiveDate(row);
   }
@@ -3409,7 +3388,6 @@
     getAutoBackupDirHandle,
     clearAutoBackupDirHandle,
     rows,
-    outputEffDate,
     outputEffectiveDate,
     row,
     q,

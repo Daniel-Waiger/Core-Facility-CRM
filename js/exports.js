@@ -75,8 +75,8 @@
     // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
     // eff_date is exported as the row's Date: the same effective date the ordering (and any
     // date-range reasoning) uses, so an undated output can't sort as recent while displaying '—'.
-    // Computed in JS via DB.outputEffectiveDate (LOCAL calendar day fallback), not the SQL
-    // outputEffDate CASE (UTC calendar day) — see that helper's comment.
+    // Computed in JS via DB.outputEffectiveDate (LOCAL calendar day fallback), never SQL
+    // date(created_at), which is the UTC day — see that helper's comment.
     const outputs = DB.rows(`SELECT po.*, f.name AS file_name FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
       .map((o) => Object.assign(o, { eff_date: DB.outputEffectiveDate(o) }))
       .sort((a, b) => (a.eff_date !== b.eff_date ? (a.eff_date < b.eff_date ? 1 : -1) : b.id - a.id));
@@ -1244,7 +1244,7 @@
     // * marking the fallback — same convention as the per-project outputs sheet.
     const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note']];
     // Effective date + ordering computed in JS via DB.outputEffectiveDate (LOCAL calendar day
-    // fallback) rather than the SQL outputEffDate CASE (UTC calendar day) — see that helper.
+    // fallback), never SQL date(created_at), which is the UTC day — see that helper.
     DB.rows(`
       SELECT po.*, p.code as project_code, p.title as project_title, f.name AS file_name
       FROM project_outputs po

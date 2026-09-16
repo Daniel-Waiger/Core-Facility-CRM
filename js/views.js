@@ -262,8 +262,8 @@
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     // Research outputs (roadmap 3.3) — the funnel's exit stage. Cloned from the same
     // "load flat, query fresh, no denormalized name column" pattern as kv above.
-    // Ordered in JS via DB.outputEffectiveDate (LOCAL calendar day fallback), not the SQL
-    // outputEffDate CASE (UTC calendar day for a blank `date`) — see that helper's comment.
+    // Ordered in JS via DB.outputEffectiveDate (LOCAL calendar day fallback for a blank `date`),
+    // never SQL date(created_at), which is the UTC day — see that helper's comment.
     const outputs = global.DB.rows(`SELECT po.*, f.name AS file_name, f.kind AS file_kind FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
       .sort((a, b) => {
         const ea = global.DB.outputEffectiveDate(a), eb = global.DB.outputEffectiveDate(b);
@@ -428,7 +428,7 @@
               <span class="output-title">${esc(o.title)}</span>
               ${o.acknowledges_facility ? `<span class="badge success">Acknowledged</span>` : ''}
               ${o.file_name ? `<span class="faint small">${ic('file')} ${esc(o.file_name)}</span>` : ''}
-              <div class="faint small output-meta">${authors ? authors + ' · ' : ''}${dateStr}${o.date ? fmt(o.date) : fmt(o.created_at)}</div>
+              <div class="faint small output-meta">${authors ? authors + ' · ' : ''}${dateStr}${fmt(global.DB.outputEffectiveDate(o))}</div>
             </button>
             <div class="output-links">
               ${doiHref ? `<a class="file-link" href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">DOI ${ic('external')}</a>` : ''}
