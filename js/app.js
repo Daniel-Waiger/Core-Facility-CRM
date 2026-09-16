@@ -4618,8 +4618,8 @@
         <div class="field"><span class="badge neutral" style="text-transform:capitalize">${esc(item.type)}</span></div>
         <div class="field"><label>Title</label><div>${esc(item.title)}</div></div>
         ${item.reference ? `<div class="field"><label>${esc(def.referenceLabel)}</label><div>${esc(item.reference)}</div></div>` : ''}
-        ${item.doi ? `<div class="field"><label>DOI</label><div><a href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">${esc(item.doi)}</a></div></div>` : ''}
-        ${item.url && UI.isSafeUrl(item.url) ? `<div class="field"><label>URL</label><div><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.url)}</a></div></div>` : ''}
+        ${item.doi ? `<div class="field"><label>DOI</label><div><a class="file-link" href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">${esc(item.doi)}</a></div></div>` : ''}
+        ${item.url && UI.isSafeUrl(item.url) ? `<div class="field"><label>URL</label><div><a class="file-link" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.url)}</a></div></div>` : ''}
         <div class="field"><label>Authors</label>${authors.length ? `<ul>${authors.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div>—</div>'}</div>
         <div class="field"><label>Date</label><div>${dateLine}</div></div>
         ${item.note ? `<div class="field"><label>Note</label><div>${esc(item.note)}</div></div>` : ''}
