@@ -401,10 +401,11 @@
 
     <!-- Research Outputs Card (roadmap 3.3) — cloned from the Custom Fields card's add/edit/
          delete pattern above; the funnel's exit stage lives here per-project. Rows are clickable
-         (opens the read-only detail); the type badge is a nested edit-action hit target, since
-         the dispatcher's closest('[data-act]') resolves the badge before the row. The card
-         itself is a drop zone for dragging a PDF straight onto it; "Attach PDF" opens the same
-         hidden file input by click. -->
+         (opens the read-only detail); the type badge is a sibling edit-action hit target placed
+         before the row's view button (HTML forbids nesting interactive elements, and buttons
+         can't nest a role="button" span), styled to sit on the same line as the title via flex-wrap.
+         The card itself is a drop zone for dragging a PDF straight onto it; "Attach PDF" opens the
+         same hidden file input by click. -->
     <div class="card mb-16 output-drop" data-drop-outputs="${p.id}">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Research Outputs</span></div>
@@ -422,8 +423,8 @@
             const dateStr = o.reference ? esc(o.reference) + ' — ' : '';
             return `
           <div class="output-row">
+            <span class="badge neutral output-type" role="button" tabindex="0" data-act="output-edit" data-id="${o.id}" title="Edit Output" style="text-transform:capitalize">${esc(o.type)}</span>
             <button type="button" class="output-main" data-act="output-view" data-id="${o.id}" aria-label="View Output">
-              <span class="badge neutral output-type" role="button" tabindex="0" data-act="output-edit" data-id="${o.id}" title="Edit Output" style="text-transform:capitalize">${esc(o.type)}</span>
               <span class="output-title">${esc(o.title)}</span>
               ${o.acknowledges_facility ? `<span class="badge success">Acknowledged</span>` : ''}
               ${o.file_name ? `<span class="faint small">${ic('file')} ${esc(o.file_name)}</span>` : ''}
