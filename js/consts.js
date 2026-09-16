@@ -57,7 +57,7 @@ window.OUTPUT_TYPE_FIELDS = {
   software: { fields: ['url', 'doi', 'reference', 'authors', 'acknowledges_facility'], referenceLabel: 'Repository / Version' },
   talk: { fields: ['reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Venue' },
   poster: { fields: ['reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Venue' },
-  acknowledgement: { fields: ['reference', 'doi', 'url', 'authors'], referenceLabel: 'Where Acknowledged' },
+  acknowledgement: { fields: ['reference', 'doi', 'url', 'authors', 'acknowledges_facility'], referenceLabel: 'Where Acknowledged' },
   other: { fields: ['doi', 'reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Reference' },
 };
 window.OUTPUT_TYPE_FIELDS.default = window.OUTPUT_TYPE_FIELDS.other;
