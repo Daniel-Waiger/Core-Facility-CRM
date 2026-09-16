@@ -248,6 +248,43 @@ A lesson that just restates an architecture rule should be deleted — point at
   before execution; had it survived, task N+1 would have wiped tasks 1..N, which run back to back
   with no commits between them. Never put a working-tree-mutating git command in a plan.
 
+## Plan quality: what produced a 10-for-10 run (2026-09-16, issue #39)
+
+- **Put the literal expected output of a runnable one-liner in the task's
+  verification criteria.** Ten tasks, ten first-try passes, zero retries. The
+  criteria that carried the most weight were of the form "run this exact
+  `node -e ...` and it prints `["SIM","TIRF","Fiji"] "Fiji, Napari" []`".
+  Executor and verifier then check the same observable fact instead of two
+  readings of a diff, and disagreement becomes impossible to paper over.
+  Grep-shaped criteria work the same way ("exactly two `#39 begin`/`#39 end`
+  pairs; the first at a line after `ix_project_outputs_project`").
+
+- **A planner must not ban vocabulary its own scope statement uses.** T10's
+  brief forbade the word "column" in changelog prose while the brief itself (and
+  the precedent 1.11.0 entry) described "two new columns"; the verifier had to
+  log a non-gating problem for obeying the scope. Style bans belong in the
+  lessons/`CLAUDE.md` layer, and the planner should self-check its prose rules
+  against its own wording before shipping the brief.
+
+- **Cross-format claims still need per-format wording.** The same T10 changelog
+  said "Tags column" for the DOCX/PDF reports, which actually render a "Tags:"
+  line per booking; only the spreadsheet paths are columns. Each export format
+  is its own code path (`CLAUDE.md`), so a release note describing "the export"
+  in one phrase is usually wrong for at least one of the three.
+
+## Recovering an interrupted parallel run (2026-09-16)
+
+- **Recover by patch + fresh clone, and discard the interrupted task's partial
+  output.** A sibling run's `git stash` in a worktree of the same clone swapped
+  this run's uncommitted work into the other issue's tree after T4. What worked:
+  save the surviving work as a patch, rebuild independent clones with
+  `core.autocrlf=false`, re-apply, **delete the half-written file from the task
+  that was mid-flight** (`reports.js` from T5), and re-run from that task with a
+  fresh FORCE nonce. T5–T10 then passed with zero retries. Resuming *on top of*
+  a half-written file is the failure mode this avoids: the next executor treats
+  partial code as the base and its greps report a state nobody authored.
+  (Shared stash stack across worktrees of one clone: seen 2×.)
+
 <!-- cma:append-here -->
 
 ## Hard rules for the 2026-09 parallel runs (orchestrator, 2026-09-16)
