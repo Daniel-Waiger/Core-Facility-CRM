@@ -333,6 +333,11 @@ describe('#39 (7): DB.renameBookingCategory / DB.removeBookingCategory', () => {
 
     const untouchedCount = DB.row("SELECT COUNT(*) c FROM meetings WHERE category='demo-cat'").c;
     assert.equal(untouchedCount, 1, 'the refused rename must leave the booking under its original category');
+
+    // 'Other' is the vocabulary picker's "+ Add New" sentinel, not a category (DB.vocabList
+    // filters it out of the regular terms), so it can be neither the source nor the target.
+    assert.equal(DB.renameBookingCategory('demo-cat', 'Other'), null, 'renameBookingCategory must refuse the Other sentinel as the NEW name');
+    assert.equal(DB.renameBookingCategory('Other', 'demo-cat2'), null, 'renameBookingCategory must refuse the Other sentinel as the OLD name');
   });
 
   test('removeBookingCategory refuses a category that still has bookings, and succeeds once it has none', async () => {

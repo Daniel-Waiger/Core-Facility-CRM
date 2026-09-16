@@ -424,7 +424,7 @@
             return `
           <div class="output-row">
             <span class="badge neutral output-type" role="button" tabindex="0" data-act="output-edit" data-id="${o.id}" title="Edit Output" style="text-transform:capitalize">${esc(o.type)}</span>
-            <button type="button" class="output-main" data-act="output-view" data-id="${o.id}" aria-label="View Output">
+            <button type="button" class="output-main" data-act="output-view" data-id="${o.id}" aria-label="View Output: ${esc(o.title)}">
               <span class="output-title">${esc(o.title)}</span>
               ${o.acknowledges_facility ? `<span class="badge success">Acknowledged</span>` : ''}
               ${o.file_name ? `<span class="faint small">${ic('file')} ${esc(o.file_name)}</span>` : ''}
@@ -764,11 +764,11 @@
       SELECT m.id, m.title, m.date, m.start_time, m.end_time, m.category, m.is_cancelled, m.billing_retained, m.project_id, pr.title AS project_title,
              (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id=mi.instrument_id WHERE mi.meeting_id=m.id) AS instruments
       FROM meetings m
-      JOIN meeting_people mp ON mp.meeting_id=m.id
       LEFT JOIN projects pr ON pr.id=m.project_id
-      WHERE mp.person_id=?
+      WHERE EXISTS (SELECT 1 FROM meeting_people mp WHERE mp.meeting_id=m.id AND mp.person_id=?)
+         OR EXISTS (SELECT 1 FROM meeting_staff ms WHERE ms.meeting_id=m.id AND ms.person_id=?)
       ORDER BY m.date DESC, m.start_time DESC, m.id DESC
-      LIMIT 25`, [p.id]);
+      LIMIT 25`, [p.id, p.id]);
 
     const training = global.DB.listPersonTraining(p.id);
 

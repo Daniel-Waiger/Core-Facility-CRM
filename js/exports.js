@@ -1579,7 +1579,8 @@
     wsTraining['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 10 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, wsTraining, 'Training');
 
-    // Sheet 3: Bookings — every meeting this person attended (via meeting_people, the real join,
+    // Sheet 3: Bookings — every meeting this person attended (meeting_people) or ran as facility
+    // staff (meeting_staff); a person in both roles on one booking still gets one row. Real joins,
     // never the denormalized meetings.attendees display string — CLAUDE.md), within the range.
     const fromVal = from || '', toVal = to || '';
     const bookings = DB.rows(
@@ -1589,11 +1590,12 @@
                  FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id
                  WHERE mi.meeting_id = m.id) AS instruments
        FROM meetings m
-       JOIN meeting_people mp ON mp.meeting_id = m.id
        LEFT JOIN projects pr ON pr.id = m.project_id
-       WHERE mp.person_id = ? AND (? = '' OR m.date >= ?) AND (? = '' OR m.date <= ?)
+       WHERE (EXISTS (SELECT 1 FROM meeting_people mp WHERE mp.meeting_id = m.id AND mp.person_id = ?)
+           OR EXISTS (SELECT 1 FROM meeting_staff ms WHERE ms.meeting_id = m.id AND ms.person_id = ?))
+         AND (? = '' OR m.date >= ?) AND (? = '' OR m.date <= ?)
        ORDER BY m.date, m.start_time`,
-      [p.id, fromVal, fromVal, toVal, toVal]
+      [p.id, p.id, fromVal, fromVal, toVal, toVal]
     );
     const bookingRows = [['Date', 'Start', 'End', 'Title', 'Project', 'Instruments', 'Category', 'Tags', 'Status']];
     bookings.forEach((b) => {

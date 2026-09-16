@@ -281,6 +281,13 @@ describe('#47 Exports.exportActivityCertificate', () => {
     const m3 = lastId(DB);
     DB.run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [m3, alice]);
 
+    // Alice ran this one as facility staff (meeting_staff) without being an attendee — it must
+    // still appear, and being both attendee and staff on m2 must not produce a second row.
+    DB.run("INSERT INTO meetings (project_id, title, date, start_time, end_time) VALUES (?, 'Staffed Only', '2026-01-20','09:00','10:00')", [liveProject]);
+    const m4 = lastId(DB);
+    DB.run("INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,'','',0)", [m4, alice]);
+    DB.run("INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,'','',0)", [m2, alice]);
+
     // Expired as of the exported range's end date (2026-01-31).
     DB.run(
       "INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on) VALUES (?,?,'User','2025-01-01',?,?)",
@@ -297,6 +304,8 @@ describe('#47 Exports.exportActivityCertificate', () => {
     assert.ok(titles.includes('In Range Cancelled'), 'an in-range booking must appear');
     assert.ok(titles.includes('Facility Sync'), 'a facility-wide in-range booking must appear');
     assert.ok(!titles.includes('Out Of Range'), 'a booking outside the exported range must not appear');
+    assert.ok(titles.includes('Staffed Only'), 'a booking the person ran as facility staff (meeting_staff only) must appear');
+    assert.equal(titles.filter((t) => t === 'Facility Sync').length, 1, 'attendee + staff on one booking yields one row, not two');
 
     assert.ok(bookingRows[0].includes('Tags'), 'the Bookings sheet must carry a Tags column, like every other booking-listing export');
     const cancelledRow = bookingRows.find((r) => r[3] === 'In Range Cancelled');
@@ -340,9 +349,13 @@ describe('#47 Views', () => {
     DB.run("INSERT INTO meetings (project_id, title, date, is_cancelled) VALUES (?, 'Cancelled Session', '2026-01-05', 1)", [liveProject]);
     const mId = lastId(DB);
     DB.run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [mId, alice]);
+    // Ran as facility staff only (meeting_staff, no attendee row) — must still count as her activity.
+    DB.run("INSERT INTO meetings (project_id, title, date) VALUES (?, 'Staffed Session', '2026-01-06')", [liveProject]);
+    DB.run("INSERT INTO meeting_staff (meeting_id, person_id, start_time, end_time, line_cost) VALUES (?,?,'','',0)", [lastId(DB), alice]);
 
     const html = Views.personDetail(alice);
     assert.match(html, /Alice/, 'the person\'s name must render');
+    assert.match(html, /Staffed Session/, 'a booking the person ran as staff (meeting_staff only) must appear in Recent Activity');
     assert.match(html, /Super User/, 'the training level must render');
     assert.match(html, /Cancelled/, 'a cancelled booking must be marked');
     assert.match(html, /Archived/, 'Alice is PI on the fixture\'s archived project too, and that must be marked');

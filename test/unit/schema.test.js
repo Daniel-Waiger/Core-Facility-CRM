@@ -396,7 +396,8 @@ describe('schema: migrations are idempotent', () => {
     'project_instruments', 'instrument_staff', 'milestones', 'milestone_owners',
     'milestone_instruments', 'meetings', 'meeting_people', 'meeting_instruments', 'meeting_staff',
     'files', 'kv', 'vocab', 'app_config', 'group_discounts', 'pricing_tiers', 'group_tiers',
-    'instrument_tier_rates', 'category_policies', 'service_entries', 'project_outputs'
+    'instrument_tier_rates', 'category_policies', 'service_entries', 'project_outputs',
+    'person_instrument_training'
   ];
 
   test('a database built straight from SCHEMA already has every migrated column (no migration needed)', async () => {

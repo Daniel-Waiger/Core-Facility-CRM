@@ -2590,6 +2590,9 @@
     newName = String(newName || '').trim();
     if (!oldName || !newName || oldName === newName) return null;
     if (PROTECTED_BOOKING_CATEGORIES.includes(oldName) || PROTECTED_BOOKING_CATEGORIES.includes(newName)) return null;
+    // 'Other' is the vocabulary layer's "+ Add New" sentinel (see vocabList), never a real
+    // category: renaming into it would relabel bookings to a value the forms treat as a trigger.
+    if (oldName === 'Other' || newName === 'Other') return null;
 
     const bookings = countBookingCategoryRefs(oldName);
     // category_policies.category is its PRIMARY KEY: if newName already has its own policy row,
