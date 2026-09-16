@@ -4610,7 +4610,10 @@
     const doiHref = item.doi ? UI.doiUrl(item.doi) : '';
     const authors = UI.splitAuthors(item.authors || '');
     const file = item.file_id ? DB.row('SELECT * FROM files WHERE id=?', [item.file_id]) : null;
-    const dateLine = item.date ? UI.fmtDate(item.date) : (UI.fmtDate(item.created_at) + ' (logged)');
+    // Blank `date` falls back to the LOCAL calendar day it was logged, via DB.outputEffectiveDate
+    // — the same rule the Project Detail ordering and exports use (never the UTC day `created_at`
+    // would give if fed straight to UI.fmtDate, which reads it as a plain date string).
+    const dateLine = item.date ? UI.fmtDate(item.date) : (UI.fmtDate(DB.outputEffectiveDate(item)) + ' (logged)');
 
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('eye')} Research Output</span></div>
@@ -4655,7 +4658,16 @@
       DB.run('INSERT INTO files (project_id, name, kind, path) VALUES (?,?,?,?)', [pid, name, 'upload', storageKey]);
       const inserted = DB.row('SELECT last_insert_rowid() as id');
       const fileId = inserted && inserted.id;
-      await DB.saveUpload(storageKey, file);
+      try {
+        await DB.saveUpload(storageKey, file);
+      } catch (saveErr) {
+        // The files row now points at a blob that was never written — remove it (and
+        // best-effort clear the storage key, in case saveUpload partially wrote it) rather than
+        // leaving a record that can never be downloaded, then report the original failure.
+        DB.run('DELETE FROM files WHERE id=?', [fileId]);
+        try { await DB.deleteUpload(storageKey); } catch (e) { console.error('deleteUpload failed', e); }
+        throw saveErr;
+      }
 
       addOutput(pid, { title, fileId, fileName: name, type: 'publication' });
       UI.toast('File attached — fill in the output details');

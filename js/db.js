@@ -2579,7 +2579,7 @@
     oldName = String(oldName || '').trim();
     newName = String(newName || '').trim();
     if (!oldName || !newName || oldName === newName) return null;
-    if (PROTECTED_BOOKING_CATEGORIES.includes(oldName)) return null;
+    if (PROTECTED_BOOKING_CATEGORIES.includes(oldName) || PROTECTED_BOOKING_CATEGORIES.includes(newName)) return null;
 
     const bookings = countBookingCategoryRefs(oldName);
     // category_policies.category is its PRIMARY KEY: if newName already has its own policy row,
@@ -3367,6 +3367,18 @@
     return `CASE WHEN TRIM(COALESCE(${a}date,'')) != '' THEN ${a}date ELSE date(${a}created_at) END`;
   }
 
+  // The JS-side, LOCAL-calendar-day-correct counterpart to outputEffDate above: takes a
+  // {date, created_at} row (a project_outputs row, or anything shaped like one) and returns the
+  // same "effective date", but with the blank-date fallback computed as a local calendar day
+  // instead of outputEffDate's SQL `date(created_at)`, which is a UTC calendar day and can read
+  // one day early at a UTC+ offset. Any caller that displays or ORDERs BY the effective date
+  // (not just uses it inside a WHERE alongside other SQL) needs this one instead — see
+  // CLAUDE.md's "Dates are local calendar days, never UTC instants". Delegates to
+  // UI.outputEffectiveDate, the single shared implementation (also used directly by reports.js).
+  function outputEffectiveDate(row) {
+    return global.UI.outputEffectiveDate(row);
+  }
+
   global.DB = {
     boot,
     get memoryMode() { return memoryMode; },
@@ -3388,6 +3400,7 @@
     clearAutoBackupDirHandle,
     rows,
     outputEffDate,
+    outputEffectiveDate,
     row,
     q,
     q1,

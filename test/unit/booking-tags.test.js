@@ -318,6 +318,23 @@ describe('#39 (7): DB.renameBookingCategory / DB.removeBookingCategory', () => {
     assert.equal(DB.renameBookingCategory('assisted session', 'anything-else'), null, 'renameBookingCategory must refuse a protected category name');
   });
 
+  test('renameBookingCategory also refuses renaming INTO a protected name, not just out of one', async () => {
+    const { DB } = await freshDb();
+    const { liveProject } = seedFixture(DB);
+
+    DB.run("INSERT INTO meetings (project_id, title, date, category) VALUES (?, 'Session 1', '2026-01-05', 'demo-cat')", [liveProject]);
+
+    // Renaming a plain category onto a protected name would silently fold ordinary bookings into
+    // 'consult'/'training'/'assisted session', corrupting the funnel/policy logic that assumes
+    // those three names are only ever used verbatim for their own purpose.
+    assert.equal(DB.renameBookingCategory('demo-cat', 'consult'), null, 'renameBookingCategory must refuse a protected category as the NEW name');
+    assert.equal(DB.renameBookingCategory('demo-cat', 'training'), null, 'renameBookingCategory must refuse a protected category as the NEW name');
+    assert.equal(DB.renameBookingCategory('demo-cat', 'assisted session'), null, 'renameBookingCategory must refuse a protected category as the NEW name');
+
+    const untouchedCount = DB.row("SELECT COUNT(*) c FROM meetings WHERE category='demo-cat'").c;
+    assert.equal(untouchedCount, 1, 'the refused rename must leave the booking under its original category');
+  });
+
   test('removeBookingCategory refuses a category that still has bookings, and succeeds once it has none', async () => {
     const { DB } = await freshDb();
     const { liveProject } = seedFixture(DB);

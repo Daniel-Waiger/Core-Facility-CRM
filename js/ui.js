@@ -636,6 +636,28 @@
     return ymd(d);
   }
 
+  // A `datetime('now')`-written timestamp ('YYYY-MM-DD HH:MM:SS', UTC, no offset) -> its LOCAL
+  // calendar day. `new Date(...)` needs an ISO string to parse as UTC, hence the 'T'/'Z' splice;
+  // parsing the raw string would instead be read as local time by most engines, silently double-
+  // converting. The single shared rule behind DB.outputEffectiveDate below and Reports' own
+  // created_at fallbacks — see CLAUDE.md's "Dates are local calendar days, never UTC instants".
+  function utcTimestampToLocalDay(ts) {
+    if (!ts) return '';
+    const dt = new Date(String(ts).replace(' ', 'T') + 'Z');
+    if (isNaN(dt.getTime())) return String(ts).slice(0, 10); // not a parseable timestamp — fall back rather than throw
+    return ymd(dt);
+  }
+
+  // The "effective date" of a research output row ({date, created_at}): its own `date` when set
+  // (already a local calendar day, stored verbatim), else the LOCAL calendar day it was logged.
+  // `project_outputs.date` is optional and every screen/export that orders or displays research
+  // outputs by date must agree on this fallback, or one will file an undated output a day early
+  // at a UTC+ offset relative to the others. See CLAUDE.md's "Dates are local calendar days".
+  function outputEffectiveDate(row) {
+    const d = row && row.date;
+    return (d && String(d).trim() !== '') ? String(d).trim() : utcTimestampToLocalDay(row && row.created_at);
+  }
+
   /* ---------------- Booking time maths ----------------
      Shared by the booking cost calculator (app.js) and the Reports screen (reports.js) so both
      count hours the same way. Times are stored as plain 'HH:MM' strings on the same calendar day,
@@ -1048,6 +1070,8 @@
     ymd,
     today,
     todayPlusDays,
+    utcTimestampToLocalDay,
+    outputEffectiveDate,
     timeToMinutes,
     hoursBetween,
     billableStaffHours,

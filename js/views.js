@@ -262,7 +262,14 @@
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     // Research outputs (roadmap 3.3) — the funnel's exit stage. Cloned from the same
     // "load flat, query fresh, no denormalized name column" pattern as kv above.
-    const outputs = global.DB.rows(`SELECT po.*, f.name AS file_name, f.kind AS file_kind FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=? ORDER BY ${global.DB.outputEffDate('po')} DESC, po.id DESC`, [id]);
+    // Ordered in JS via DB.outputEffectiveDate (LOCAL calendar day fallback), not the SQL
+    // outputEffDate CASE (UTC calendar day for a blank `date`) — see that helper's comment.
+    const outputs = global.DB.rows(`SELECT po.*, f.name AS file_name, f.kind AS file_kind FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
+      .sort((a, b) => {
+        const ea = global.DB.outputEffectiveDate(a), eb = global.DB.outputEffectiveDate(b);
+        if (ea !== eb) return ea < eb ? 1 : -1;
+        return b.id - a.id;
+      });
     const mtgs = global.DB.rows(`
       SELECT m.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
       FROM meetings m

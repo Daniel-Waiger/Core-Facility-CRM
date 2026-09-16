@@ -1000,11 +1000,11 @@
   // local time to force local parsing): reparse the stored string as an explicit UTC instant by
   // appending 'Z', then read that instant's LOCAL calendar fields via UI.ymd (never toISOString,
   // which would just undo the fix by re-describing the instant in UTC again).
+  // Delegates to UI.utcTimestampToLocalDay — the single shared implementation of this rule
+  // (also used by DB.outputEffectiveDate for the same fallback outside reports.js, e.g. the
+  // Project Detail research-outputs ordering and the XLSX/DOCX/PDF exports).
   function utcTimestampToLocalDay(ts) {
-    if (!ts) return '';
-    const d = new Date(String(ts).replace(' ', 'T') + 'Z');
-    if (isNaN(d.getTime())) return String(ts).slice(0, 10); // not a parseable timestamp — fall back rather than throw
-    return UI.ymd(d);
+    return UI.utcTimestampToLocalDay(ts);
   }
   // 'YYYY-MM-DD' (or a longer datetime string, sliced) in-range check — '' on either bound means
   // unbounded, mirroring RANGE_SQL's own '' = unbounded convention above, just in plain JS for

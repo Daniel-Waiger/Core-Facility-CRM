@@ -104,6 +104,33 @@ describe('UI.doiUrl', () => {
   });
 });
 
+describe('UI.utcTimestampToLocalDay / UI.outputEffectiveDate', () => {
+  test('a created_at timestamp late in the UTC day rolls to the next LOCAL calendar day at a UTC+ offset', () => {
+    assert.equal(process.env.TZ, 'Asia/Jerusalem', 'this test must run under TZ=Asia/Jerusalem to be meaningful');
+    // 22:30 UTC on the 15th is 00:30/01:30 the 16th in Asia/Jerusalem (UTC+2/+3) — the whole point
+    // of the local-day rule (CLAUDE.md's "Dates are local calendar days, never UTC instants").
+    assert.equal(UI.utcTimestampToLocalDay('2026-09-15 22:30:00'), '2026-09-16');
+  });
+
+  test('empty/null input returns empty rather than throwing', () => {
+    assert.equal(UI.utcTimestampToLocalDay(''), '');
+    assert.equal(UI.utcTimestampToLocalDay(null), '');
+  });
+
+  test('outputEffectiveDate uses the explicit date column verbatim when set, ignoring created_at', () => {
+    assert.equal(UI.outputEffectiveDate({ date: '2026-01-05', created_at: '2026-09-15 22:30:00' }), '2026-01-05');
+  });
+
+  test('outputEffectiveDate falls back to the LOCAL calendar day of created_at when date is blank', () => {
+    assert.equal(process.env.TZ, 'Asia/Jerusalem', 'this test must run under TZ=Asia/Jerusalem to be meaningful');
+    // Before the fix this fell back to SQL's `date(created_at)`, the UTC day (2026-09-15) — a
+    // day early relative to every other local-calendar-day value in the app.
+    assert.equal(UI.outputEffectiveDate({ date: '', created_at: '2026-09-15 22:30:00' }), '2026-09-16');
+    assert.equal(UI.outputEffectiveDate({ date: null, created_at: '2026-09-15 22:30:00' }), '2026-09-16');
+    assert.equal(UI.outputEffectiveDate({ date: '   ', created_at: '2026-09-15 22:30:00' }), '2026-09-16');
+  });
+});
+
 describe('UI.splitAuthors', () => {
   test('splits on ";" and newline, NOT on "," — "Smith, J." is one author, not two', () => {
     const authors = UI.splitAuthors('Smith, J.; Doe, A.\nLee, K');

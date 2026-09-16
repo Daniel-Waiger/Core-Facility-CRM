@@ -75,7 +75,11 @@
     // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
     // eff_date is exported as the row's Date: the same effective date the ordering (and any
     // date-range reasoning) uses, so an undated output can't sort as recent while displaying '—'.
-    const outputs = DB.rows(`SELECT po.*, f.name AS file_name, ${DB.outputEffDate('po')} AS eff_date FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=? ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`, [id]);
+    // Computed in JS via DB.outputEffectiveDate (LOCAL calendar day fallback), not the SQL
+    // outputEffDate CASE (UTC calendar day) — see that helper's comment.
+    const outputs = DB.rows(`SELECT po.*, f.name AS file_name FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
+      .map((o) => Object.assign(o, { eff_date: DB.outputEffectiveDate(o) }))
+      .sort((a, b) => (a.eff_date !== b.eff_date ? (a.eff_date < b.eff_date ? 1 : -1) : b.id - a.id));
     const prog = DB.projectProgress(id);
 
     return { p, ppl, inst, ms, kv, mtgs, entries, files, outputs, prog };
@@ -1239,14 +1243,18 @@
     // Date column = the effective date the ordering uses (explicit date, else creation day),
     // * marking the fallback — same convention as the per-project outputs sheet.
     const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note']];
+    // Effective date + ordering computed in JS via DB.outputEffectiveDate (LOCAL calendar day
+    // fallback) rather than the SQL outputEffDate CASE (UTC calendar day) — see that helper.
     DB.rows(`
-      SELECT po.*, p.code as project_code, p.title as project_title, f.name AS file_name, ${DB.outputEffDate('po')} AS eff_date
+      SELECT po.*, p.code as project_code, p.title as project_title, f.name AS file_name
       FROM project_outputs po
       JOIN projects p ON p.id = po.project_id
-      LEFT JOIN files f ON f.id = po.file_id
-      ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`).forEach((o) => {
-      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
-    });
+      LEFT JOIN files f ON f.id = po.file_id`)
+      .map((o) => Object.assign(o, { eff_date: DB.outputEffectiveDate(o) }))
+      .sort((a, b) => (a.eff_date !== b.eff_date ? (a.eff_date < b.eff_date ? 1 : -1) : b.id - a.id))
+      .forEach((o) => {
+        outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
+      });
     const wsOut = XLSX.utils.aoa_to_sheet(outRows);
     wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
