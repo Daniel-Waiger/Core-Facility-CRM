@@ -75,7 +75,7 @@
     // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
     // eff_date is exported as the row's Date: the same effective date the ordering (and any
     // date-range reasoning) uses, so an undated output can't sort as recent while displaying '—'.
-    const outputs = DB.rows(`SELECT *, ${DB.outputEffDate()} AS eff_date FROM project_outputs WHERE project_id=? ORDER BY ${DB.outputEffDate()} DESC, id DESC`, [id]);
+    const outputs = DB.rows(`SELECT po.*, f.name AS file_name, ${DB.outputEffDate('po')} AS eff_date FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=? ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`, [id]);
     const prog = DB.projectProgress(id);
 
     return { p, ppl, inst, ms, kv, mtgs, entries, files, outputs, prog };
@@ -575,12 +575,12 @@
     // Sheet 7: Research Outputs (roadmap 3.3) — the funnel's exit stage. The Date column is the
     // EFFECTIVE date (explicit date, else the record-creation day) — the same value the ordering
     // uses — with a * marking the fallback so a backfilled row is distinguishable.
-    const outRows = [['Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
+    const outRows = [['Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note']];
     d.outputs.forEach((o) => {
-      outRows.push([o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
+      outRows.push([o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
     const ws7 = XLSX.utils.aoa_to_sheet(outRows);
-    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 40 }];
+    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 40 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, ws7, 'Research Outputs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -705,6 +705,11 @@
               : (o.eff_date ? `(${UI.fmtDate(o.eff_date)}, logged) ` : '') }),
             new TextRun({ text: o.reference ? `${o.reference} ` : '', italics: true }),
             new TextRun({ text: o.note ? `— ${o.note}` : '' }),
+            new TextRun({ text: o.authors ? `  Authors: ${o.authors}` : '', italics: true, break: 1 }),
+            new TextRun({ text: o.doi ? `  DOI: ${o.doi}` : '', italics: true }),
+            new TextRun({ text: o.url ? `  URL: ${o.url}` : '', italics: true }),
+            new TextRun({ text: `  Acknowledges facility: ${o.acknowledges_facility ? 'Yes' : 'No'}`, italics: true }),
+            new TextRun({ text: o.file_name ? `  File: ${o.file_name}` : '', italics: true }),
           ]
         }));
       });
@@ -998,6 +1003,19 @@
           pdf.setFontSize(9);
           y += 5;
         }
+        const obits = [];
+        if (o.authors) obits.push(`Authors: ${o.authors}`);
+        if (o.doi) obits.push(`DOI: ${o.doi}`);
+        if (o.url) obits.push(`URL: ${o.url}`);
+        obits.push(`Acknowledges facility: ${o.acknowledges_facility ? 'Yes' : 'No'}`);
+        if (o.file_name) obits.push(`File: ${o.file_name}`);
+        checkPage(6);
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdfText(pdf, obits.join('   |   '), margin + 4, y);
+        pdf.setTextColor(20, 20, 20);
+        pdf.setFontSize(9);
+        y += 5;
       });
     }
 
@@ -1211,16 +1229,17 @@
     // Project" leading columns as the Meetings/Service Entries sheets above.
     // Date column = the effective date the ordering uses (explicit date, else creation day),
     // * marking the fallback — same convention as the per-project outputs sheet.
-    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
+    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note']];
     DB.rows(`
-      SELECT po.*, p.code as project_code, p.title as project_title, ${DB.outputEffDate('po')} AS eff_date
+      SELECT po.*, p.code as project_code, p.title as project_title, f.name AS file_name, ${DB.outputEffDate('po')} AS eff_date
       FROM project_outputs po
       JOIN projects p ON p.id = po.project_id
+      LEFT JOIN files f ON f.id = po.file_id
       ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`).forEach((o) => {
-      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
+      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
     const wsOut = XLSX.utils.aoa_to_sheet(outRows);
-    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 30 }, { wch: 40 }];
+    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
 
     // Final sheet: Notes — mirrors the Reports & Utilization export's own Notes sheet (a plain,

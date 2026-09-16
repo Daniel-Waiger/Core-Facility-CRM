@@ -233,6 +233,11 @@
     reference TEXT DEFAULT '',
     date TEXT DEFAULT '',
     note TEXT DEFAULT '',
+    doi TEXT DEFAULT '',
+    url TEXT DEFAULT '',
+    authors TEXT DEFAULT '',
+    acknowledges_facility INTEGER DEFAULT 0,
+    file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
@@ -606,6 +611,17 @@
         CREATE INDEX IF NOT EXISTS ix_project_outputs_project ON project_outputs(project_id);
       `);
     } catch (_) {}
+
+    // --- #41 begin ---
+    // Additive project_outputs columns (roadmap #41): this runs after the CREATE TABLE IF NOT
+    // EXISTS above, so a DB migrating from before project_outputs existed gets the table first,
+    // then these columns; a DB that already has the table (and possibly the columns) just no-ops.
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN doi TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN url TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN authors TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN acknowledges_facility INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN file_id INTEGER REFERENCES files(id) ON DELETE SET NULL"); } catch (_) {}
+    // --- #41 end ---
   }
 
   // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
@@ -3046,6 +3062,24 @@
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (3, 'publication', 'Volumetric mapping of pancreatic islet distribution in cleared murine tissue', 'J. Endocrine Imaging 12(3):200-214', ?)`, [day(-40)]);
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (3, 'acknowledgement', 'Core facility acknowledged in State Health Initiative renewal report', 'State Health Initiative #4401 — Year 2 progress report', ?)`, [day(-10)]);
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (1, 'dataset', 'Intravital CAR-T 4D time-lapse volumes (raw + segmented)', 'NAS-Bioimaging-Vol4 dataset DOI pending', ?)`, [day(-1)]);
+
+    // --- #41 begin ---
+    // Backfill the roadmap #41 fields (doi/url/authors/acknowledges_facility/file_id) onto the
+    // two outputs above via UPDATE, not INSERT, so the funnel's output counts/dates are unchanged.
+    run(`UPDATE project_outputs SET
+        doi = '10.1000/jei.2026.12.3.200',
+        authors = 'Chen, L.; Okafor, T.; Rivera, M.',
+        acknowledges_facility = 1,
+        file_id = (SELECT id FROM files WHERE project_id=3 AND name='Pancreatic_Islets_3D_Summary.xlsx')
+      WHERE project_id=3 AND type='publication'`);
+    // 10.1000/jei.2026.12.3.200 is a fictional DOI (10.1000 is IANA's reserved test/example
+    // registrant prefix) — it does not resolve to a real record.
+    run(`UPDATE project_outputs SET
+        url = 'https://example.org/bioimaging/vol4',
+        authors = 'Park, S.; Nguyen, H.',
+        acknowledges_facility = 0
+      WHERE project_id=1 AND type='dataset'`);
+    // --- #41 end ---
 
     markDirty();
     return true;

@@ -3,6 +3,20 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Research outputs carry DOI, URL, authors, a facility-acknowledgement flag and an attached file (#41)
+- The Add/Edit Output dialog shows the fields that fit the chosen type (publication, thesis, dataset, software, talk, poster, acknowledgement) (#41)
+- Drop a PDF onto the Research Outputs card (or use Attach PDF) to store it as an attachment and start a new output with the title read from the file (#41)
+- Each output row opens a read-only detail view, and clicking its type badge opens the edit dialog (#41)
+- DOI and URL are clickable links (DOI resolves through doi.org) (#41)
+- The new fields appear in the project XLSX/DOCX/PDF exports and the facility-wide "Research Outputs" sheet (#41)
+- The demo dataset shows a DOI, authors and an acknowledged output (#41)
+
+### Changed
+- Default output types now also include thesis, software, talk and poster (#41)
+
 ## [1.11.0] — 2026-09-12
 
 An adversarial review of the whole app — every screen driven in a real browser, the money and

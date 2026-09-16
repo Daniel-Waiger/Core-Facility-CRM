@@ -254,7 +254,7 @@
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     // Research outputs (roadmap 3.3) — the funnel's exit stage. Cloned from the same
     // "load flat, query fresh, no denormalized name column" pattern as kv above.
-    const outputs = global.DB.rows(`SELECT * FROM project_outputs WHERE project_id=? ORDER BY ${global.DB.outputEffDate()} DESC, id DESC`, [id]);
+    const outputs = global.DB.rows(`SELECT po.*, f.name AS file_name, f.kind AS file_kind FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=? ORDER BY ${global.DB.outputEffDate('po')} DESC, po.id DESC`, [id]);
     const mtgs = global.DB.rows(`
       SELECT m.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
       FROM meetings m
@@ -385,25 +385,47 @@
     </div>
 
     <!-- Research Outputs Card (roadmap 3.3) — cloned from the Custom Fields card's add/edit/
-         delete pattern above; the funnel's exit stage lives here per-project. -->
-    <div class="card mb-16">
+         delete pattern above; the funnel's exit stage lives here per-project. Rows are clickable
+         (opens the read-only detail); the type badge is a nested edit-action hit target, since
+         the dispatcher's closest('[data-act]') resolves the badge before the row. The card
+         itself is a drop zone for dragging a PDF straight onto it; "Attach PDF" opens the same
+         hidden file input by click. -->
+    <div class="card mb-16 output-drop" data-drop-outputs="${p.id}">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Research Outputs</span></div>
+        <button class="btn btn-ghost btn-sm" data-act="output-pick-file" data-project-id="${p.id}">${ic('file-plus')} Attach PDF</button>
         <button class="btn btn-ghost btn-sm" data-act="output-add" data-project-id="${p.id}">${ic('plus')} Add Output</button>
+        <input type="file" accept="application/pdf,.pdf" class="visually-hidden-input" data-output-file-input="${p.id}" hidden>
       </div>
       <div class="card-body">
         ${outputs.length ? `
-        <div class="kv">
-          ${outputs.map((o) => `
-            <div class="kv-row">
-              <span class="k"><span class="badge neutral" style="text-transform:capitalize">${esc(o.type)}</span> ${esc(o.title)}</span>
-              <span class="v">${o.reference ? esc(o.reference) + ' — ' : ''}${o.date ? fmt(o.date) : fmt(o.created_at)}</span>
-              <div class="row" style="gap:4px">
-                <span class="del" role="button" tabindex="0" aria-label="Edit Output" data-act="output-edit" data-id="${o.id}" title="Edit Output">${ic('edit')}</span>
-                <span class="del" role="button" tabindex="0" aria-label="Delete Output" data-act="output-del" data-id="${o.id}" title="Delete Output">${ic('x')}</span>
-              </div>
-            </div>`).join('')}
-        </div>` : emptyState('tag', 'No research outputs yet', 'Log a publication, acknowledgement, dataset, or other output once this project produces one.')}
+        <div class="output-list">
+          ${outputs.map((o) => {
+            const doiHref = global.UI.doiUrl(o.doi);
+            const rawAuthors = o.authors || '';
+            const authors = rawAuthors.length > 80 ? esc(rawAuthors.slice(0, 80)) + '…' : esc(rawAuthors);
+            const dateStr = o.reference ? esc(o.reference) + ' — ' : '';
+            return `
+          <div class="output-row">
+            <button type="button" class="output-main" data-act="output-view" data-id="${o.id}" aria-label="View Output">
+              <span class="badge neutral output-type" role="button" tabindex="0" data-act="output-edit" data-id="${o.id}" title="Edit Output" style="text-transform:capitalize">${esc(o.type)}</span>
+              <span class="output-title">${esc(o.title)}</span>
+              ${o.acknowledges_facility ? `<span class="badge success">Acknowledged</span>` : ''}
+              ${o.file_name ? `<span class="faint small">${ic('file')} ${esc(o.file_name)}</span>` : ''}
+              <div class="faint small output-meta">${authors ? authors + ' · ' : ''}${dateStr}${o.date ? fmt(o.date) : fmt(o.created_at)}</div>
+            </button>
+            <div class="output-links">
+              ${doiHref ? `<a class="file-link" href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">DOI ${ic('external')}</a>` : ''}
+              ${global.UI.isSafeUrl(o.url) ? `<a class="file-link" href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">Link ${ic('external')}</a>` : ''}
+              ${o.file_kind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${o.file_id}" data-name="${esc(o.file_name)}">Download</button>` : ''}
+              <span class="del" role="button" tabindex="0" aria-label="Delete Output" data-act="output-del" data-id="${o.id}" title="Delete Output">${ic('x')}</span>
+            </div>
+          </div>`;
+          }).join('')}
+        </div>
+        <div class="drop-hint">${ic('file-plus')} Drop a PDF here or use Attach PDF to log it as an output — the title is read from the file when it has one.</div>
+        ` : `${emptyState('tag', 'No research outputs yet', 'Log a publication, acknowledgement, dataset, or other output once this project produces one.')}
+        <div class="drop-hint">${ic('file-plus')} Drop a PDF here or use Attach PDF to log it as an output — the title is read from the file when it has one.</div>`}
       </div>
     </div>
 

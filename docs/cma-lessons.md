@@ -204,3 +204,14 @@ A lesson that just restates an architecture rule should be deleted — point at
   `git reset --hard` there before reading anything.
 
 <!-- cma:append-here -->
+
+## Hard rules for the 2026-09 parallel runs (orchestrator, 2026-09-16)
+
+Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos\cfc-39`, `cfc-47`, `cfc-41`). A verifier's `git stash` in one checkout swapped two issues' uncommitted work and cost an hour. Therefore, for every executor and verifier:
+
+- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work.
+- **To compare against the base commit**, use read-only forms: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, or `git stash` is NOT one of them. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
+- **Stay inside your own checkout.** The repo path in your brief is the only directory you may edit. If `git status` shows changes that clearly belong to another issue (#39 tags, #47 training, #41 outputs), stop and report `blocked` with what you saw; do not "clean up".
+- **Line endings are LF** in these clones (`core.autocrlf=false`). Do not introduce CRLF. The wiring and boot-ready tests scrape `js/app.js` with LF-anchored patterns.
+- **Timezone:** inline `TZ='Asia/Jerusalem' node ...` may not reach `process.env.TZ` in this shell; the host clock is already Asia/Jerusalem, so date behaviour is exercised at UTC+ regardless. A test asserting the literal env value is a known environment artefact; say so plainly rather than chasing it.
+- **No version bumps, ever, on these branches.** `index.html ?v=`, `sw.js CACHE_VERSION/PRECACHE_URLS`, `js/consts.js APP_VERSION` stay untouched; CHANGELOG bullets go under `## [Unreleased]`.
