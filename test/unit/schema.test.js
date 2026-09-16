@@ -410,6 +410,7 @@ describe('schema: migrations are idempotent', () => {
       instruments: ['location', 'cost', 'cost_unit', 'is_retired', 'retired_at'],
       meetings: ['link', 'start_time', 'end_time', 'discount_pct', 'group_org', 'group_discount_pct',
         'subtotal', 'total_before_tax', 'total_cost', 'is_cancelled', 'cancelled_at', 'billing_retained', 'tags'],
+      project_outputs: ['doi', 'url', 'authors', 'acknowledges_facility', 'file_id'],
     };
     for (const [table, cols] of Object.entries(migratedColumns)) {
       const present = tableColumns(DB, table);
@@ -417,6 +418,32 @@ describe('schema: migrations are idempotent', () => {
         assert.ok(present.includes(col), `${table}.${col} should already exist on a fresh SCHEMA-built database`);
       }
     }
+  });
+
+  test('project_outputs.file_id is ON DELETE SET NULL — deleting the referenced file leaves the output row in place', async () => {
+    const { DB } = await freshDb();
+    const { liveProject } = seedFixture(DB);
+
+    DB.run("INSERT INTO files (project_id, name, kind, path) VALUES (?, 'Manuscript.pdf', 'upload', '/x')", [liveProject]);
+    const fileId = DB.row('SELECT last_insert_rowid() as id').id;
+    DB.run(
+      "INSERT INTO project_outputs (project_id, type, title, file_id) VALUES (?, 'publication', 'Paper', ?)",
+      [liveProject, fileId]
+    );
+    const outputId = DB.row('SELECT last_insert_rowid() as id').id;
+
+    DB.currentBytes(); // exercise the pragma reassert, same as real autosave timing
+
+    DB.run('DELETE FROM files WHERE id=?', [fileId]);
+
+    const output = DB.row('SELECT id, file_id FROM project_outputs WHERE id=?', [outputId]);
+    assert.ok(output, 'the output row itself must NOT be deleted when its file is deleted');
+    assert.equal(output.file_id, null, 'ON DELETE SET NULL should have cleared project_outputs.file_id');
+
+    const fks = DB.rows('PRAGMA foreign_key_list(project_outputs)');
+    const filesFk = fks.find((fk) => fk.table === 'files');
+    assert.ok(filesFk, 'project_outputs must carry a foreign key to files');
+    assert.equal(filesFk.on_delete, 'SET NULL', 'project_outputs -> files must be declared ON DELETE SET NULL');
   });
 
   test('running the migration path a second time (via backup/restore) changes no column list', async () => {

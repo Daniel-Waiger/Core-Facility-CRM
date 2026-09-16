@@ -248,6 +248,12 @@
         select.insertBefore(opt, otherOpt || null);
       }
       select.dataset.prev = value;
+      // Setting .selected/.value programmatically never fires a native 'change' event, but a
+      // listener bound to this select (e.g. the Research Outputs Type field's
+      // applyOutputTypeFields wiring) needs to react exactly as if the visitor had picked the
+      // new option themselves — dispatch one so "+ Add New" and a manual selection stay
+      // indistinguishable to anything listening on this select.
+      select.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
       // No parent <select> to inject into (e.g. the project page's "+ Add status" button,
       // which isn't a dropdown) — refresh the page underneath so the new term shows up
@@ -1241,14 +1247,47 @@
     // modal is open, or if the user cancels it).
     document.addEventListener('change', (e) => {
       const sel = e.target.closest('select.vocab-select');
-      if (!sel) return;
-      if (sel.value === 'Other') {
-        const prev = sel.dataset.prev || '';
-        sel.value = prev;
-        openAddVocab(sel.dataset.cat, sel.id, sel.dataset.label);
-      } else {
-        sel.dataset.prev = sel.value;
+      if (sel) {
+        if (sel.value === 'Other') {
+          const prev = sel.dataset.prev || '';
+          sel.value = prev;
+          openAddVocab(sel.dataset.cat, sel.id, sel.dataset.label);
+        } else {
+          sel.dataset.prev = sel.value;
+        }
+        return;
       }
+      // The Research Outputs card's hidden file-picker input (opened via pickOutputFile):
+      // route the chosen file through the same import path the drop zone uses, then clear the
+      // input so choosing the same file again still fires a fresh 'change' event.
+      const fileInput = e.target.closest('[data-output-file-input]');
+      if (fileInput && fileInput.files.length) {
+        importOutputFile(Number(fileInput.dataset.outputFileInput), fileInput.files[0]);
+        fileInput.value = '';
+      }
+    });
+
+    // Research Outputs drag-and-drop: a PDF dropped onto `[data-drop-outputs]` (the Research
+    // Outputs card) is logged the same way a picked file is (see importOutputFile). The
+    // dragover/dragleave pair only toggles the `is-dragover` highlight class; the browser default
+    // must be prevented on dragover or the drop event never fires.
+    document.addEventListener('dragover', (e) => {
+      const card = e.target.closest('[data-drop-outputs]');
+      if (!card) return;
+      e.preventDefault();
+      card.classList.add('is-dragover');
+    });
+    document.addEventListener('dragleave', (e) => {
+      const card = e.target.closest('[data-drop-outputs]');
+      if (!card) return;
+      card.classList.remove('is-dragover');
+    });
+    document.addEventListener('drop', (e) => {
+      const card = e.target.closest('[data-drop-outputs]');
+      if (!card) return;
+      e.preventDefault();
+      card.classList.remove('is-dragover');
+      importOutputFile(Number(card.dataset.dropOutputs), e.dataTransfer.files[0]);
     });
   }
 
@@ -1474,9 +1513,17 @@
       // Research Outputs CRUD (roadmap 3.3)
       case 'output-add': return addOutput(el.dataset.projectId || ctx.project);
       case 'output-save': return outputSave();
-      case 'output-edit': return editOutput(el.dataset.id);
+      case 'output-view': return viewOutput(el.dataset.id);
+      case 'output-edit': {
+        // Opened from the read-only view dialog: dismiss that dialog first so it cannot sit
+        // behind the edit form showing stale values after a save.
+        const dim = el.closest('.modal-dim');
+        if (dim) UI.closeDim(dim);
+        return editOutput(el.dataset.id);
+      }
       case 'output-edit-save': return outputEditSave(el.dataset.id);
       case 'output-del': return outputDel(el.dataset.id);
+      case 'output-pick-file': return pickOutputFile(el.dataset.projectId || ctx.project);
 
       // Files CRUD
       case 'add-file': return addFile();
@@ -4389,24 +4436,85 @@
     refresh();
   }
 
-  /* ---------------- Research Outputs (roadmap 3.3) ----------------
+  /* ---------------- Research Outputs (roadmap 3.3, extended by roadmap #41) ----------------
      Cloned from the Custom Key-Value Fields pattern just above — same add/edit/delete shape,
      just with a Type vocab field (vocabField, category OUTPUT_TYPE) in place of the free-text
-     key. Feeds Reports.computeFunnelRows' exit stage. */
-  function addOutput(projectId) {
+     key. Feeds Reports.computeFunnelRows' exit stage.
+
+     outputFieldsHtml renders every field the Add and Edit modals share (id prefix 'out'/'oute'),
+     including the ones OUTPUT_TYPE_FIELDS (js/consts.js) may hide for the current type — each
+     such field's wrapper carries `data-out-field="<name>"` naming exactly the string that map
+     uses, so applyOutputTypeFields can show/hide by simple membership test. Hiding is display
+     only: a hidden field keeps whatever value it holds and is still read (and saved) by
+     outputSave/outputEditSave, so flipping Type and back never drops data entered under a
+     different type. */
+  function outputFieldsHtml(prefix, item = {}) {
+    const file = item.file_id ? DB.row('SELECT * FROM files WHERE id=?', [item.file_id]) : null;
+    const fileName = (file && file.name) || item.file_name || '';
+    const fileKind = file ? file.kind : 'upload';
+    const fileLine = item.file_id ? `
+        <div class="field">
+          <label>Attachment</label>
+          <div class="row" style="gap:8px;align-items:center">
+            <span class="small faint">Attached File: ${esc(fileName)}</span>
+            ${fileKind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${item.file_id}" data-name="${esc(fileName)}">Download</button>` : ''}
+          </div>
+        </div>` : '';
+    return `
+        ${vocabField({ category: 'OUTPUT_TYPE', id: `${prefix}-type`, selected: item.type || 'publication', label: 'Type', required: true })}
+        <div class="field"><label>Title *</label><input class="input" id="${prefix}-title" value="${esc(item.title || '')}" placeholder="e.g. Volumetric mapping of pancreatic islet distribution..." /></div>
+        <div class="field" data-out-field="reference"><label id="${prefix}-reference-label">Reference</label><input class="input" id="${prefix}-reference" value="${esc(item.reference || '')}" placeholder="e.g. journal citation, DOI, grant report title" /></div>
+        <div class="field" data-out-field="doi"><label>DOI</label><input class="input" id="${prefix}-doi" value="${esc(item.doi || '')}" placeholder="e.g. 10.1000/xyz123" /></div>
+        <div class="field" data-out-field="url"><label>URL</label><input class="input" id="${prefix}-url" value="${esc(item.url || '')}" placeholder="https://..." /></div>
+        <div class="field" data-out-field="authors">
+          <label>Authors</label>
+          <textarea class="input" id="${prefix}-authors" rows="2">${esc(item.authors || '')}</textarea>
+          <div class="hint">One author per line, or separate with semicolons.</div>
+        </div>
+        <div class="field" data-out-field="acknowledges_facility">
+          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="${prefix}-ack" ${item.acknowledges_facility ? 'checked' : ''} /> Acknowledges the Facility</label>
+        </div>
+        <div class="field"><label>Date</label><input type="date" class="input" id="${prefix}-date" value="${esc(item.date || '')}" /></div>
+        <div class="field"><label>Note</label><textarea class="input" id="${prefix}-note" rows="2">${esc(item.note || '')}</textarea></div>
+        <input type="hidden" id="${prefix}-file-id" value="${item.file_id || ''}" />
+        ${fileLine}`;
+  }
+
+  /* Shows/hides each `[data-out-field]` wrapper in `modalEl` per the current Type selection's
+     OUTPUT_TYPE_FIELDS entry (falling back to .default for a facility-added type not in the
+     map, so a new vocab term shows every field rather than silently hiding one), and relabels
+     the Reference field's <label> to that type's referenceLabel. Title/Date/Note have no
+     `data-out-field` wrapper and are therefore always visible, per the map's own contract. */
+  function applyOutputTypeFields(modalEl, prefix) {
+    if (!modalEl) return;
+    const typeSel = modalEl.querySelector(`#${prefix}-type`);
+    if (!typeSel) return;
+    const def = window.OUTPUT_TYPE_FIELDS[typeSel.value] || window.OUTPUT_TYPE_FIELDS.default;
+    modalEl.querySelectorAll('[data-out-field]').forEach((wrap) => {
+      wrap.hidden = !def.fields.includes(wrap.dataset.outField);
+    });
+    const refLabel = modalEl.querySelector(`#${prefix}-reference-label`);
+    if (refLabel) refLabel.textContent = def.referenceLabel;
+  }
+
+  // prefill: { title, fileId, fileName, type } — used when an output is logged straight from an
+  // attached file (e.g. a PDF whose /Title was sniffed) so the form opens already carrying that
+  // file's link and a sensible starting title/type instead of an empty form.
+  function addOutput(projectId, prefill = {}) {
+    const item = { type: prefill.type || 'publication', title: prefill.title || '', file_id: prefill.fileId || null, file_name: prefill.fileName || '' };
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('tag')} Add Research Output</span></div>
       <div class="body"><div class="stack">
-        ${vocabField({ category: 'OUTPUT_TYPE', id: 'out-type', selected: 'publication', label: 'Type', required: true })}
-        <div class="field"><label>Title *</label><input class="input" id="out-title" placeholder="e.g. Volumetric mapping of pancreatic islet distribution..." /></div>
-        <div class="field"><label>Reference</label><input class="input" id="out-ref" placeholder="e.g. journal citation, DOI, grant report title" /></div>
-        <div class="field"><label>Date</label><input type="date" class="input" id="out-date" /></div>
-        <div class="field"><label>Note</label><textarea class="input" id="out-note" rows="2"></textarea></div>
+        ${outputFieldsHtml('out', item)}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="output-save" data-project-id="${projectId}">Add Output</button>
-      </div>`);
+      </div>`, (m) => {
+      applyOutputTypeFields(m, 'out');
+      const typeSel = m.querySelector('#out-type');
+      if (typeSel) typeSel.addEventListener('change', () => applyOutputTypeFields(m, 'out'));
+    });
   }
 
   function outputSave() {
@@ -4414,13 +4522,22 @@
     const projectId = Number(m.querySelector('[data-act="output-save"]').dataset.projectId) || ctx.project;
     const type = m.querySelector('#out-type').value.trim();
     const title = m.querySelector('#out-title').value.trim();
-    const reference = m.querySelector('#out-ref').value.trim();
+    const reference = m.querySelector('#out-reference').value.trim();
+    const doiRaw = m.querySelector('#out-doi').value.trim();
+    const url = m.querySelector('#out-url').value.trim();
+    const authors = m.querySelector('#out-authors').value.trim();
+    const ack = m.querySelector('#out-ack').checked ? 1 : 0;
     const date = m.querySelector('#out-date').value;
     const note = m.querySelector('#out-note').value.trim();
+    const fileIdRaw = m.querySelector('#out-file-id').value.trim();
     if (!type || !title) { UI.toast('Type and title are required', 'error'); return; }
+    const doi = doiRaw ? UI.normalizeDoi(doiRaw) : '';
+    if (doiRaw && !doi) { UI.toast('Enter a valid DOI, e.g. 10.1000/xyz123', 'error'); return; }
+    if (url && !UI.isSafeUrl(url)) { UI.toast('Enter a full web address starting with http:// or https://', 'error'); return; }
+    const fileId = fileIdRaw ? Number(fileIdRaw) : null;
 
-    DB.run('INSERT INTO project_outputs (project_id, type, title, reference, date, note) VALUES (?,?,?,?,?,?)',
-      [projectId, type, title, reference, date, note]);
+    DB.run('INSERT INTO project_outputs (project_id, type, title, reference, date, note, doi, url, authors, acknowledges_facility, file_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [projectId, type, title, reference, date, note, doi, url, authors, ack, fileId]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Output added');
     refresh();
@@ -4433,29 +4550,40 @@
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Research Output</span></div>
       <div class="body"><div class="stack">
-        ${vocabField({ category: 'OUTPUT_TYPE', id: 'oute-type', selected: item.type, label: 'Type', required: true })}
-        <div class="field"><label>Title *</label><input class="input" id="oute-title" value="${esc(item.title)}" /></div>
-        <div class="field"><label>Reference</label><input class="input" id="oute-ref" value="${esc(item.reference)}" /></div>
-        <div class="field"><label>Date</label><input type="date" class="input" id="oute-date" value="${esc(item.date)}" /></div>
-        <div class="field"><label>Note</label><textarea class="input" id="oute-note" rows="2">${esc(item.note)}</textarea></div>
+        ${outputFieldsHtml('oute', item)}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="output-edit-save" data-id="${item.id}">Save Changes</button>
-      </div>`);
+      </div>`, (m) => {
+      applyOutputTypeFields(m, 'oute');
+      const typeSel = m.querySelector('#oute-type');
+      if (typeSel) typeSel.addEventListener('change', () => applyOutputTypeFields(m, 'oute'));
+    });
   }
 
   function outputEditSave(id) {
     const m = UI.topModal();
     const type = m.querySelector('#oute-type').value.trim();
     const title = m.querySelector('#oute-title').value.trim();
-    const reference = m.querySelector('#oute-ref').value.trim();
+    const reference = m.querySelector('#oute-reference').value.trim();
+    const doiRaw = m.querySelector('#oute-doi').value.trim();
+    const url = m.querySelector('#oute-url').value.trim();
+    const authors = m.querySelector('#oute-authors').value.trim();
+    const ack = m.querySelector('#oute-ack').checked ? 1 : 0;
     const date = m.querySelector('#oute-date').value;
     const note = m.querySelector('#oute-note').value.trim();
+    // The form has no control to detach a file, so the hidden input (pre-populated with the
+    // existing file_id by outputFieldsHtml) always round-trips it unchanged here.
+    const fileIdRaw = m.querySelector('#oute-file-id').value.trim();
     if (!type || !title) { UI.toast('Type and title are required', 'error'); return; }
+    const doi = doiRaw ? UI.normalizeDoi(doiRaw) : '';
+    if (doiRaw && !doi) { UI.toast('Enter a valid DOI, e.g. 10.1000/xyz123', 'error'); return; }
+    if (url && !UI.isSafeUrl(url)) { UI.toast('Enter a full web address starting with http:// or https://', 'error'); return; }
+    const fileId = fileIdRaw ? Number(fileIdRaw) : null;
 
-    DB.run('UPDATE project_outputs SET type=?, title=?, reference=?, date=?, note=? WHERE id=?',
-      [type, title, reference, date, note, id]);
+    DB.run('UPDATE project_outputs SET type=?, title=?, reference=?, date=?, note=?, doi=?, url=?, authors=?, acknowledges_facility=?, file_id=? WHERE id=?',
+      [type, title, reference, date, note, doi, url, authors, ack, fileId, id]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Output updated');
     refresh();
@@ -4470,6 +4598,79 @@
     DB.run('DELETE FROM project_outputs WHERE id=?', [id]);
     UI.toast('Output deleted');
     refresh();
+  }
+
+  /* Read-only detail view: opened from the Research Outputs list (data-act="output-view"),
+     e.g. when a facility manager wants the full record — DOI link, author list, acknowledgement
+     flag, attached file — without dropping into the edit form. "Edit" hands off to editOutput. */
+  function viewOutput(id) {
+    const item = DB.row('SELECT * FROM project_outputs WHERE id=?', [id]);
+    if (!item) return;
+    const def = window.OUTPUT_TYPE_FIELDS[item.type] || window.OUTPUT_TYPE_FIELDS.default;
+    const doiHref = item.doi ? UI.doiUrl(item.doi) : '';
+    const authors = UI.splitAuthors(item.authors || '');
+    const file = item.file_id ? DB.row('SELECT * FROM files WHERE id=?', [item.file_id]) : null;
+    const dateLine = item.date ? UI.fmtDate(item.date) : (UI.fmtDate(item.created_at) + ' (logged)');
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('eye')} Research Output</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><span class="badge neutral" style="text-transform:capitalize">${esc(item.type)}</span></div>
+        <div class="field"><label>Title</label><div>${esc(item.title)}</div></div>
+        ${item.reference ? `<div class="field"><label>${esc(def.referenceLabel)}</label><div>${esc(item.reference)}</div></div>` : ''}
+        ${item.doi ? `<div class="field"><label>DOI</label><div><a href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">${esc(item.doi)}</a></div></div>` : ''}
+        ${item.url && UI.isSafeUrl(item.url) ? `<div class="field"><label>URL</label><div><a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.url)}</a></div></div>` : ''}
+        <div class="field"><label>Authors</label>${authors.length ? `<ul>${authors.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div>—</div>'}</div>
+        <div class="field"><label>Date</label><div>${dateLine}</div></div>
+        ${item.note ? `<div class="field"><label>Note</label><div>${esc(item.note)}</div></div>` : ''}
+        <div class="field"><div>Facility acknowledged: ${item.acknowledges_facility ? 'Yes' : 'No'}</div></div>
+        ${file ? `<div class="field"><label>Attached File</label><div class="row" style="gap:8px;align-items:center"><span>${esc(file.name)}</span>${file.kind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${file.id}" data-name="${esc(file.name)}">Download</button>` : ''}</div></div>` : ''}
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Close</button>
+        <button class="btn btn-primary" data-act="output-edit" data-id="${item.id}">Edit</button>
+      </div>`);
+  }
+
+  /* Drop-a-PDF / pick-a-PDF path onto the Research Outputs card: stores the file through the
+     exact same files/uploads path fSave uses for a plain attachment (INSERT INTO files, then
+     DB.saveUpload keyed on the same `${pid}_${Date.now()}_${name}` storageKey), so a PDF logged
+     this way is just an ordinary upload as far as download-file/deleteFile are concerned. The
+     only extra step is sniffing a starting title out of the PDF's own metadata (falling back to
+     the filename) and handing the file straight to addOutput's prefill so the Add Output form
+     opens already carrying the link — if the visitor cancels that dialog, the PDF simply stays
+     attached with no output record, per the note on this task. */
+  async function importOutputFile(projectId, file) {
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    if (!isPdf) { UI.toast('Drop a PDF file to log it as a research output.', 'error'); return; }
+    try {
+      const pid = Number(projectId) || ctx.project;
+      const name = file.name;
+      const bytes = await file.arrayBuffer();
+      const fallbackTitle = name.replace(/\.pdf$/i, '');
+      const title = UI.pdfTitleFromBytes(bytes) || fallbackTitle;
+      const storageKey = `${pid}_${Date.now()}_${name}`;
+
+      DB.run('INSERT INTO files (project_id, name, kind, path) VALUES (?,?,?,?)', [pid, name, 'upload', storageKey]);
+      const inserted = DB.row('SELECT last_insert_rowid() as id');
+      const fileId = inserted && inserted.id;
+      await DB.saveUpload(storageKey, file);
+
+      addOutput(pid, { title, fileId, fileName: name, type: 'publication' });
+      UI.toast('File attached — fill in the output details');
+      refresh();
+    } catch (err) {
+      handleActError(err);
+    }
+  }
+
+  // Delegated from the drop zone's own "or click to choose a file" control — the drop zone lives
+  // on whatever screen is currently rendered (Project Detail's Research Outputs card), so the
+  // hidden file input is found by data attribute rather than held onto across renders.
+  function pickOutputFile(projectId) {
+    const input = document.querySelector('[data-output-file-input]');
+    if (input) input.click();
   }
 
   /* ---------------- Files CRUD ---------------- */

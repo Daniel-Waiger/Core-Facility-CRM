@@ -17,10 +17,18 @@ This project uses [Semantic Versioning](https://semver.org/).
 - A "Trained Users" column on the Instrument Stewardship scorecard, in the custom report and in the Reports spreadsheet (#47)
 - An Activity Certificate spreadsheet export per person, with their details, training, bookings in a date range and projects (#47)
 - Demo data now includes training records (#47)
+- Research outputs carry DOI, URL, authors, a facility-acknowledgement flag and an attached file (#41)
+- The Add/Edit Output dialog shows the fields that fit the chosen type (publication, thesis, dataset, software, talk, poster, acknowledgement) (#41)
+- Drop a PDF onto the Research Outputs card (or use Attach PDF) to store it as an attachment and start a new output with the title read from the file (#41)
+- Each output row opens a read-only detail view, and clicking its type badge opens the edit dialog (#41)
+- DOI and URL are clickable links (DOI resolves through doi.org) (#41)
+- The new fields appear in the project XLSX/DOCX/PDF exports and the facility-wide "Research Outputs" sheet (#41)
+- The demo dataset shows a DOI, authors and an acknowledged output (#41)
 
 ### Changed
 - **Booking categories can now be renamed or removed from Settings → Category Billing.** Renaming a category updates every booking that uses it; removing one is only offered once nothing uses it anymore, and consult, training and assisted session are protected from either change. (#39)
 - The stewardship footnote no longer says the trained-user pool is unavailable (#47)
+- Default output types now also include thesis, software, talk and poster (#41)
 
 ## [1.11.0] — 2026-09-12
 
