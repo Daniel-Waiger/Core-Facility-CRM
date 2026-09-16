@@ -62,10 +62,20 @@ A lesson that just restates an architecture rule should be deleted — point at
   allow-list it with a stated reason; never soften the check, and never report a
   suite as passing with a real violation quietly allow-listed. _(2026-09-10)_
 
-- **Serve the app rather than opening `file://` when the change touches
-  storage.** IndexedDB and the service worker behave differently under
-  `file://` on some browsers, so a bug can be invisible or fabricated
-  depending on how the verifier opened the page.
+- **Record the failing-test baseline once, at run start, and put it in every
+  brief.** In the #39 run (2026-09-16) three unit tests failed on unmodified
+  HEAD; all ten verifiers re-triaged them independently, two reached different
+  counts (T5's executor reported 6 failures, its verifier reproduced 256/256
+  green), and several reached for `git stash` to prove the point — the exact
+  command that had already corrupted the run. A one-line "known baseline: these
+  N tests fail on HEAD, here is why" in the brief removes both the duplicated
+  work and the motive to touch working-tree state.
+
+- **Never word a criterion as "the full suite exits 0" when the baseline is
+  red.** T1, T3, T4 and T9 all passed in substance while literally failing that
+  wording, forcing each verifier to write a paragraph arguing around it. Word it
+  "no failures beyond the recorded baseline" instead; otherwise an honest
+  verifier must either fail good work or learn to discount its own criteria.
 
 ## The trap that makes work look like it did nothing
 
@@ -123,15 +133,12 @@ A lesson that just restates an architecture rule should be deleted — point at
   of two, and a "complete" gap list that omitted an undisclosed scope
   narrowing. A fix does not inherit the review's correctness. Re-verify.
 
-- **Code comments are not evidence, and this repo has proved it.**
-  `js/reports.js` justified a narrowing with "per the roadmap spec"; the roadmap
-  said no such thing. `js/exports.js` promised an "(Archived)" suffix in two
-  Notes sheets that no code has ever written. Both shipped and survived review.
-  Only executing code settles a claim.
-
-- **The app's own output strings are documentation too.** The "(Archived)"
-  defect was not in the manual — it was in a spreadsheet the app hands to a
-  user. When auditing docs, audit the strings the app itself emits.
+- **Code comments are not evidence, and the app's own output strings are
+  documentation.** `js/reports.js` justified a narrowing with "per the roadmap
+  spec"; the roadmap said no such thing. `js/exports.js` promised an "(Archived)"
+  suffix in two Notes sheets that no code has ever written — a defect not in the
+  manual but in a spreadsheet handed to a user. Both shipped and survived review.
+  Only executing code settles a claim; audit the strings the app emits too.
 
 ## Run hygiene
 
@@ -182,12 +189,12 @@ A lesson that just restates an architecture rule should be deleted — point at
   instrument-less bookings) were independently reproducible in the shipped demo seed with no setup
   — before writing a fixture, try the claim against the demo dataset first.
 
-- **A correction pass over the previous review's own claims found two more wrong ones on inspection**
-  — one about which vocab category was actually unescaped (PERSON_TYPES was fine; `people.type` and
-  the STATUS vocab were not), one about a UI overlap being clipped rather than visually stacked.
-  This is the same "corrections need their own adversarial pass" lesson already recorded above,
-  seen again in a different section of the same run — restating it here would be a duplicate; this
-  entry exists only to note it recurred, not to re-explain it.
+- **`test/unit/wiring.test.js` and `test/unit/boot-ready-signal.test.js` scrape `js/app.js` with
+  regexes and are the repo's most brittle tests.** They break for reasons that have nothing to do
+  with the change under test: CRLF line endings (2026-09-16, failed on every task until the clones
+  were rebuilt with `core.autocrlf=false`) and any reshaping of `boot()` / `handleAct()`. If they
+  are the only red tests, suspect the harness before the diff — and a task that restructures either
+  function must update them in the same task.
 
 ## Rendering claims (2026-09-12)
 
@@ -203,15 +210,52 @@ A lesson that just restates an architecture rule should be deleted — point at
   (one concluded a rename had never happened). Tell every executor the exact head SHA and make it
   `git reset --hard` there before reading anything.
 
+## Plan quality: what produced a 10-for-10 run (2026-09-16, issue #39)
+
+- **Put the literal expected output of a runnable one-liner in the task's
+  verification criteria.** Ten tasks, ten first-try passes, zero retries. The
+  criteria that carried the most weight were of the form "run this exact
+  `node -e ...` and it prints `["SIM","TIRF","Fiji"] "Fiji, Napari" []`".
+  Executor and verifier then check the same observable fact instead of two
+  readings of a diff, and disagreement becomes impossible to paper over.
+  Grep-shaped criteria work the same way ("exactly two `#39 begin`/`#39 end`
+  pairs; the first at a line after `ix_project_outputs_project`").
+
+- **A planner must not ban vocabulary its own scope statement uses.** T10's
+  brief forbade the word "column" in changelog prose while the brief itself (and
+  the precedent 1.11.0 entry) described "two new columns"; the verifier had to
+  log a non-gating problem for obeying the scope. Style bans belong in the
+  lessons/`CLAUDE.md` layer, and the planner should self-check its prose rules
+  against its own wording before shipping the brief.
+
+- **Cross-format claims still need per-format wording.** The same T10 changelog
+  said "Tags column" for the DOCX/PDF reports, which actually render a "Tags:"
+  line per booking; only the spreadsheet paths are columns. Each export format
+  is its own code path (`CLAUDE.md`), so a release note describing "the export"
+  in one phrase is usually wrong for at least one of the three.
+
+## Recovering an interrupted parallel run (2026-09-16)
+
+- **Recover by patch + fresh clone, and discard the interrupted task's partial
+  output.** A sibling run's `git stash` in a worktree of the same clone swapped
+  this run's uncommitted work into the other issue's tree after T4. What worked:
+  save the surviving work as a patch, rebuild independent clones with
+  `core.autocrlf=false`, re-apply, **delete the half-written file from the task
+  that was mid-flight** (`reports.js` from T5), and re-run from that task with a
+  fresh FORCE nonce. T5–T10 then passed with zero retries. Resuming *on top of*
+  a half-written file is the failure mode this avoids: the next executor treats
+  partial code as the base and its greps report a state nobody authored.
+  (Shared stash stack across worktrees of one clone: seen 2×.)
+
 <!-- cma:append-here -->
 
 ## Hard rules for the 2026-09 parallel runs (orchestrator, 2026-09-16)
 
 Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos\cfc-39`, `cfc-47`, `cfc-41`). A verifier's `git stash` in one checkout swapped two issues' uncommitted work and cost an hour. Therefore, for every executor and verifier:
 
-- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work.
-- **To compare against the base commit**, use read-only forms: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, or `git stash` is NOT one of them. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
+- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work. Seen 2× (2026-09-16): the swap that cost the hour, and then the #39 verifiers themselves reaching for `git stash`/`pop` to prove a failure pre-existing — the urge is strong and specific to verification, so the brief must name the safe substitute, not just the ban. Tasks briefed after these rules landed complied.
+- **To compare against the base commit**, use read-only forms only: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
 - **Stay inside your own checkout.** The repo path in your brief is the only directory you may edit. If `git status` shows changes that clearly belong to another issue (#39 tags, #47 training, #41 outputs), stop and report `blocked` with what you saw; do not "clean up".
-- **Line endings are LF** in these clones (`core.autocrlf=false`). Do not introduce CRLF. The wiring and boot-ready tests scrape `js/app.js` with LF-anchored patterns.
-- **Timezone:** inline `TZ='Asia/Jerusalem' node ...` may not reach `process.env.TZ` in this shell; the host clock is already Asia/Jerusalem, so date behaviour is exercised at UTC+ regardless. A test asserting the literal env value is a known environment artefact; say so plainly rather than chasing it.
+- **Line endings are LF** in these clones (`core.autocrlf=false`). Do not introduce CRLF. The wiring and boot-ready tests scrape `js/app.js` with LF-anchored patterns — in the #39 run a CRLF checkout made both fail on *every* task until the clones were rebuilt, and each verifier spent effort re-proving they were pre-existing. Check `git config core.autocrlf` when creating a checkout, before the first task runs.
+- **Timezone:** inline `TZ='Asia/Jerusalem' node ...` may not reach `process.env.TZ` in this shell; the host clock is already Asia/Jerusalem, so date behaviour is exercised at UTC+ regardless. A test asserting the literal env value is a known environment artefact; say so plainly rather than chasing it. Confirmed 2026-09-16: on the same tasks one agent saw 6 failures and another 256/256 green purely from how the env var was passed — so quote the *command you ran* alongside any failure count, or the two reports are not comparable.
 - **No version bumps, ever, on these branches.** `index.html ?v=`, `sw.js CACHE_VERSION/PRECACHE_URLS`, `js/consts.js APP_VERSION` stay untouched; CHANGELOG bullets go under `## [Unreleased]`.
