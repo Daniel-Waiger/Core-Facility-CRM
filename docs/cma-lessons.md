@@ -76,27 +76,42 @@ A lesson that just restates an architecture rule should be deleted — point at
   allow-list it with a stated reason; never soften the check, and never report a
   suite as passing with a real violation quietly allow-listed. _(2026-09-10)_
 
-- **A task's verification command must only assert on that task's own files.**
-  In #41, five of eleven tasks "failed" a clause of their own chained
-  verification one-liner for reasons outside the task: a
-  `git diff --stat -- js/consts.js | grep -q '^0$'` clause tripped by a sibling
-  task's legitimate edit, a `'Research Outputs'`-count clause that was already
-  wrong at HEAD, a "modality" substring false positive on untouched lines. Each
-  cost an executor and a verifier a round of explaining. Planners: scope every
-  grep/diff clause to the files the task edits, and pin counts to a number you
-  verified at HEAD, not one you expect. Verifiers: a failing clause about a file
-  the task never touched is a plan defect, not a task failure — say which.
-  _(2026-09-16)_
+- **A test that throws before its first assertion did not "fail" — it never
+  ran, and the gap it was guarding is still open.** _(2026-09-16, #47)_ The
+  clones were checked out with `core.autocrlf=true`, so `wiring.test.js`'s
+  LF-anchored `scrapeDispatcherCases` threw and the dispatch-completeness check
+  never executed during T1–T3. Everyone read it as "2 pre-existing failures",
+  and the hole was real: T7's verifier later found **4 unwired `data-act`
+  values**. Practice: when a suite failure is dismissed as environmental, state
+  *which* assertions consequently never ran, and treat those criteria as
+  unverified rather than as background noise. (Fix at source:
+  `core.autocrlf=false` clones, LF everywhere.)
 
-- **Reproduce a suspected pre-existing failure on an independent clone, never by
-  mutating the working tree.** #41's verifiers correctly separated 3–4 baseline
-  unit failures (TZ env artefacts, the `wiring.test.js` CRLF scraper) from the
-  work under review — but several reached for `git stash` to do it, which in a
-  shared clone swaps sibling issues' uncommitted work (see hard rules below).
-  Use `git show HEAD:<path> > <scratchpad>/<name>` or a scratchpad clone. A
-  verdict of "pre-existing" is only credible with the reproduction shown.
-  _(2026-09-16)_
+- **An executor's diagnosis of a failing test is a claim, not evidence —
+  verify it or it misleads the next task.** _(2026-09-16, #47)_ T2's executor
+  reported `wiring.test.js` as "waiting on T4's dispatcher cases"; the verifier
+  proved it was the CRLF scraper throwing. Had the verifier accepted the
+  diagnosis, T4 would have inherited a false explanation for a failure it was
+  blamed for. Reproduce the failure's *cause* (on a clean copy extracted with
+  `git show HEAD:<path>`), don't relay the executor's story.
 
+- **Triage the baseline once, in the brief — not once per verifier.**
+  _(2026-09-16, #47)_ The same 2–4 pre-existing failures (CRLF scrapers, the
+  `process.env.TZ` literal assertion) were independently re-reproduced by five
+  verifiers in one run, each burning a clean-HEAD comparison to reach the same
+  conclusion. Record the exact baseline pass/fail list with the run's brief and
+  write criteria as "no *new* failures vs. that list"; a literal "0 failures"
+  criterion in a repo with known-red tests forces this waste and invites a
+  verifier to either fail good work or quietly soften the bar.
+
+- **A verifier may rule a criterion unsatisfiable-as-written and judge the
+  intent — that is a correct verdict, not a soft pass.** _(2026-09-16, #47 T5)_
+  The planner's harness seeded a booking dated 2026-03-05 and then asserted
+  stewardship rows for 2026-01-01..2026-01-15, so the literal script could never
+  print "T5 OK" even though the implementation was right. The verifier passed
+  the task and reported the fixture bug. Planners: date fixtures inside the
+  ranges their own assertions use; verifiers: say plainly "criterion is faulty,
+  here is what I verified instead" rather than failing correct work.
 
 ## The trap that makes work look like it did nothing
 
@@ -149,21 +164,23 @@ A lesson that just restates an architecture rule should be deleted — point at
   picked, when no picker joins `grant_users` at all. Plausible prose is exactly
   what a false claim looks like.
 
-- **A correction needs its own adversarial pass (seen 3×: 2026-09-09, 2×
-  2026-09-12).** In the first round, **two of six corrections were themselves
+- **A correction needs its own adversarial pass** _(seen 2×: 2026-09-09,
+  2026-09-12)_. In the first round, **two of six corrections were themselves
   wrong** — a claim true of one report asserted of two, and a "complete" gap
-  list that omitted an undisclosed scope narrowing. A later pass over a review's
-  own claims found two more wrong (which vocab category was unescaped; whether a
-  UI overlap clipped or stacked). A fix does not inherit the review's
-  correctness. Re-verify.
+  list that omitted an undisclosed scope narrowing. The 2026-09-12 review pass
+  repeated it exactly: two of its own claims were wrong on inspection (which
+  vocab category was unescaped; clipped vs stacked UI). A fix does not inherit
+  the review's correctness. Re-verify.
 
 - **Code comments are not evidence, and this repo has proved it.**
   `js/reports.js` justified a narrowing with "per the roadmap spec"; the roadmap
   said no such thing. `js/exports.js` promised an "(Archived)" suffix in two
   Notes sheets that no code has ever written. Both shipped and survived review.
-  Only executing code settles a claim. Note where that second defect lived: not
-  in the manual but in a spreadsheet the app hands to a user — **the app's own
-  output strings are documentation and need auditing too.**
+  Only executing code settles a claim. _(seen 3×; 2026-09-16: a new seed block's
+  own explanatory comment named the wrong demo person and instrument for four of
+  the six rows it described — the rows were right, the prose was not. When a
+  task writes data *and* a comment describing it, check the comment against the
+  rows; verifiers should call this out as a nit rather than let it ship.)_
 
 ## Run hygiene
 
@@ -174,18 +191,14 @@ A lesson that just restates an architecture rule should be deleted — point at
   **commit each unit of work as it lands** rather than batching at the end —
   what is on disk survives, what is in a dead agent's context does not.
 
-- **Exit Plan Mode before launching an execute workflow — subagents inherit it
-  and refuse to edit.** In #41, attempt 1 of *every* execute run was wasted:
-  each executor reported the task done-by-plan or blocked because the parent
-  session had never formally left Plan Mode. Nothing in the subagent's brief
-  hints at this, and the failure looks like executor stubbornness rather than a
-  mode flag. Check the mode is exited before dispatch. _(2026-09-16)_
-
-- **Recovery after such a kill is possible but must be audited, not assumed.**
-  Agents that die after writing leave complete, parseable files. Check each
-  survivor's output against its original brief, and treat anything an agent
-  never reported on as unverified — in this run, the two chapters whose authors
-  died contained six defects between them.
+- **Recovery after a kill or a clobber must be audited, not assumed.** Agents
+  that die after writing leave complete, parseable files; check each survivor's
+  output against its original brief and treat anything never reported on as
+  unverified (two chapters whose authors died held six defects between them).
+  Same shape after the 2026-09-16 stash clobber: the orchestrator saved patches,
+  rebuilt clean clones, re-applied, and resumed with a FORCE nonce so only the
+  lost task and its successors re-ran — re-running the already-verified tasks
+  would have re-opened settled ground. _(seen 2×: 2026-09-10, 2026-09-16)_
 
 - **The manual stores each chapter's number twice** — in `docs/manual/manual.js`
   and again as a hardcoded `<p class="ch-kicker">Chapter N</p>` in every page.
@@ -242,8 +255,18 @@ A lesson that just restates an architecture rule should be deleted — point at
 Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos\cfc-39`, `cfc-47`, `cfc-41`). They were first set up as **git worktrees of one clone, which share a single stash stack** — a verifier's `git stash` in one worktree swapped #39's and #47's uncommitted work and cost an hour; #41 escaped only by luck, its verifiers used `git stash` too. Fixed by rebuilding as independent clones. **Parallel issues get independent clones, never worktrees.** For every executor and verifier:
 
 - **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work.
-- **To compare against the base commit**, use read-only forms: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, or `git stash` is NOT one of them. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
+- **To compare against the base commit**, use read-only forms only: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, `git log`. `git stash` is *not* one of them. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
 - **Stay inside your own checkout.** The repo path in your brief is the only directory you may edit. If `git status` shows changes that clearly belong to another issue (#39 tags, #47 training, #41 outputs), stop and report `blocked` with what you saw; do not "clean up".
 - **Line endings are LF** in these clones (`core.autocrlf=false`). Do not introduce CRLF. `test/unit/wiring.test.js` and `boot-ready-signal.test.js` scrape `js/app.js` with LF-anchored patterns: the first #41 clone was made on Windows with `core.autocrlf=true`, so those two tests failed on *every* task until the clones were recreated — burning verifier time on each. Before a run, confirm `git config core.autocrlf` is `false` in the checkout; when a scraper test fails, check line endings before the diff.
 - **Timezone:** inline `TZ='Asia/Jerusalem' node ...` may not reach `process.env.TZ` in this shell; the host clock is already Asia/Jerusalem, so date behaviour is exercised at UTC+ regardless. A test asserting the literal env value is a known environment artefact; say so plainly rather than chasing it.
+- **Reporting `blocked` on a polluted tree is the best possible outcome, not a
+  failure.** _(2026-09-16, #47 T7)_ The shared stash stack swapped #39 and #47
+  work; the verifier noticed `js/db.js` held a `#39` fence instead of `#47` and
+  refused to pass, and the retry executor made zero edits and reported
+  `blocked` with `git status` / reflog evidence. That pair of refusals is why
+  nothing was silently overwritten and the run was recoverable. An executor that
+  had "helpfully" cleaned the tree would have destroyed the sibling issue's
+  work. Detection rule: check that *your* task's marker (fence, symbol, column)
+  is what the file actually contains before trusting the tree.
+
 - **No version bumps, ever, on these branches.** `index.html ?v=`, `sw.js CACHE_VERSION/PRECACHE_URLS`, `js/consts.js APP_VERSION` stay untouched; CHANGELOG bullets go under `## [Unreleased]`.
