@@ -1516,7 +1516,7 @@
   /* Activity certificate (#47): a single person's training + booking + project history as one
      workbook — the thing a lab head or auditor asks for as proof of what someone is cleared for
      and what they actually did. `asOf` (the last day of the exported range, or today when the
-     range has no end) is the one reference date passed to DB.trainingActiveOn for every training
+     range has no end) is the one reference date passed to DB.trainingStatusOn for every training
      row, matching the same "as of a date, not a live trend" rule the Stewardship sheet's
      Trained Users column above now documents — never toISOString().slice, per CLAUDE.md. */
   function exportActivityCertificate(personId, from, to) {
@@ -1560,7 +1560,10 @@
         t.trained_on || '—',
         t.trainer_name ? UI.retiredName(t.trainer_name, t.trainer_retired) : '—',
         t.expires_on || 'No expiry',
-        DB.trainingActiveOn(t, asOf) ? 'Valid' : 'Expired',
+        (() => {
+          const status = DB.trainingStatusOn(t, asOf);
+          return status === 'valid' ? 'Valid' : status === 'pending' ? 'Not Yet Valid' : 'Expired';
+        })(),
         t.note || ''
       ]);
     });
@@ -1572,7 +1575,7 @@
     // never the denormalized meetings.attendees display string — CLAUDE.md), within the range.
     const fromVal = from || '', toVal = to || '';
     const bookings = DB.rows(
-      `SELECT m.date, m.start_time, m.end_time, m.title, m.category, m.is_cancelled, m.billing_retained,
+      `SELECT m.date, m.start_time, m.end_time, m.title, m.category, m.tags, m.is_cancelled, m.billing_retained,
               pr.title AS project_title,
               (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ')
                  FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id
@@ -1584,18 +1587,19 @@
        ORDER BY m.date, m.start_time`,
       [p.id, fromVal, fromVal, toVal, toVal]
     );
-    const bookingRows = [['Date', 'Start', 'End', 'Title', 'Project', 'Instruments', 'Category', 'Status']];
+    const bookingRows = [['Date', 'Start', 'End', 'Title', 'Project', 'Instruments', 'Category', 'Tags', 'Status']];
     bookings.forEach((b) => {
       bookingRows.push([
         b.date, b.start_time, b.end_time, b.title,
         b.project_title || 'Facility-wide',
         b.instruments || '—',
         b.category || '—',
+        b.tags || '—',
         b.is_cancelled ? (b.billing_retained ? 'Cancelled (charge retained)' : 'Cancelled') : 'Held'
       ]);
     });
     const wsBookings = XLSX.utils.aoa_to_sheet(bookingRows);
-    wsBookings['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 22 }];
+    wsBookings['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 22 }];
     XLSX.utils.book_append_sheet(wb, wsBookings, 'Bookings');
 
     // Sheet 4: Projects — same PI-or-team query as Views.personDetail, so this sheet can never

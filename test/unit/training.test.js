@@ -196,6 +196,16 @@ describe('#47 DB.trainingActiveOn: the date-boundary rule', () => {
     assert.equal(DB.trainingActiveOn({ trained_on: '2026-01-01', expires_on: '2026-06-01' }, '2026-06-02'), false, 'expired the day after expires_on');
     assert.equal(DB.trainingActiveOn({ trained_on: '2026-01-01', expires_on: '' }, '2099-01-01'), true, 'a blank expires_on never expires');
     assert.equal(DB.trainingActiveOn({ trained_on: '', expires_on: '2026-06-01' }, '2020-01-01'), true, 'a blank trained_on carries no start restriction');
+    assert.equal(DB.trainingActiveOn({ trained_on: null, expires_on: '2026-06-01' }, '2020-01-01'), true, 'a NULL trained_on carries no start restriction, same as a blank one');
+  });
+});
+
+describe('#47 DB.trainingStatusOn: valid/expired/pending, built on trainingActiveOn', () => {
+  test('a future trained_on reads "pending", not "expired"; a past expires_on still reads "expired"; an active record reads "valid"', async () => {
+    const { DB } = await freshDb();
+    assert.equal(DB.trainingStatusOn({ trained_on: '2026-01-01', expires_on: '2026-06-01' }, '2026-03-01'), 'valid');
+    assert.equal(DB.trainingStatusOn({ trained_on: '2026-01-01', expires_on: '2026-06-01' }, '2026-06-02'), 'expired', 'past expires_on is expired, not pending');
+    assert.equal(DB.trainingStatusOn({ trained_on: '2099-01-01', expires_on: '' }, '2026-01-01'), 'pending', 'trained_on in the future, not yet reached, must not read as "expired"');
   });
 });
 
@@ -258,7 +268,7 @@ describe('#47 Exports.exportActivityCertificate', () => {
     const { DB, Exports, XLSX } = app;
     const { alice, sam, scopeA, liveProject } = seedFixture(DB);
 
-    DB.run("INSERT INTO meetings (project_id, title, date, start_time, end_time, is_cancelled) VALUES (?, 'In Range Cancelled', '2026-01-10','09:00','10:00', 1)", [liveProject]);
+    DB.run("INSERT INTO meetings (project_id, title, date, start_time, end_time, is_cancelled, tags) VALUES (?, 'In Range Cancelled', '2026-01-10','09:00','10:00', 1, 'urgent, follow-up')", [liveProject]);
     const m1 = lastId(DB);
     DB.run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [m1, alice]);
 
@@ -288,8 +298,10 @@ describe('#47 Exports.exportActivityCertificate', () => {
     assert.ok(titles.includes('Facility Sync'), 'a facility-wide in-range booking must appear');
     assert.ok(!titles.includes('Out Of Range'), 'a booking outside the exported range must not appear');
 
+    assert.ok(bookingRows[0].includes('Tags'), 'the Bookings sheet must carry a Tags column, like every other booking-listing export');
     const cancelledRow = bookingRows.find((r) => r[3] === 'In Range Cancelled');
-    assert.equal(cancelledRow[7], 'Cancelled', 'a cancelled, non-retained booking reads "Cancelled"');
+    assert.equal(cancelledRow[bookingRows[0].indexOf('Tags')], 'urgent, follow-up', 'a booking\'s tags must populate the Tags column');
+    assert.equal(cancelledRow[8], 'Cancelled', 'a cancelled, non-retained booking reads "Cancelled"');
     const facilityRow = bookingRows.find((r) => r[3] === 'Facility Sync');
     assert.equal(facilityRow[4], 'Facility-wide', 'a project-less booking reads "Facility-wide"');
 
@@ -344,6 +356,21 @@ describe('#47 Views', () => {
     const app = await freshViewsApp();
     seedFixture(app.DB);
     assert.match(app.Views.instruments(), /Trained Users/);
+  });
+
+  test('the Instruments screen Trained Users count includes a NULL trained_on row, matching DB.trainedUserCountsAsOf', async () => {
+    const app = await freshViewsApp();
+    const { DB, UI } = app;
+    const { alice, scopeA } = seedFixture(DB);
+    // trained_on left NULL (no start restriction) rather than '' — the inline SQL this screen
+    // used to run only matched the empty-string case, silently excluding NULL rows.
+    DB.run("INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on) VALUES (?,?,'User',NULL)", [alice, scopeA]);
+
+    const expected = DB.trainedUserCountsAsOf(UI.today()).find((r) => r.instrument_id === scopeA);
+    assert.equal(expected.trained_users, 1, 'sanity check: the shared rule itself must count the NULL row');
+
+    const html = app.Views.instruments();
+    assert.match(html, /<span class="badge neutral">1<\/span>/, 'the Instruments screen must render the same trained-user count as DB.trainedUserCountsAsOf');
   });
 
   test('the People screen rows link to the person profile via data-goto="person"', async () => {
