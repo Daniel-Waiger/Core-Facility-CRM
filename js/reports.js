@@ -188,6 +188,13 @@
       FROM instrument_staff ist
       JOIN people pe ON pe.id = ist.person_id`));
   }
+  // Roadmap 3.2/#47. Per-instrument headcount of currently-active trainees, evaluated as of a
+  // single reference date (see DB.trainedUserCountsAsOf) rather than over the (from,to) range —
+  // this is a snapshot, not a historical fact, so it is memoized on `asOf` rather than on the
+  // range like every other loader in this file.
+  function loadTrainedUserCounts(facts, asOf) {
+    return memo(facts, 'trainedUsers:' + asOf, () => new Map(DB.trainedUserCountsAsOf(asOf).map((r) => [r.instrument_id, r.trained_users])));
+  }
   /* Roadmap 3.2. DELIBERATELY UNBOUNDED — the one loader in this file that does not take
      (from,to). To know whether a person's booking on this instrument in the selected range was
      their FIRST EVER (not just their first in-range one), the query must see the instrument's
@@ -565,14 +572,19 @@
      deliberately NOT rolled up into a per-supervisor total (that would silently double-count any
      shared instrument into a fabricated "score" per person, which this app does not do).
 
-     OMITTED, on purpose, with a labeled footnote rather than a fake column: trained-user pool
-     trend and downtime share both need Tier 4 data (training records, downtime logs) this app
-     doesn't have yet.
+     "Trained Users" (#47) is a headcount as of the range end, not a trend over the range — see
+     loadTrainedUserCounts/DB.trainedUserCountsAsOf. OMITTED, on purpose, with a labeled footnote
+     rather than a fake column: downtime share, which needs downtime-log data this app doesn't
+     have yet.
      ================================================================================ */
   function computeStewardshipRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
     facts = useFacts(facts, from, to);
+    // An unbounded range end means "today" — Trained Users is a snapshot as of a single date,
+    // so an open-ended range needs a concrete reference date to evaluate it against.
+    const asOf = to || UI.today();
     return memo(facts, 'stewardshipRows', () => {
+      const trainedByInstrument = loadTrainedUserCounts(facts, asOf);
       // Reuse — passing `facts` along means these hit the memoized result from an EARLIER call in
       // the same render/export (render() and exportReportsXlsx both compute instrument/consult
       // rows on their own before calling this) rather than re-running either's SQL or aggregation
@@ -616,6 +628,7 @@
           id: r.id, name: r.name, retired: r.retired,
           bookings: r.bookings, hours: r.hours, revenue: r.revenue,
           distinctUsers: (distinctUsersByInstrument.get(r.id) || new Set()).size,
+          trainedUsers: trainedByInstrument.get(r.id) || 0,
           newUsers: newUsersByInstrument.get(r.id) || 0,
           projectsServed: (projectsByInstrument.get(r.id) || new Set()).size,
           facilityWideSessions: facilityWideByInstrument.get(r.id) || 0,
@@ -1406,7 +1419,7 @@
           const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
           g.rows.forEach((r) => rows.push({
             supervisor: supLabel, name: r.name, retired: r.retired, bookings: r.bookings, hours: r.hours,
-            revenue: r.revenue, distinctUsers: r.distinctUsers, newUsers: r.newUsers,
+            revenue: r.revenue, distinctUsers: r.distinctUsers, trainedUsers: r.trainedUsers, newUsers: r.newUsers,
             projectsServed: r.projectsServed, facilityWideSessions: r.facilityWideSessions, consultCount: r.consultCount
           }));
         });
@@ -1419,6 +1432,7 @@
         ccol('hours', 'Hours', 'hours', (r) => r.hours),
         ccol('revenue', 'Line Charges', 'money', (r) => r.revenue),
         ccol('distinctUsers', 'Distinct Users', 'number', (r) => r.distinctUsers),
+        ccol('trainedUsers', 'Trained Users', 'number', (r) => r.trainedUsers),
         ccol('newUsers', 'New Users', 'number', (r) => r.newUsers),
         ccol('projectsServed', 'Projects Served', 'number', (r) => r.projectsServed),
         ccol('facilityWideSessions', 'Facility-Wide Sessions', 'number', (r) => r.facilityWideSessions),
@@ -1707,7 +1721,7 @@
           <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">${g.supervisor ? 'Supervisor: ' + nameCell(g.supervisor.name, g.supervisor.retired) : 'Unassigned (no supervisor on file)'}</div>
           <div class="tbl-wrap">
             <table class="tbl">
-              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Line Charges</th><th>Distinct Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
+              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Line Charges</th><th>Distinct Users</th><th>Trained Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
               <tbody>
                 ${g.rows.map((r) => `
                   <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1716,6 +1730,7 @@
                     <td class="mono small">${fmtHours(r.hours)}</td>
                     <td class="mono small">${fmtMoney(r.revenue)}</td>
                     <td class="mono small">${r.distinctUsers}</td>
+                    <td class="mono small">${r.trainedUsers}</td>
                     <td class="mono small">${r.newUsers}</td>
                     <td class="mono small">${r.projectsServed}</td>
                     <td class="mono small">${r.facilityWideSessions}</td>
@@ -1725,7 +1740,7 @@
             </table>
           </div>
         </div>`).join('')}
-      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Line Charges follows the retained-charge rule used everywhere else. Omitted on purpose (need Tier 4 data this app doesn't have yet): trained-user pool trend and downtime share.</div>
+      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Line Charges follows the retained-charge rule used everywhere else. "Trained Users" counts people holding a training record on that instrument that is valid on the last day of the selected range (no expiry, or an expiry on or after that day; "today" when the range has no end) — a headcount as of that date, not a trend, and independent of whether they booked in the range. Omitted on purpose (needs downtime records this app doesn't have yet): downtime share.</div>
     </div>
 
     <div class="card mb-16">

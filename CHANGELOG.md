@@ -3,6 +3,20 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- A person profile page, opened from the People list, showing their details, projects, recent bookings (with cancelled ones marked) and instrument training (#47)
+- Training records per person and instrument, each with a level (User / Super User), a date, a trainer and an optional expiry, added, edited and removed from the profile (#47)
+- Mobile and Campus fields on the person dialog (#47)
+- A "Trained Users" count on the Instruments list (#47)
+- A "Trained Users" column on the Instrument Stewardship scorecard, in the custom report and in the Reports spreadsheet (#47)
+- An Activity Certificate spreadsheet export per person, with their details, training, bookings in a date range and projects (#47)
+- Demo data now includes training records (#47)
+
+### Changed
+- The stewardship footnote no longer says the trained-user pool is unavailable (#47)
+
 ## [1.11.0] — 2026-09-12
 
 An adversarial review of the whole app — every screen driven in a real browser, the money and

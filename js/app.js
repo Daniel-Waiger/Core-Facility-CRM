@@ -3,7 +3,7 @@
   'use strict';
   const Views = global.Views, UI = global.UI, DB = global.DB, Exports = global.Exports, Reports = global.Reports;
   const C = global.CONST, esc = UI.esc, ic = UI.icon;
-  const ctx = { route: 'dashboard', project: null };
+  const ctx = { route: 'dashboard', project: null, person: null };
 
   let _personSavedCallback = null;
   const autoBackupFolderStatus = { supported: false, name: null, granted: false };
@@ -66,6 +66,7 @@
     dashboard: 'Dashboard',
     projects: 'Projects Registry',
     project: 'Project Details',
+    person: 'Person Profile',
     people: 'People, Labs &amp; Researchers',
     instruments: 'Core Instruments',
     calendar: 'Schedule &amp; Milestones',
@@ -304,6 +305,7 @@
 
   function hashFor(name, id) {
     if (name === 'project' && id) return '#/project/' + Number(id);
+    if (name === 'person' && id) return '#/person/' + Number(id);
     return HASH_ROUTES.includes(name) ? '#/' + name : '#/dashboard';
   }
 
@@ -315,6 +317,10 @@
     if (parts[0] === 'project') {
       const id = Number(parts[1]);
       return id ? { name: 'project', id } : null;
+    }
+    if (parts[0] === 'person') {
+      const id = Number(parts[1]);
+      return id ? { name: 'person', id } : null;
     }
     return HASH_ROUTES.includes(parts[0]) ? { name: parts[0], id: null } : null;
   }
@@ -332,6 +338,7 @@
   function applyRoute(name, id) {
     ctx.route = name;
     ctx.project = id ? Number(id) : null;
+    ctx.person = name === 'person' ? Number(id) : null;
     document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('active', n.dataset.nav === name));
     document.getElementById('page-title').innerHTML = TITLES[name] || 'Dashboard';
     renderView();
@@ -367,6 +374,10 @@
       location.replace('#/projects'); // stale/deleted project id — fall back, don't crash
       return;
     }
+    if (parsed.name === 'person' && !DB.row('SELECT id FROM people WHERE id=?', [parsed.id])) {
+      location.replace('#/people'); // stale/deleted person id — fall back, don't crash
+      return;
+    }
     applyRoute(parsed.name, parsed.id);
   }
 
@@ -375,7 +386,8 @@
   function initRouting() {
     window.addEventListener('hashchange', onHashChange);
     const parsed = parseHash(location.hash);
-    if (parsed && (parsed.name !== 'project' || DB.row('SELECT id FROM projects WHERE id=?', [parsed.id]))) {
+    if (parsed && (parsed.name !== 'project' || DB.row('SELECT id FROM projects WHERE id=?', [parsed.id]))
+               && (parsed.name !== 'person' || DB.row('SELECT id FROM people WHERE id=?', [parsed.id]))) {
       applyRoute(parsed.name, parsed.id);
     } else {
       route('dashboard');
@@ -397,6 +409,7 @@
 
     v.innerHTML =
       name === 'project' ? Views.projectDetail(id) :
+      name === 'person' ? Views.personDetail(ctx.person) :
       name === 'projects' ? Views.projects() :
       name === 'dashboard' ? Views.dashboard() :
       name === 'people' ? Views.people() :
@@ -1387,6 +1400,14 @@
       case 'p-edit-save': return pEditSave(el.dataset.id);
       case 'retire-person': return retirePerson(el.dataset.id);
       case 'restore-person': return restorePerson(el.dataset.id);
+      case 'training-add': return openTrainingModal(null, el.dataset.personId);
+      case 'training-edit': return openTrainingModal(el.dataset.id);
+      case 'training-save': return trainingSave(el.dataset.id, el.dataset.personId);
+      case 'training-del': return removeTraining(el.dataset.id);
+      case 'export-activity-certificate': {
+        const f = document.getElementById('cert-from'), t = document.getElementById('cert-to');
+        return Exports.exportActivityCertificate(el.dataset.id, f ? f.value : '', t ? t.value : '');
+      }
 
       // Project Collaborators & Instruments link
       case 'add-project-person': return addProjectPerson();
@@ -2058,6 +2079,10 @@
           ${listPickerField({ id: 'p-dept', label: 'Department', values: deptNames(), modalTitle: 'Department', category: 'DEPT' })}
           <div class="field"><label>Email Address</label><input type="email" class="input" id="p-email" placeholder="jane.doe@university.edu" /></div>
         </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Mobile</label><input type="tel" class="input" id="p-mobile" placeholder="Optional" /></div>
+          <div class="field"><label>Campus</label><input class="input" id="p-campus" placeholder="e.g. Main campus" /></div>
+        </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
         <div class="field">
           <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="p-is-staff" /> Facility Staff (billable by the hour on bookings)</label>
@@ -2081,12 +2106,14 @@
     const org = m.querySelector('#p-org').value.trim();
     const dept = m.querySelector('#p-dept').value.trim();
     const email = m.querySelector('#p-email').value.trim();
+    const mobile = m.querySelector('#p-mobile').value.trim();
+    const campus = m.querySelector('#p-campus').value.trim();
     const note = m.querySelector('#p-note').value.trim();
     const isStaff = m.querySelector('#p-is-staff').checked ? 1 : 0;
     const rate = Number(m.querySelector('#p-rate').value) || 0;
     if (rejectNegative(rate, 'Rate')) return;
 
-    DB.run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', [name, type, org, dept, email, note, isStaff, rate]);
+    DB.run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate, mobile, campus) VALUES (?,?,?,?,?,?,?,?,?,?)', [name, type, org, dept, email, note, isStaff, rate, mobile, campus]);
     const newPerson = DB.row('SELECT last_insert_rowid() as id');
     const newPersonId = newPerson ? newPerson.id : null;
 
@@ -2118,6 +2145,10 @@
           ${listPickerField({ id: 'pe-dept', label: 'Department', values: deptNames(), selected: p.department || '', modalTitle: 'Department', category: 'DEPT' })}
           <div class="field"><label>Email Address</label><input type="email" class="input" id="pe-email" value="${esc(p.email || '')}" /></div>
         </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Mobile</label><input type="tel" class="input" id="pe-mobile" value="${esc(p.mobile || '')}" placeholder="Optional" /></div>
+          <div class="field"><label>Campus</label><input class="input" id="pe-campus" value="${esc(p.campus || '')}" placeholder="e.g. Main campus" /></div>
+        </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
         <div class="field">
           <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="pe-is-staff" ${p.is_staff ? 'checked' : ''} /> Facility Staff (billable by the hour on bookings)</label>
@@ -2139,6 +2170,8 @@
     const org = m.querySelector('#pe-org').value.trim();
     const dept = m.querySelector('#pe-dept').value.trim();
     const email = m.querySelector('#pe-email').value.trim();
+    const mobile = m.querySelector('#pe-mobile').value.trim();
+    const campus = m.querySelector('#pe-campus').value.trim();
     const note = m.querySelector('#pe-note').value.trim();
     const isStaff = m.querySelector('#pe-is-staff').checked ? 1 : 0;
     const rateVal = m.querySelector('#pe-rate').value;
@@ -2153,7 +2186,7 @@
     // is on are one save — otherwise a throw partway through the refresh loop would leave some
     // meetings.attendees strings updated to the new name and others still showing the old one.
     DB.transaction(() => {
-      DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
+      DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=?, mobile=?, campus=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, mobile, campus, id]);
       // people.name may have just changed — meetings.attendees is a denormalized copy of it, so
       // every meeting this person is on must be recomputed from meeting_people or it goes stale.
       // Gated on an actual rename (not just called unconditionally): a person with a long booking
@@ -2183,7 +2216,7 @@
     if (!refs.total) {
       const ok = await UI.confirmModal(
         'Delete Person',
-        `"${esc(p.name)}" isn't referenced by any project, milestone or booking, so there's no history to keep. Delete permanently?`,
+        `"${esc(p.name)}" isn't referenced by any project, milestone, booking or training record, so there's no history to keep. Delete permanently?`,
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
@@ -2202,6 +2235,11 @@
         // branch is only reached when there genuinely are none) can't hold one, but the explicit
         // clear is the same belt-and-suspenders convention every delete path here follows.
         DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
+        DB.run('DELETE FROM person_instrument_training WHERE person_id=?', [id]);
+        // trainer_id is a SET NULL soft link not counted by countPersonRefs (same belt-and-
+        // suspenders convention as the soft links above) — a training record where this person
+        // was the trainer, not the trainee, must not be deleted, only have the reference cleared.
+        DB.run('UPDATE person_instrument_training SET trainer_id=NULL WHERE trainer_id=?', [id]);
         DB.run('DELETE FROM people WHERE id=?', [id]);
       });
       UI.toast('Person deleted');
@@ -2217,6 +2255,7 @@
     if (refs.bookings) where.push('an attendee on ' + plural(refs.bookings, 'booking'));
     if (refs.staffed) where.push('billable staff on ' + plural(refs.staffed, 'booking'));
     if (refs.entries) where.push('performing staff on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
+    if (refs.training) where.push('trained on ' + plural(refs.training, 'instrument'));
 
     const ok = await UI.confirmModal(
       'Retire Person',
@@ -2234,6 +2273,113 @@
     if (!p) return;
     DB.setRetired('people', id, false);
     UI.toast(`${p.name} restored`);
+    refresh();
+  }
+
+  /* ---------------- Instrument Training CRUD (#47 Person Profile) ----------------
+     Same "selectable = not retired OR already selected here" rule (CLAUDE.md) applies to both
+     the Instrument and Trainer pickers below — a retired instrument/trainer already on the
+     record being edited stays in the list (so its badge still renders) but drops out for a new
+     pick. Trainer excludes the trainee themselves (id<>pid) — a person can't train themselves. */
+  function openTrainingModal(trainingId, personId) {
+    const cur = trainingId ? DB.row('SELECT * FROM person_instrument_training WHERE id=?', [trainingId]) : null;
+    const pid = cur ? cur.person_id : Number(personId);
+    const instruments = DB.rows('SELECT id, name, is_retired FROM instruments WHERE is_retired=0 OR id=? ORDER BY name', [cur ? cur.instrument_id : -1]);
+    const trainers = DB.rows('SELECT id, name, is_retired, is_staff FROM people WHERE (is_retired=0 OR id=?) AND id<>? ORDER BY is_staff DESC, name', [cur ? cur.trainer_id : -1, pid]);
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('cpu')} ${cur ? 'Edit Training Record' : 'Add Training Record'}</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Instrument *</label>
+          <select class="input" id="tr-instrument">
+            <option value="">-- Select Instrument --</option>
+            ${instruments.map((i) => `<option value="${i.id}" ${cur && cur.instrument_id === i.id ? 'selected' : ''}>${esc(UI.retiredName(i.name, i.is_retired))}</option>`).join('')}
+          </select>
+        </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Level</label>
+            <select class="input" id="tr-level">
+              ${C.TRAINING_LEVELS.map((lv) => `<option value="${lv}" ${(cur ? cur.level : 'User') === lv ? 'selected' : ''}>${lv}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Trained On *</label><input type="date" class="input" id="tr-trained-on" value="${cur ? esc(cur.trained_on) : UI.today()}" /></div>
+        </div>
+        <div class="field"><label>Trainer</label>
+          <select class="input" id="tr-trainer">
+            <option value="">-- None --</option>
+            ${trainers.map((t) => `<option value="${t.id}" ${cur && cur.trainer_id === t.id ? 'selected' : ''}>${esc(UI.retiredName(t.name, t.is_retired))}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Expires On</label>
+          <input type="date" class="input" id="tr-expires-on" value="${cur && cur.expires_on ? esc(cur.expires_on) : ''}" />
+          <div class="faint small mt-8">Leave blank if the training does not expire.</div>
+        </div>
+        <div class="field"><label>Note</label><input class="input" id="tr-note" value="${cur ? esc(cur.note || '') : ''}" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="training-save" data-id="${cur ? cur.id : ''}" data-person-id="${pid}">Save Training</button>
+      </div>`);
+  }
+
+  function trainingSave(id, personId) {
+    const m = UI.topModal();
+    const instrumentSel = m.querySelector('#tr-instrument');
+    const instrumentId = Number(instrumentSel.value) || 0;
+    if (!instrumentId) {
+      UI.toast('Choose an instrument', 'error');
+      instrumentSel.classList.add('is-invalid');
+      return;
+    }
+    const level = m.querySelector('#tr-level').value;
+    const trainedOnEl = m.querySelector('#tr-trained-on');
+    const trainedOn = trainedOnEl.value;
+    if (!trainedOn) {
+      UI.toast('Training date required', 'error');
+      trainedOnEl.classList.add('is-invalid');
+      return;
+    }
+    const expiresOn = m.querySelector('#tr-expires-on').value;
+    if (expiresOn && expiresOn < trainedOn) {
+      UI.toast('Expiry cannot be before the training date', 'error');
+      return;
+    }
+    const trainerId = Number(m.querySelector('#tr-trainer').value) || null;
+    const note = m.querySelector('#tr-note').value.trim();
+    const pid = Number(personId);
+
+    if (id) {
+      DB.run(
+        'UPDATE person_instrument_training SET instrument_id=?, level=?, trained_on=?, trainer_id=?, expires_on=?, note=? WHERE id=?',
+        [instrumentId, level, trainedOn, trainerId, expiresOn, note, id]
+      );
+    } else {
+      DB.run(
+        'INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)',
+        [pid, instrumentId, level, trainedOn, trainerId, expiresOn, note]
+      );
+    }
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Training record saved');
+    refresh();
+  }
+
+  async function removeTraining(id) {
+    const rec = DB.row(
+      `SELECT t.id, t.level, i.name AS instrument_name FROM person_instrument_training t
+       JOIN instruments i ON i.id = t.instrument_id WHERE t.id=?`,
+      [id]
+    );
+    if (!rec) return;
+    const ok = await UI.confirmModal(
+      'Remove Training Record',
+      `Remove the ${esc(rec.level)} training record on "${esc(rec.instrument_name)}"? This cannot be undone.`,
+      { danger: true, confirmText: 'Remove' }
+    );
+    if (!ok) return;
+    DB.run('DELETE FROM person_instrument_training WHERE id=?', [id]);
+    UI.toast('Training record removed');
     refresh();
   }
 
@@ -2419,7 +2565,7 @@
     if (!refs.total) {
       const ok = await UI.confirmModal(
         'Delete Instrument',
-        `"${esc(i.name)}" isn't assigned to any project, milestone or booking, so there's no history to keep. Delete permanently?`,
+        `"${esc(i.name)}" isn't assigned to any project, milestone, booking or training record, so there's no history to keep. Delete permanently?`,
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
@@ -2437,6 +2583,7 @@
         // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
         // but the explicit clear is the same belt-and-suspenders convention as every other field here.
         DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
+        DB.run('DELETE FROM person_instrument_training WHERE instrument_id=?', [id]);
         DB.run('DELETE FROM instruments WHERE id=?', [id]);
       });
       UI.toast('Instrument deleted');
@@ -2450,6 +2597,7 @@
     if (refs.milestones) where.push('used by ' + plural(refs.milestones, 'milestone'));
     if (refs.bookings) where.push('booked on ' + plural(refs.bookings, 'booking'));
     if (refs.entries) where.push('attributed on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
+    if (refs.training) where.push('on ' + plural(refs.training, 'training record'));
 
     const ok = await UI.confirmModal(
       'Retire Instrument',
