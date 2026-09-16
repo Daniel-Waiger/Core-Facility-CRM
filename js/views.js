@@ -669,7 +669,7 @@
           <colgroup>
             <col style="width:20%"><col style="width:10%"><col style="width:14%"><col style="width:11%">
             <col style="width:10%"><col style="width:9%"><col style="width:56px"><col style="width:120px">
-            <col style="width:78px"><col style="width:78px">
+            <col style="width:78px"><col style="width:110px">
           </colgroup>
           <thead>
             <tr>
@@ -687,7 +687,7 @@
           </thead>
           <tbody>
             ${rows.map((r) => `
-              <tr class="${r.is_retired ? 'row-retired' : ''}">
+              <tr class="row-link ${r.is_retired ? 'row-retired' : ''}" data-goto="person" data-id="${r.id}">
                 <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
                 <td><span class="badge neutral">${esc(r.type)}</span></td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
@@ -698,6 +698,7 @@
                 <td>${r.is_staff ? `<span class="badge success" data-tooltip="Facility Staff — billable by the hour on bookings">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="mono small">${r.is_staff ? esc(global.UI.fmtMoney(r.rate || 0)) : '—'}</td>
                 <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-ghost btn-xs" data-goto="person" data-id="${r.id}" title="Open Profile">${ic('chevron')}</button>
                   <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
                   ${r.is_retired
                     ? `<button class="btn btn-ghost btn-xs" data-act="restore-person" data-id="${r.id}" title="Restore — make available for new work again">${ic('rocket')}</button>`
@@ -707,6 +708,172 @@
           </tbody>
         </table>
       </div>`}
+    </div>`;
+  }
+
+  /* ---------------- Person detail (#47) ----------------
+     Mirrors projectDetail's shape (header card, then a run of per-topic cards) but for one
+     person: their own details, the projects they're on (as PI or team member), the bookings
+     they've attended (newest first, cancelled ones kept and marked — same rule as Project
+     Costs), their instrument training records, and an Activity Certificate export. */
+  function personDetail(id) {
+    const p = global.DB.row('SELECT * FROM people WHERE id=?', [id]);
+    if (!p) return emptyState('users', 'Person not found', 'This person may have been deleted.');
+
+    const dv = (v) => (v ? esc(v) : '—');
+
+    const projectRows = global.DB.rows(`
+      SELECT p.id, p.code, p.title, p.status, p.is_archived,
+             CASE WHEN p.pi_id=? THEN 'PI' ELSE COALESCE(pp.role,'') END AS role
+      FROM projects p
+      LEFT JOIN project_people pp ON pp.project_id=p.id AND pp.person_id=?
+      WHERE p.pi_id=? OR pp.person_id IS NOT NULL
+      ORDER BY p.is_archived, p.title`, [p.id, p.id, p.id]);
+
+    const activity = global.DB.rows(`
+      SELECT m.id, m.title, m.date, m.start_time, m.end_time, m.category, m.is_cancelled, m.billing_retained, m.project_id, pr.title AS project_title,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id=mi.instrument_id WHERE mi.meeting_id=m.id) AS instruments
+      FROM meetings m
+      JOIN meeting_people mp ON mp.meeting_id=m.id
+      LEFT JOIN projects pr ON pr.id=m.project_id
+      WHERE mp.person_id=?
+      ORDER BY m.date DESC, m.start_time DESC, m.id DESC
+      LIMIT 25`, [p.id]);
+
+    const training = global.DB.listPersonTraining(p.id);
+
+    return `
+    <div class="card mb-16">
+      <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div class="grow">
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <span class="project-title">${esc(global.UI.retiredName(p.name, p.is_retired))}</span>
+            <span class="badge neutral">${esc(p.type)}</span>
+            ${p.is_staff ? `<span class="badge success" data-tooltip="Billable by the hour on bookings">Facility Staff</span>` : ''}
+          </div>
+        </div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" data-goto="people">Back to People</button>
+          <button class="btn btn-primary btn-sm" data-act="edit-person" data-id="${p.id}">Edit Person</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Personal Details Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('user')} Personal Details</span></div></div>
+      <div class="card-body">
+        <div class="metadata-grid">
+          <div class="meta-item"><span class="meta-label">Full Name:</span> <span class="meta-val">${dv(p.name)}</span></div>
+          <div class="meta-item"><span class="meta-label">Email:</span> <span class="meta-val">${dv(p.email)}</span></div>
+          <div class="meta-item"><span class="meta-label">Mobile:</span> <span class="meta-val">${dv(p.mobile)}</span></div>
+          <div class="meta-item"><span class="meta-label">Lab / Group / Company:</span> <span class="meta-val">${dv(p.organization)}</span></div>
+          <div class="meta-item"><span class="meta-label">Department:</span> <span class="meta-val">${dv(p.department)}</span></div>
+          <div class="meta-item"><span class="meta-label">Campus:</span> <span class="meta-val">${dv(p.campus)}</span></div>
+          ${p.is_staff ? `<div class="meta-item"><span class="meta-label">Rate/hr:</span> <span class="meta-val">${esc(global.UI.fmtMoney(p.rate || 0))}</span></div>` : ''}
+          <div class="meta-item" style="grid-column: span 2"><span class="meta-label">Notes:</span> <span class="meta-val">${dv(p.note)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Projects Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('folder')} Projects</span></div></div>
+      <div class="card-body">
+        ${projectRows.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Code</th><th>Title</th><th>Role</th><th>Status</th></tr></thead>
+            <tbody>
+              ${projectRows.map((r) => `
+                <tr class="row-link ${r.is_archived ? 'row-retired' : ''}" data-goto="project" data-id="${r.id}">
+                  <td class="mono small">${esc(r.code)}</td>
+                  <td class="font-medium small">${esc(r.title)}</td>
+                  <td class="small">${dv(r.role)}</td>
+                  <td>${statusBadge(r.status)}${r.is_archived ? ' <span class="badge neutral">Archived</span>' : ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('folder', 'No projects yet', 'Projects this person is part of will appear here.')}
+      </div>
+    </div>
+
+    <!-- Recent Activity Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('calendar')} Recent Activity</span></div></div>
+      <div class="card-body">
+        ${activity.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Date</th><th>Time</th><th>Title</th><th>Project</th><th>Instruments</th><th>Status</th></tr></thead>
+            <tbody>
+              ${activity.map((m) => `
+                <tr class="${m.is_cancelled ? 'row-retired' : ''}">
+                  <td class="mono small">${fmt(m.date)}</td>
+                  <td class="mono small faint">${m.start_time ? esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : '—'}</td>
+                  <td class="small font-medium">${esc(m.title)}</td>
+                  <td class="small">${m.project_title ? esc(m.project_title) : 'Facility-wide'}</td>
+                  <td class="faint small">${m.instruments ? esc(m.instruments) : '—'}</td>
+                  <td>${m.is_cancelled ? '<span class="badge danger">Cancelled</span>' : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="faint small mt-8">Showing the 25 most recent bookings this person attended. Cancelled bookings are kept and marked.</div>`
+        : emptyState('calendar', 'No bookings yet', 'Bookings this person attends will show up here.')}
+      </div>
+    </div>
+
+    <!-- Instrument Training Card -->
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('cpu')} Instrument Training</span></div>
+        <button class="btn btn-primary btn-sm" data-act="training-add" data-person-id="${p.id}">${ic('plus')} Add Training</button>
+      </div>
+      <div class="card-body">
+        ${training.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Instrument</th><th>Level</th><th>Trained On</th><th>Trainer</th><th>Expires On</th><th>Note</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${training.map((rec) => {
+                const expired = !global.DB.trainingActiveOn(rec, global.UI.today());
+                return `
+                <tr>
+                  <td class="small font-medium">${esc(global.UI.retiredName(rec.instrument_name, rec.instrument_retired))}</td>
+                  <td><span class="badge primary">${esc(rec.level)}</span></td>
+                  <td class="mono small faint">${fmt(rec.trained_on)}</td>
+                  <td class="small">${rec.trainer_name ? esc(global.UI.retiredName(rec.trainer_name, rec.trainer_retired)) : '—'}</td>
+                  <td class="mono small faint">${rec.expires_on ? fmt(rec.expires_on) : 'No expiry'}${expired ? ' <span class="badge warning">Expired</span>' : ''}</td>
+                  <td class="faint small">${dv(rec.note)}</td>
+                  <td style="text-align:right;white-space:nowrap">
+                    <button class="btn btn-ghost btn-xs" data-act="training-edit" data-id="${rec.id}" title="Edit Training Record">${ic('edit')}</button>
+                    <button class="btn btn-ghost btn-xs" data-act="training-del" data-id="${rec.id}" title="Remove Training Record">${ic('trash')}</button>
+                  </td>
+                </tr>`; }).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('cpu', 'No training records yet', 'Add the instruments this person has been trained to use.')}
+      </div>
+    </div>
+
+    <!-- Activity Certificate Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('file')} Activity Certificate</span></div></div>
+      <div class="card-body">
+        <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <div>
+            <label class="faint small" for="cert-from">From</label>
+            <input type="date" class="input" id="cert-from" value="${global.UI.ymd(new Date(new Date().getFullYear(), 0, 1))}">
+          </div>
+          <div>
+            <label class="faint small" for="cert-to">To</label>
+            <input type="date" class="input" id="cert-to" value="${global.UI.today()}">
+          </div>
+          <button class="btn btn-secondary" data-act="export-activity-certificate" data-id="${p.id}">${ic('file')} Export Activity Certificate</button>
+        </div>
+        <div class="faint small mt-8">Exports this person's details, training records and the bookings they attended in the range as a spreadsheet.</div>
+      </div>
     </div>`;
   }
 
@@ -724,9 +891,12 @@
                 WHERE pi.instrument_id = i.id AND p.is_archived=0) as proj_count,
              (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
                 FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
-                WHERE ist.instrument_id = i.id) as supervisors
+                WHERE ist.instrument_id = i.id) as supervisors,
+             (SELECT COUNT(DISTINCT t.person_id) FROM person_instrument_training t
+                WHERE t.instrument_id=i.id AND (t.trained_on='' OR t.trained_on<=?)
+                  AND (t.expires_on='' OR t.expires_on IS NULL OR t.expires_on>=?)) AS trained_users
       FROM instruments i
-      ORDER BY i.is_retired, i.name`);
+      ORDER BY i.is_retired, i.name`, [global.UI.today(), global.UI.today()]);
     const retiredCount = allRows.filter((r) => r.is_retired).length;
 
     const qLower = (instrumentFilter.query || '').trim().toLowerCase();
@@ -773,9 +943,9 @@
         <table class="tbl">
           <colgroup>
             <col style="width:18%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
-            <col style="width:11%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
+            <col style="width:11%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
           </colgroup>
-          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th title="People with a training record valid today">Trained Users</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
@@ -785,6 +955,7 @@
                 <td class="faint small">${esc(r.location || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td class="faint small">${esc(r.supervisors || '—')}</td>
+                <td><span class="badge neutral">${r.trained_users}</span></td>
                 <td class="mono small">${esc(global.UI.fmtMoney(r.cost || 0))}</td>
                 <td class="muted small">${esc(global.UI.unitLabel(r.cost_unit || 'time'))}</td>
                 <td><span class="badge neutral">${r.proj_count} project${r.proj_count === 1 ? '' : 's'}</span></td>
@@ -1667,6 +1838,7 @@
     projectDetail,
     people,
     setPeopleFilter,
+    personDetail,
     instruments,
     setInstrumentFilter,
     calendar,

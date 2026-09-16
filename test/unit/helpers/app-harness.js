@@ -53,6 +53,7 @@ function injectAppInternals(src) {
     retirePricingTier: retirePricingTier,
     bookingSave: bookingSave,
     bookingEditSave: bookingEditSave,
+    removeTraining: removeTraining,
   };
 `;
   return src.slice(0, idx) + expose + src.slice(idx);

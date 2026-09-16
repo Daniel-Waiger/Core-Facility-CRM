@@ -33,6 +33,8 @@
     organization TEXT DEFAULT '',
     department TEXT DEFAULT '',
     email TEXT DEFAULT '',
+    mobile TEXT DEFAULT '',
+    campus TEXT DEFAULT '',
     note TEXT DEFAULT '',
     is_staff INTEGER DEFAULT 0,
     rate REAL DEFAULT 0,
@@ -236,6 +238,19 @@
     note TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS person_instrument_training (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+    level TEXT NOT NULL DEFAULT 'User',
+    trained_on TEXT DEFAULT '',
+    trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+    expires_on TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS ix_pit_person ON person_instrument_training(person_id);
+  CREATE INDEX IF NOT EXISTS ix_pit_instrument ON person_instrument_training(instrument_id);
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
   CREATE INDEX IF NOT EXISTS ix_files_project ON files(project_id);
@@ -612,6 +627,27 @@
     // Must stay after the meetings_new rebuild above, which copies an explicit column list.
     try { db.exec("ALTER TABLE meetings ADD COLUMN tags TEXT DEFAULT ''"); } catch (_) {}
     // --- #39 end ---
+    // --- #47 begin ---
+    try { db.exec("ALTER TABLE people ADD COLUMN mobile TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN campus TEXT DEFAULT ''"); } catch (_) {}
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS person_instrument_training (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+          level TEXT NOT NULL DEFAULT 'User',
+          trained_on TEXT DEFAULT '',
+          trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+          expires_on TEXT DEFAULT '',
+          note TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS ix_pit_person ON person_instrument_training(person_id);
+        CREATE INDEX IF NOT EXISTS ix_pit_instrument ON person_instrument_training(instrument_id);
+      `);
+    } catch (_) {}
+    // --- #47 end ---
   }
 
   // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
@@ -2157,6 +2193,10 @@
   // Also deliberately excludes instrument_staff for the same reason as countInstrumentRefs below:
   // supervising an instrument is a current assignment, not history. retirePerson's zero-ref
   // delete branch cleans up instrument_staff rows explicitly before deleting the person.
+  // `training` counts rows where this person is the TRAINEE (person_id) only — being listed as
+  // someone else's trainer (trainer_id) is deliberately not counted, same reasoning as
+  // instrument_staff above: trainer_id is nullable (ON DELETE SET NULL) precisely so a retired
+  // trainer's past training records survive with the trainer reference cleared, not blocked.
   function countPersonRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_people WHERE person_id=?) AS projects,
@@ -2164,12 +2204,15 @@
       (SELECT COUNT(*) FROM meeting_people WHERE person_id=?) AS bookings,
       (SELECT COUNT(*) FROM meeting_staff WHERE person_id=?) AS staffed,
       (SELECT COUNT(*) FROM service_entries WHERE person_id=?) AS entries,
-      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi`, [id, id, id, id, id, id]) || {};
+      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi,
+      (SELECT COUNT(*) FROM person_instrument_training WHERE person_id=?) AS training`,
+      [id, id, id, id, id, id, id]) || {};
     const parts = {
       projects: r.projects || 0, milestones: r.milestones || 0,
-      bookings: r.bookings || 0, staffed: r.staffed || 0, entries: r.entries || 0, pi: r.pi || 0
+      bookings: r.bookings || 0, staffed: r.staffed || 0, entries: r.entries || 0, pi: r.pi || 0,
+      training: r.training || 0
     };
-    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.entries + parts.pi;
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.entries + parts.pi + parts.training;
     return parts;
   }
   // Deliberately excludes instrument_staff: a supervisor assignment is current-state ("who looks
@@ -2177,19 +2220,88 @@
   // project that actually used the instrument). retireInstrument's zero-ref delete branch still
   // cleans up instrument_staff rows explicitly before deleting, so a supervised-but-otherwise-
   // unused instrument can still be deleted without leaving an orphaned join row.
+  // `training` counts rows where this instrument is the one trained ON (instrument_id) — same
+  // rule as countPersonRefs above, and trainer_id is not part of this table's identity either way.
   function countInstrumentRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_instruments WHERE instrument_id=?) AS projects,
       (SELECT COUNT(*) FROM milestone_instruments WHERE instrument_id=?) AS milestones,
       (SELECT COUNT(*) FROM meeting_instruments WHERE instrument_id=?) AS bookings,
-      (SELECT COUNT(*) FROM service_entries WHERE instrument_id=?) AS entries`,
-      [id, id, id, id]) || {};
+      (SELECT COUNT(*) FROM service_entries WHERE instrument_id=?) AS entries,
+      (SELECT COUNT(*) FROM person_instrument_training WHERE instrument_id=?) AS training`,
+      [id, id, id, id, id]) || {};
     const parts = {
-      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0, entries: r.entries || 0
+      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0, entries: r.entries || 0,
+      training: r.training || 0
     };
-    parts.total = parts.projects + parts.milestones + parts.bookings + parts.entries;
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.entries + parts.training;
     return parts;
   }
+
+  /* ---------------- Instrument training (#47) ----------------
+     person_instrument_training records who is cleared to run an instrument unsupervised
+     ('User') or to also train/supervise others on it ('Super User'), when they were signed
+     off, who signed them off, and an optional expiry. A row is "active" — currently valid,
+     for gating a booking or for counting toward an instrument's trained-user total — exactly
+     when today (or whatever reference date the caller asks about) falls on or after
+     trained_on (or trained_on is blank, meaning "no start restriction") AND on or before
+     expires_on (or expires_on is blank, meaning "never expires"). Pure string comparison on
+     'YYYY-MM-DD' text, same as every other date column in this schema (CLAUDE.md: "Dates are
+     local calendar days") — never a Date object, so this is safe to call with a date typed by
+     the user on either side of midnight in any timezone. */
+  function trainingActiveOn(rec, asOf) {
+    const startOk = !rec.trained_on || rec.trained_on <= asOf;
+    const endOk = !rec.expires_on || rec.expires_on >= asOf;
+    return !!(startOk && endOk);
+  }
+  // Same rule as trainingActiveOn above, evaluated in SQL so a full instrument list can be
+  // annotated in one query rather than N+1 JS-side calls. Returns one row per instrument that
+  // has at least one currently-active trainee; an instrument with none simply isn't in the
+  // result, so callers should treat a missing instrument_id as trained_users=0 (see the
+  // trainedUserCountsAsOf test/usage pattern elsewhere: `.find(...) || {trained_users: 0}`).
+  // asOf is caller-supplied (pass UI.today() when the caller's own date range has a blank end)
+  // rather than computed here, so this stays a pure function of its arguments like every other
+  // DB.* aggregation (CLAUDE.md: reports/aggregations must not fork date logic per caller).
+  function trainedUserCountsAsOf(asOf) {
+    return rows(
+      `SELECT instrument_id, COUNT(DISTINCT person_id) AS trained_users
+       FROM person_instrument_training
+       WHERE (trained_on = '' OR trained_on IS NULL OR trained_on <= ?)
+         AND (expires_on = '' OR expires_on IS NULL OR expires_on >= ?)
+       GROUP BY instrument_id`,
+      [asOf, asOf]
+    );
+  }
+  // Every training record for one person, newest sign-off first, with the instrument and
+  // trainer resolved for display (retired flags included so the caller can append "(Retired)"
+  // via UI.retiredName the same way every other list in this app does — this function does not
+  // append it itself, matching grantLabel/tierLabel's split of "resolve the row" vs "render it").
+  function listPersonTraining(personId) {
+    return rows(
+      `SELECT pit.*, i.name AS instrument_name, i.is_retired AS instrument_retired,
+              tr.name AS trainer_name, tr.is_retired AS trainer_retired
+       FROM person_instrument_training pit
+       LEFT JOIN instruments i ON i.id = pit.instrument_id
+       LEFT JOIN people tr ON tr.id = pit.trainer_id
+       WHERE pit.person_id = ?
+       ORDER BY pit.trained_on DESC, pit.id DESC`,
+      [personId]
+    );
+  }
+  // Every training record for one instrument, ordered by the trainee's name — mirrors
+  // listPersonTraining above but from the instrument side (e.g. for an instrument's own detail
+  // screen listing who is currently cleared to use it).
+  function listInstrumentTraining(instrumentId) {
+    return rows(
+      `SELECT pit.*, p.name AS person_name, p.is_retired AS person_retired
+       FROM person_instrument_training pit
+       LEFT JOIN people p ON p.id = pit.person_id
+       WHERE pit.instrument_id = ?
+       ORDER BY p.name`,
+      [instrumentId]
+    );
+  }
+
   // `billed` follows the same Project Costs rule as views.js/reports.js (CLAUDE.md: "a row counts
   // unless is_cancelled && !billing_retained") — a cancelled-and-waived booking or service entry
   // bills 0 on that screen, so the Archive dialog quoting a different (raw) figure here would be
@@ -2538,6 +2650,7 @@
       DELETE FROM kv;
       DELETE FROM project_outputs;
       DELETE FROM projects;
+      DELETE FROM person_instrument_training;
       DELETE FROM people;
       DELETE FROM instruments;
     `);
@@ -2545,7 +2658,7 @@
       // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
       // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
-      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries','project_outputs')");
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries','project_outputs','person_instrument_training')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     // M9: every attachment blob this database ever held is now orphaned (its `files` row is
     // gone above) — without this they lingered in IndexedDB forever and kept shipping inside
@@ -3160,6 +3273,30 @@
     run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Extended CAR-T Time-Lapse Re-acquisition (Automated Multipoint)']);
     run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'New User Training: Zeiss Lightsheet Z.1 Acquisition Basics']);
     // --- #39 end ---
+    // --- #47 begin ---
+    // 12. Instrument training records (#47) — a deliberate mix so both the trained-user counter
+    // and the expiry-aware queries have something real to show: a still-valid record (Chen on
+    // the FV3000), a record expiring in the future (Chen on the Nikon), a Super User record with
+    // no expiry at all (Anand on the Glacios, trainer_id null — no-trainer case), an already-
+    // expired record (Rostova on the FV3000, so the FV3000's trained-user count excludes her and
+    // counts only Chen), and a second expired-but-refresher-flagged record (Kim on the Leica).
+    const trainingRows = [
+      [4, 2, 'User', day(-120), 6, '', 'Trained on the FV3000 for intravital time-lapses'],
+      [4, 4, 'User', day(-90), 6, day(275), ''],
+      [5, 1, 'Super User', day(-200), 6, '', 'Independent after-hours use approved'],
+      [1, 2, 'User', day(-400), 6, day(-5), 'Refresher due'],
+      [7, 5, 'Super User', day(-300), null, '', ''],
+      [3, 3, 'User', day(-60), 6, day(305), '']
+    ];
+    trainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
+
+    // Demo affiliation values (mobile/campus) — UPDATE only, peopleData's INSERT above is untouched.
+    run("UPDATE people SET campus='Longwood' WHERE id IN (1,4)");
+    run("UPDATE people SET campus='Cambridge' WHERE id IN (2,5)");
+    run("UPDATE people SET campus='Main Campus' WHERE id IN (6,7,8)");
+    run("UPDATE people SET mobile='+1 617 555 0142' WHERE id=4");
+    run("UPDATE people SET mobile='+1 617 555 0187' WHERE id=6");
+    // --- #47 end ---
 
     markDirty();
     return true;
@@ -3255,6 +3392,10 @@
     countInstrumentRefs,
     countProjectRefs,
     countGrantRefs,
+    trainingActiveOn,
+    trainedUserCountsAsOf,
+    listPersonTraining,
+    listInstrumentTraining,
     grantLabel,
     setProjectArchived,
     countBookingRefs,

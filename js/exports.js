@@ -1322,7 +1322,7 @@
       ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total. A booking with no instrument line at all (a pure consult/sync) still has real staff hours, so those are grouped under a "No Instrument" row rather than dropped from this sheet.'],
       [''],
       ['Instrument stewardship scorecard'],
-      ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. Omitted on purpose (need data this app does not track yet): trained-user pool trend and downtime share.'],
+      ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. "Trained Users" counts people holding a training record on that instrument that is valid on the last day of the exported range (no expiry, or an expiry on or after that day; today when the range has no end) — a headcount as of that date, not a trend. Omitted on purpose (needs downtime records this app does not track yet): downtime share.'],
       [''],
       ['Breadth'],
       ['Distinct labs/people and new-lab counts exclude cancelled bookings entirely; a booking with no lab/group on file is omitted from lab counts. "New Labs" counts labs whose first-ever non-cancelled booking (checked across the facility’s whole history, not just the exported range) falls inside the exported dates.'],
@@ -1398,15 +1398,15 @@
     // supervisor count). Fed from the exact same Reports.computeStewardshipRows the screen
     // renders from. A shared instrument repeats under every supervisor it's linked to — see the
     // Notes sheet for why that's intentional.
-    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Line Charges', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
+    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Line Charges', 'Distinct Users', 'Trained Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
     stewardship.groups.forEach((g) => {
       const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
       g.rows.forEach((r) => {
-        stewardRows.push([supLabel, UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), r.distinctUsers, r.newUsers, r.projectsServed, r.facilityWideSessions, r.consultCount]);
+        stewardRows.push([supLabel, UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), r.distinctUsers, r.trainedUsers, r.newUsers, r.projectsServed, r.facilityWideSessions, r.consultCount]);
       });
     });
     const wsSteward = XLSX.utils.aoa_to_sheet(stewardRows);
-    wsSteward['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }];
+    wsSteward['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsSteward, 'Stewardship');
 
     // Sheet 7: Consults — bookings tagged Category = "consult", counted per instrument and per
@@ -1494,6 +1494,118 @@
   // 1.9999999999998) showing up in a spreadsheet cell.
   function round2(n) { return Math.round((n || 0) * 100) / 100; }
 
+  /* Activity certificate (#47): a single person's training + booking + project history as one
+     workbook — the thing a lab head or auditor asks for as proof of what someone is cleared for
+     and what they actually did. `asOf` (the last day of the exported range, or today when the
+     range has no end) is the one reference date passed to DB.trainingActiveOn for every training
+     row, matching the same "as of a date, not a live trend" rule the Stewardship sheet's
+     Trained Users column above now documents — never toISOString().slice, per CLAUDE.md. */
+  function exportActivityCertificate(personId, from, to) {
+    const p = DB.row('SELECT * FROM people WHERE id=?', [Number(personId)]);
+    if (!p) { UI.toast('Person not found', 'error'); return; }
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+
+    const asOf = to || UI.today();
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Details
+    const details = [
+      ['ACTIVITY CERTIFICATE', ''],
+      ['Full Name', p.name],
+      ['Position / Role', p.type],
+      ['Lab / Group / Company', p.organization || '—'],
+      ['Department', p.department || '—'],
+      ['Campus', p.campus || '—'],
+      ['Email', p.email || '—'],
+      ['Mobile', p.mobile || '—'],
+      ['Facility Staff', p.is_staff ? 'Yes' : 'No'],
+      ['Record Status', p.is_retired ? 'Retired' : 'Active'],
+      ['Range From', from || 'Earliest'],
+      ['Range To', to || 'Latest'],
+      ['Exported', new Date().toLocaleString()],
+    ];
+    const wsDetails = XLSX.utils.aoa_to_sheet(details);
+    wsDetails['!cols'] = [{ wch: 22 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsDetails, 'Details');
+
+    // Sheet 2: Training — every sign-off this person holds, evaluated as of `asOf` (never "now"
+    // live, so a certificate exported for a past range reads the same way years later).
+    const training = DB.listPersonTraining(p.id);
+    const trainingRows = [['Instrument', 'Level', 'Trained On', 'Trainer', 'Expires On', 'Status', 'Note']];
+    training.forEach((t) => {
+      trainingRows.push([
+        UI.retiredName(t.instrument_name || '—', t.instrument_retired),
+        t.level,
+        t.trained_on || '—',
+        t.trainer_name ? UI.retiredName(t.trainer_name, t.trainer_retired) : '—',
+        t.expires_on || 'No expiry',
+        DB.trainingActiveOn(t, asOf) ? 'Valid' : 'Expired',
+        t.note || ''
+      ]);
+    });
+    const wsTraining = XLSX.utils.aoa_to_sheet(trainingRows);
+    wsTraining['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 10 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(wb, wsTraining, 'Training');
+
+    // Sheet 3: Bookings — every meeting this person attended (via meeting_people, the real join,
+    // never the denormalized meetings.attendees display string — CLAUDE.md), within the range.
+    const fromVal = from || '', toVal = to || '';
+    const bookings = DB.rows(
+      `SELECT m.date, m.start_time, m.end_time, m.title, m.category, m.is_cancelled, m.billing_retained,
+              pr.title AS project_title,
+              (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                 FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id
+                 WHERE mi.meeting_id = m.id) AS instruments
+       FROM meetings m
+       JOIN meeting_people mp ON mp.meeting_id = m.id
+       LEFT JOIN projects pr ON pr.id = m.project_id
+       WHERE mp.person_id = ? AND (? = '' OR m.date >= ?) AND (? = '' OR m.date <= ?)
+       ORDER BY m.date, m.start_time`,
+      [p.id, fromVal, fromVal, toVal, toVal]
+    );
+    const bookingRows = [['Date', 'Start', 'End', 'Title', 'Project', 'Instruments', 'Category', 'Status']];
+    bookings.forEach((b) => {
+      bookingRows.push([
+        b.date, b.start_time, b.end_time, b.title,
+        b.project_title || 'Facility-wide',
+        b.instruments || '—',
+        b.category || '—',
+        b.is_cancelled ? (b.billing_retained ? 'Cancelled (charge retained)' : 'Cancelled') : 'Held'
+      ]);
+    });
+    const wsBookings = XLSX.utils.aoa_to_sheet(bookingRows);
+    wsBookings['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, wsBookings, 'Bookings');
+
+    // Sheet 4: Projects — same PI-or-team query as Views.personDetail, so this sheet can never
+    // disagree with what the person's own detail screen shows.
+    const projects = DB.rows(
+      `SELECT p.id, p.code, p.title, p.status, p.is_archived,
+              CASE WHEN p.pi_id=? THEN 'PI' ELSE COALESCE(pp.role,'') END AS role
+       FROM projects p
+       LEFT JOIN project_people pp ON pp.project_id=p.id AND pp.person_id=?
+       WHERE p.pi_id=? OR pp.person_id IS NOT NULL
+       ORDER BY p.is_archived, p.title`,
+      [p.id, p.id, p.id]
+    );
+    const projectRows = [['Code', 'Title', 'Role', 'Status', 'Archived']];
+    projects.forEach((r) => {
+      projectRows.push([r.code, r.title, r.role || '—', r.status, r.is_archived ? 'Yes' : 'No']);
+    });
+    const wsProjects = XLSX.utils.aoa_to_sheet(projectRows);
+    wsProjects['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsProjects, 'Projects');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(
+      new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      `Activity-Certificate-${p.name.replace(/[^A-Za-z0-9]+/g, '_')}-${from || 'earliest'}_to_${to || 'latest'}.xlsx`
+    );
+    UI.toast('Exported activity certificate to XLSX');
+  }
+
   /* Custom report generator (roadmap 3.6). spec = { entity, columns: ['key',...], from, to } —
      built by app.js from the Custom Report modal's current selection; from/to are always the
      explicit range the modal is showing (mirrors the screen's Reports.getRange() at open time —
@@ -1561,6 +1673,7 @@
 
   global.Exports = {
     exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx,
+    exportActivityCertificate,
     // Exposed for test/unit/exports.test.js only (the RTL bidi helper and the lazy font loader) —
     // no other file in the app reads these directly.
     _pdfBidiReverse: pdfBidiReverse, _preparePdfFont: preparePdfFont,

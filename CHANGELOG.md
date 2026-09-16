@@ -10,9 +10,17 @@ This project uses [Semantic Versioning](https://semver.org/).
 - **A new Booking Tags report card** shows bookings and booked hours per tag, with cancelled bookings excluded and a booking with more than one tag counted under each of them; also available as a custom-report entity and as a sheet in the Reports export. (#39)
 - **Tags travel with exports**: a Tags column in the per-project spreadsheet and the facility-wide Meetings and Bookings & Costs sheets, and a Tags line per booking in the Word and PDF reports. (#39)
 - **A few demo bookings now carry tags**, so the new report and columns have something to show out of the box. (#39)
+- A person profile page, opened from the People list, showing their details, projects, recent bookings (with cancelled ones marked) and instrument training (#47)
+- Training records per person and instrument, each with a level (User / Super User), a date, a trainer and an optional expiry, added, edited and removed from the profile (#47)
+- Mobile and Campus fields on the person dialog (#47)
+- A "Trained Users" count on the Instruments list (#47)
+- A "Trained Users" column on the Instrument Stewardship scorecard, in the custom report and in the Reports spreadsheet (#47)
+- An Activity Certificate spreadsheet export per person, with their details, training, bookings in a date range and projects (#47)
+- Demo data now includes training records (#47)
 
 ### Changed
 - **Booking categories can now be renamed or removed from Settings → Category Billing.** Renaming a category updates every booking that uses it; removing one is only offered once nothing uses it anymore, and consult, training and assisted session are protected from either change. (#39)
+- The stewardship footnote no longer says the trained-user pool is unavailable (#47)
 
 ## [1.11.0] — 2026-09-12
 
