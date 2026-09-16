@@ -423,7 +423,7 @@
             const dateStr = o.reference ? esc(o.reference) + ' — ' : '';
             return `
           <div class="output-row">
-            <span class="badge neutral output-type" role="button" tabindex="0" data-act="output-edit" data-id="${o.id}" title="Edit Output" style="text-transform:capitalize">${esc(o.type)}</span>
+            <span class="badge neutral output-type" role="button" tabindex="0" data-act="output-edit" data-id="${o.id}" title="Edit Output" aria-label="Edit ${esc(o.type)} Output: ${esc(o.title)}" style="text-transform:capitalize">${esc(o.type)}</span>
             <button type="button" class="output-main" data-act="output-view" data-id="${o.id}" aria-label="View Output: ${esc(o.title)}">
               <span class="output-title">${esc(o.title)}</span>
               ${o.acknowledges_facility ? `<span class="badge success">Acknowledged</span>` : ''}
@@ -745,7 +745,8 @@
   /* ---------------- Person detail (#47) ----------------
      Mirrors projectDetail's shape (header card, then a run of per-topic cards) but for one
      person: their own details, the projects they're on (as PI or team member), the bookings
-     they've attended (newest first, cancelled ones kept and marked — same rule as Project
+     they were involved in, as an attendee or as the facility staff who ran them (newest first,
+     cancelled ones kept and marked — same rule as Project
      Costs), their instrument training records, and an Activity Certificate export. */
   function personDetail(id) {
     const p = global.DB.row('SELECT * FROM people WHERE id=?', [id]);
@@ -850,8 +851,8 @@
             </tbody>
           </table>
         </div>
-        <div class="faint small mt-8">Showing the 25 most recent bookings this person attended. Cancelled bookings are kept and marked.</div>`
-        : emptyState('calendar', 'No bookings yet', 'Bookings this person attends will show up here.')}
+        <div class="faint small mt-8">Showing the 25 most recent bookings this person attended or ran as facility staff. Cancelled bookings are kept and marked.</div>`
+        : emptyState('calendar', 'No bookings yet', 'Bookings this person attends or runs as facility staff will show up here.')}
       </div>
     </div>
 
@@ -905,7 +906,7 @@
           </div>
           <button class="btn btn-secondary" data-act="export-activity-certificate" data-id="${p.id}">${ic('file')} Export Activity Certificate</button>
         </div>
-        <div class="faint small mt-8">Exports this person's details, training records and the bookings they attended in the range as a spreadsheet.</div>
+        <div class="faint small mt-8">Exports this person's details, training records and the bookings they attended or ran as facility staff in the range as a spreadsheet.</div>
       </div>
     </div>`;
   }

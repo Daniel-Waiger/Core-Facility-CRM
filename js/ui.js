@@ -862,12 +862,28 @@
       text += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
     }
 
-    const literalRe = /\/Title\s*\(((?:\\.|[^\\)])*)\)/g;
+    // A PDF literal string runs to its matching ')': unescaped parentheses inside it are legal
+    // as long as they balance ("(Results (A/B) study)"), and a backslash escapes the next byte,
+    // newline included. A regex stopping at the first ')' truncated such titles, so the literal
+    // form is scanned with a depth counter instead; the raw text keeps its escapes for the
+    // unescape loop below.
+    function scanLiteral(from) {
+      let depth = 1;
+      for (let i = from; i < text.length; i++) {
+        const c = text[i];
+        if (c === '\\') { i++; continue; }
+        if (c === '(') depth++;
+        else if (c === ')' && --depth === 0) return text.slice(from, i);
+      }
+      return null; // unterminated — not a usable title
+    }
+    const openRe = /\/Title\s*\(/g;
     const hexRe = /\/Title\s*<([0-9A-Fa-f\s]*)>/g;
     let last = null; // { index, kind, raw }
     let m;
-    while ((m = literalRe.exec(text))) {
-      if (!last || m.index > last.index) last = { index: m.index, kind: 'literal', raw: m[1] };
+    while ((m = openRe.exec(text))) {
+      const raw = scanLiteral(m.index + m[0].length);
+      if (raw !== null && (!last || m.index > last.index)) last = { index: m.index, kind: 'literal', raw };
     }
     while ((m = hexRe.exec(text))) {
       if (!last || m.index > last.index) last = { index: m.index, kind: 'hex', raw: m[1] };

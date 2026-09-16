@@ -19,6 +19,16 @@ describe('UI.pdfTitleFromBytes', () => {
     assert.equal(UI.pdfTitleFromBytes(bytes), 'Volumetric (islet) mapping');
   });
 
+  test('unescaped but balanced parentheses inside a literal /Title are part of the title, not its end', () => {
+    const pdf = '%PDF-1.4\n<< /Title (Results (A/B) study) /Author (A) >>\n%%EOF';
+    assert.equal(UI.pdfTitleFromBytes(Buffer.from(pdf, 'latin1')), 'Results (A/B) study');
+  });
+
+  test('a backslash line continuation inside a literal /Title is dropped, not a truncation point', () => {
+    const pdf = '%PDF-1.4\n<< /Title (Long \\\ntitle) >>\n%%EOF';
+    assert.equal(UI.pdfTitleFromBytes(Buffer.from(pdf, 'latin1')), 'Long title');
+  });
+
   test('accepts a plain ArrayBuffer, not only a Uint8Array/Buffer', () => {
     const pdf = '%PDF-1.4\n<< /Title (Plain Buffer Title) >>\n%%EOF';
     const u8 = Buffer.from(pdf, 'latin1');
