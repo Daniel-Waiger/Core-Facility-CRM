@@ -572,10 +572,10 @@
      deliberately NOT rolled up into a per-supervisor total (that would silently double-count any
      shared instrument into a fabricated "score" per person, which this app does not do).
 
-     "Trained Users" (#47) is a headcount as of the range end, not a trend over the range — see
-     loadTrainedUserCounts/DB.trainedUserCountsAsOf. OMITTED, on purpose, with a labeled footnote
-     rather than a fake column: downtime share, which needs downtime-log data this app doesn't
-     have yet.
+     "Trained Users" (#47) IS included: a headcount as of the range end, not a trend over the
+     range — see loadTrainedUserCounts/DB.trainedUserCountsAsOf. OMITTED, on purpose, with a
+     labeled footnote rather than a fake column: downtime share, which needs downtime-log data
+     this app doesn't have yet.
      ================================================================================ */
   function computeStewardshipRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }

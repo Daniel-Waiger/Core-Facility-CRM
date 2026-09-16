@@ -1022,13 +1022,18 @@
         if (o.url) obits.push(`URL: ${o.url}`);
         obits.push(`Acknowledges facility: ${o.acknowledges_facility ? 'Yes' : 'No'}`);
         if (o.file_name) obits.push(`File: ${o.file_name}`);
-        checkPage(6);
+        // A long author list, DOI/URL or filename must wrap inside the A4 text width (the same
+        // pdfSplitTextToSize the Project Notes block uses), one page check per resulting line.
         pdf.setFontSize(8);
         pdf.setTextColor(100, 116, 139);
-        pdfText(pdf, obits.join('   |   '), margin + 4, y);
+        for (const line of pdfSplitTextToSize(pdf, obits.join('   |   '), 210 - (margin * 2) - 4)) {
+          checkPage(5);
+          pdfText(pdf, line, margin + 4, y);
+          y += 4;
+        }
         pdf.setTextColor(20, 20, 20);
         pdf.setFontSize(9);
-        y += 5;
+        y += 1;
       });
     }
 

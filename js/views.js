@@ -264,7 +264,7 @@
     // "load flat, query fresh, no denormalized name column" pattern as kv above.
     // Ordered in JS via DB.outputEffectiveDate (LOCAL calendar day fallback for a blank `date`),
     // never SQL date(created_at), which is the UTC day — see that helper's comment.
-    const outputs = global.DB.rows(`SELECT po.*, f.name AS file_name, f.kind AS file_kind FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
+    const outputs = global.DB.rows(`SELECT po.*, f.name AS file_name, f.kind AS file_kind, f.path AS file_path FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
       .sort((a, b) => {
         const ea = global.DB.outputEffectiveDate(a), eb = global.DB.outputEffectiveDate(b);
         if (ea !== eb) return ea < eb ? 1 : -1;
@@ -428,12 +428,13 @@
               <span class="output-title">${esc(o.title)}</span>
               ${o.acknowledges_facility ? `<span class="badge success">Acknowledged</span>` : ''}
               ${o.file_name ? `<span class="faint small">${ic('file')} ${esc(o.file_name)}</span>` : ''}
-              <div class="faint small output-meta">${authors ? authors + ' · ' : ''}${dateStr}${fmt(global.DB.outputEffectiveDate(o))}</div>
+              <span class="faint small output-meta" style="display:block">${authors ? authors + ' · ' : ''}${dateStr}${fmt(global.DB.outputEffectiveDate(o))}</span>
             </button>
             <div class="output-links">
               ${doiHref ? `<a class="file-link" href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">DOI ${ic('external')}</a>` : ''}
               ${global.UI.isSafeUrl(o.url) ? `<a class="file-link" href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">Link ${ic('external')}</a>` : ''}
               ${o.file_kind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${o.file_id}" data-name="${esc(o.file_name)}">Download</button>` : ''}
+              ${o.file_kind === 'link' && global.UI.isSafeUrl(o.file_path) ? `<a class="file-link" href="${esc(o.file_path)}" target="_blank" rel="noopener noreferrer" data-tooltip="${esc(o.file_path)}">File ${ic('external')}</a>` : ''}
               <span class="del" role="button" tabindex="0" aria-label="Delete Output" data-act="output-del" data-id="${o.id}" title="Delete Output">${ic('x')}</span>
             </div>
           </div>`;
@@ -1152,7 +1153,7 @@
     // readable without relying solely on the title tooltip's hover delay. tabindex makes that
     // keyboard-reachable too, not just mouse-hover.
     return `
-      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title} tabindex="0">
+      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title} tabindex="0" role="button">
         <span class="ev-label-full">${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}${tagChips(e.tags)}</span>
         <span class="ev-label-compact">${icon} <span class="mono" style="font-size:10px">${esc(e.start_time || '')}</span></span>
         <span class="ev-label-icon">${icon}</span>

@@ -42,7 +42,9 @@ database, has a demo tab perform a forced clear-and-reseed, and requires the fin
 unchanged — the demo sandbox guarantee, asserted on bytes rather than behaviour.
 `smoke.spec.js` renders every screen and fails on any JavaScript error; it is what caught the
 sandbox opening blank. `sanitize.spec.js` covers the note sanitizer, which can only run in a real
-browser because Node has no `DOMParser`.
+browser because Node has no `DOMParser`. `output-type-fields.spec.js` opens the Add Output dialog
+and checks that switching the type really hides and shows the fields in the rendered layout, since
+a `[hidden]` attribute the stylesheet overrides would pass any source-text check.
 
 Playwright is not a dependency of this repo. The suites find it from a local or global install, or
 from `PLAYWRIGHT_MODULE`; set `CHROMIUM_PATH` if a browser is present that Playwright did not

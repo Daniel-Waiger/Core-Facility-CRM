@@ -4627,7 +4627,7 @@
         <div class="field"><label>Date</label><div>${dateLine}</div></div>
         ${item.note ? `<div class="field"><label>Note</label><div>${esc(item.note)}</div></div>` : ''}
         <div class="field"><div>Facility acknowledged: ${item.acknowledges_facility ? 'Yes' : 'No'}</div></div>
-        ${file ? `<div class="field"><label>Attached File</label><div class="row" style="gap:8px;align-items:center"><span>${esc(file.name)}</span>${file.kind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${file.id}" data-name="${esc(file.name)}">Download</button>` : ''}</div></div>` : ''}
+        ${file ? `<div class="field"><label>Attached File</label><div class="row" style="gap:8px;align-items:center"><span>${esc(file.name)}</span>${file.kind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${file.id}" data-name="${esc(file.name)}">Download</button>` : ''}${file.kind === 'link' && UI.isSafeUrl(file.path) ? `<a class="file-link" href="${esc(file.path)}" target="_blank" rel="noopener noreferrer">Open ${ic('external')}</a>` : ''}</div></div>` : ''}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Close</button>
