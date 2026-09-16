@@ -409,7 +409,7 @@ describe('schema: migrations are idempotent', () => {
       projects: ['sample', 'flags', 'is_archived', 'archived_at'],
       instruments: ['location', 'cost', 'cost_unit', 'is_retired', 'retired_at'],
       meetings: ['link', 'start_time', 'end_time', 'discount_pct', 'group_org', 'group_discount_pct',
-        'subtotal', 'total_before_tax', 'total_cost', 'is_cancelled', 'cancelled_at', 'billing_retained'],
+        'subtotal', 'total_before_tax', 'total_cost', 'is_cancelled', 'cancelled_at', 'billing_retained', 'tags'],
     };
     for (const [table, cols] of Object.entries(migratedColumns)) {
       const present = tableColumns(DB, table);

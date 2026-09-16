@@ -658,6 +658,22 @@
     return rawHours > 0 ? Math.max(1, Math.ceil(rawHours)) : 0;
   }
 
+  /* ---------------- Tag string split/join ----------------
+     One copy so callers never drift: a comma-joined tag string turns into a clean array of
+     trimmed, non-empty, exact-match-deduped (first occurrence wins, case preserved) entries, and
+     back into a single comma-space-joined string for display/storage. */
+  function parseTags(str) {
+    const seen = new Set();
+    const out = [];
+    String(str || '').split(',').map((s) => s.trim()).filter(Boolean).forEach((t) => {
+      if (!seen.has(t)) { seen.add(t); out.push(t); }
+    });
+    return out;
+  }
+  function joinTags(arr) {
+    return parseTags((arr || []).join(',')).join(', ');
+  }
+
   /* ---------------- Booking cost math (bill of materials) ----------------
      Plain-language walkthrough of every number below, since this is money math that has to be
      auditable, not just "works":
@@ -923,6 +939,8 @@
     timeToMinutes,
     hoursBetween,
     billableStaffHours,
+    parseTags,
+    joinTags,
     retiredName,
     isSafeUrl,
     fmtMoney,

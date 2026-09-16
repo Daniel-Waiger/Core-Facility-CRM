@@ -8,6 +8,14 @@
   const today = global.UI.today;
   const DATE_LOCALE = global.UI.DATE_LOCALE;
 
+  // Small inline tag chips for a booking's `tags` column, shared by the Bookings & Syncs card,
+  // the Project Costs table and the calendar chip. Returns '' when there are no tags.
+  function tagChips(tags) {
+    const list = global.UI.parseTags(tags);
+    if (!list.length) return '';
+    return `<span class="chips" style="display:inline-flex;gap:4px;margin-left:6px">${list.map((t) => `<span class="chip-sm">${esc(t)}</span>`).join('')}</span>`;
+  }
+
   /* ---------------- Dashboard ---------------- */
   function dashboard() {
     const now = today();
@@ -469,7 +477,7 @@
                 const tierStr = global.DB.tierLabel(m.tier_id);
                 return `
                 <tr class="${m.is_cancelled ? 'row-retired' : ''}">
-                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
+                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}${tagChips(m.tags)}</td>
                   <td class="small">${bookingGrantStr ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
                   <td class="small">${tierStr === '—' ? '<span class="faint">—</span>' : esc(tierStr)}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
@@ -551,7 +559,7 @@
           ${mtgs.length ? mtgs.map((m) => `
             <div class="meeting-box mb-8 ${m.is_cancelled ? 'row-retired' : ''}">
               <div class="row">
-                <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
+                <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${tagChips(m.tags)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email Attendees">${ic('mail')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit Booking">${ic('edit')}</button>
@@ -860,7 +868,7 @@
       WHERE m.due_date >= ? AND m.due_date <= ?`, [startStr, endStr]);
 
     const mtgs = global.DB.rows(`
-      SELECT m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled, p.id as project_id, p.title as project_title
+      SELECT m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled, m.tags, p.id as project_id, p.title as project_title
       FROM meetings m
       LEFT JOIN projects p ON p.id = m.project_id
       WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
@@ -884,6 +892,7 @@
         cancelled: !!mt.is_cancelled,
         start_time: mt.start_time || '',
         end_time: mt.end_time || '',
+        tags: mt.tags || '',
         project_id: mt.project_id,
         project_title: mt.project_title
       });
@@ -919,11 +928,12 @@
     const icon = e.kind === 'mt' ? '📅' : '🎯';
     const cls = `ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}`;
     const dataAttrs = `data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"`;
-    const title = `title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}"`;
+    const tagList = global.UI.parseTags(e.tags).join(', ');
+    const title = `title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${tagList ? ' [' + esc(tagList) + ']' : ''}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}"`;
     if (!compactable) {
       return `
       <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title}>
-        ${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+        ${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}${tagChips(e.tags)}
       </div>`;
     }
     // Resource Timeline chips: a short booking's box (a few percent of a day column) can be too
@@ -937,7 +947,7 @@
     // keyboard-reachable too, not just mouse-hover.
     return `
       <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title} tabindex="0">
-        <span class="ev-label-full">${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}</span>
+        <span class="ev-label-full">${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}${tagChips(e.tags)}</span>
         <span class="ev-label-compact">${icon} <span class="mono" style="font-size:10px">${esc(e.start_time || '')}</span></span>
         <span class="ev-label-icon">${icon}</span>
       </div>`;
@@ -1322,7 +1332,7 @@
     const autoBackupEnabled = UI.storage.getItem('auto-backup-enabled') !== '0';
     const lastAutoBackup = UI.storage.getItem('last-auto-backup-at');
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
-    const folderStatus = global.App.autoBackupFolderStatus;
+    const folderStatus = (global.App && global.App.autoBackupFolderStatus) || { supported: false, name: null, granted: false };
     const adminOn = UI.storage.getItem('admin-mode') === '1';
     const skipSingleInstrumentPrompt = UI.storage.getItem('skip-single-instrument-prompt') === '1';
     const orgs = global.DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization").map((r) => r.organization);
@@ -1490,10 +1500,12 @@
     <div class="card mb-16">
       <div class="card-title">${ic('tag')} Category Billing</div>
       <div class="card-body">
-        <div class="faint small mb-8">What percent of a Facility Staff member's normal rate a booking category bills, and whether that category requires a facility staff assignee at all. Instrument time is unaffected — tiers and discounts already govern that. An existing booking keeps its saved price until it is edited and re-saved — like every other rate in the app, a re-save prices at the rules in force at that moment.</div>
+        <div class="faint small mb-8">What percent of a Facility Staff member's normal rate a booking category bills, and whether that category requires a facility staff assignee at all. Instrument time is unaffected — tiers and discounts already govern that. An existing booking keeps its saved price until it is edited and re-saved — like every other rate in the app, a re-save prices at the rules in force at that moment. Renaming a category updates every booking that uses it; a category can only be removed once no booking uses it. consult, training and assisted session are built into the reports and billing rules and cannot be renamed or removed.</div>
         ${categoryPolicies.map((p) => `
           <div class="row mb-8 cat-policy-row" style="gap:14px;align-items:center;flex-wrap:wrap" data-category="${esc(p.category)}">
             <span class="small font-medium" style="min-width:130px">${esc(p.category)}</span>
+            ${global.DB.protectedBookingCategories().includes(p.category) ? '' : `<button class="btn btn-ghost btn-xs" data-act="category-rename" data-category="${esc(p.category)}" title="Rename Category">${ic('edit')}</button>
+            <button class="btn btn-ghost btn-xs" data-act="category-remove" data-category="${esc(p.category)}" title="Remove Category">${ic('trash')}</button>`}
             <div class="field" style="margin:0">
               <label class="small faint">Staff %</label>
               <input type="number" min="0" max="100" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} ${p.category === 'assisted session' ? 'oninput="window.App && window.App.syncCategoryBillingHints && window.App.syncCategoryBillingHints()"' : ''} />

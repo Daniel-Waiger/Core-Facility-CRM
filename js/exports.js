@@ -534,16 +534,16 @@
     // DB.buildTierLabelMap) — a per-project export is usually small, but there's no reason to pay
     // even that per row when the same one-time query answers every row.
     const tierMap = DB.buildTierLabelMap();
-    const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
+    const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Tags', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', m.tags || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
 
     // Sheet 5b: Service Entries (roadmap 2.3) — standalone billable work outside any booking.
@@ -668,6 +668,7 @@
         children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
         if (m.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(m)}`, italics: true }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
+        if (m.tags) children.push(new Paragraph({ text: 'Tags: ' + m.tags, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
         if (m.total_cost) {
@@ -911,6 +912,14 @@
           pdf.setFontSize(9);
           y += 4;
         }
+        if (m.tags) {
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdfText(pdf, `Tags: ${m.tags}`, margin + 4, y);
+          pdf.setTextColor(20, 20, 20);
+          pdf.setFontSize(9);
+          y += 4;
+        }
         if (m.note) {
           htmlToPdf(pdf, m.note, margin + 4, 210 - margin * 2 - 4, {
             get y() { return y; }, set y(v) { y = v; }, checkPage
@@ -1104,7 +1113,7 @@
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
-    const mtRows = [['Project Code', 'Project', 'Meeting', 'Grant', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Grant', 'Category', 'Tags', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
@@ -1112,12 +1121,12 @@
       LEFT JOIN projects p ON p.id = mt.project_id
       LEFT JOIN grants g ON g.id = mt.grant_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), m.category || '—',
+      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), m.category || '—', m.tags || '—',
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
-    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings'); // !cols is intentionally shorter than the header row — SheetJS just applies its default width past the end
 
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
@@ -1146,7 +1155,7 @@
     // 164.12 → 0, tax blank); naming it "Charged Total" instead — no different value, no
     // Subtotal/Before Tax change — makes plain that this column, unlike the two before it, answers
     // "what got billed", so a 0 next to an untouched Subtotal is expected, not an arithmetic gap.
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Charged Total']];
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Tags', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Charged Total']];
     // One tier-name lookup for the whole sheet (see DB.buildTierLabelMap) instead of a SELECT per
     // booking row — this sheet is every booking the facility has ever logged, so at scale that was
     // the single largest source of repeated queries in this export.
@@ -1167,7 +1176,7 @@
       const overheadPct = m.tier_overhead_pct == null ? '' : round2(m.tier_overhead_pct);
       const effectiveTaxPct = (counts && beforeTax > 0) ? round2((((m.total_cost || 0) / beforeTax) - 1) * 100) : '';
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, bcTierMap),
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.tags || '—', grantLabelFor(m), DB.tierLabel(m.tier_id, bcTierMap),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
@@ -1175,7 +1184,7 @@
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     // Sheet 7: Service Entries (roadmap 2.3) — standalone billable work outside any booking,
@@ -1285,6 +1294,7 @@
     const svc = Reports.computeServiceEntryRows(from, to, facts);
     const breadth = Reports.computeBreadthRows(from, to, facts);
     const mix = Reports.computeActivityMixRows(from, to, facts);
+    const tagRows = Reports.computeBookingTagRows(from, to, facts);
     const funnel = Reports.computeFunnelRows(from, to, facts);
     const labConsultsOn = Reports.getLabConsultsEnabled(); // mirror the on-screen opt-in toggle exactly
 
@@ -1319,6 +1329,9 @@
       [''],
       ['Activity Mix'],
       ['Hours booked per meetings.category per month, excluding cancelled bookings; a booking with no category on file is grouped under "(uncategorized)". Categories are read from the data, not a fixed list. Standalone service entries are not included — they are logged in units/quantity, not hours.'],
+      [''],
+      ['Booking Tags'],
+      ['Bookings and booked hours per tag, excluding cancelled bookings. A booking carrying several tags is counted once under each of them, so the Bookings column can exceed the number of distinct bookings in the range.'],
       [''],
       ['Per-Lab Consults'],
       [labConsultsOn
@@ -1442,6 +1455,14 @@
     const wsMix = XLSX.utils.aoa_to_sheet(mixRows);
     wsMix['!cols'] = [{ wch: 10 }, ...mix.categories.map(() => ({ wch: 16 }))];
     XLSX.utils.book_append_sheet(wb, wsMix, 'Activity Mix');
+
+    // Sheet 10b: Booking Tags — fed from the exact same Reports.computeBookingTagRows the
+    // Booking Tags card renders from; see the Notes-sheet entry above for the counting rule.
+    const tagSheetRows = [['Tag', 'Bookings', 'Booked Hours']];
+    tagRows.rows.forEach((r) => tagSheetRows.push([r.tag, r.bookings, round2(r.hours)]));
+    const wsTags = XLSX.utils.aoa_to_sheet(tagSheetRows);
+    wsTags['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsTags, 'Booking Tags');
 
     // Sheet 11 (opt-in only): Per-Lab Consults — mirrors the Breadth card's opt-in checkbox exactly;
     // the sheet is omitted entirely when the toggle is off, same as the on-screen table.

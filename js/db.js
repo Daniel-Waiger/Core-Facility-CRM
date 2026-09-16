@@ -119,6 +119,7 @@
     attendees TEXT DEFAULT '',
     link TEXT DEFAULT '',
     category TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
     discount_pct REAL DEFAULT 0,
@@ -606,6 +607,11 @@
         CREATE INDEX IF NOT EXISTS ix_project_outputs_project ON project_outputs(project_id);
       `);
     } catch (_) {}
+
+    // --- #39 begin ---
+    // Must stay after the meetings_new rebuild above, which copies an explicit column list.
+    try { db.exec("ALTER TABLE meetings ADD COLUMN tags TEXT DEFAULT ''"); } catch (_) {}
+    // --- #39 end ---
   }
 
   // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
@@ -1934,16 +1940,32 @@
      Built-in CONST[category] values are always shown first, then any
      facility-added terms on top — merged and deduped so callers never need
      to know which list a value came from. */
+  // A built-in CONST value can be "removed" without touching consts.js: its name goes into the
+  // app_config key `hidden_vocab_<category>` (a JSON array), and vocabList() below filters it out
+  // of BOTH the built-in defaults and any custom vocab row of the same name. Used by
+  // renameBookingCategory/removeBookingCategory so a built-in category (e.g. 'sync') can be
+  // renamed or removed even though it isn't a row in the `vocab` table to begin with.
+  function hiddenVocab(category) {
+    const raw = getConfig('hidden_vocab_' + category, null);
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((v) => typeof v === 'string') : [];
+    } catch (_) {
+      return [];
+    }
+  }
   function vocabList(category) {
     const defaults = (global.CONST && global.CONST[category]) || [];
     const custom = rows('SELECT value FROM vocab WHERE category=? ORDER BY value', [category]).map((r) => r.value);
     const hasOther = defaults.includes('Other') || custom.includes('Other');
+    const hidden = new Set(hiddenVocab(category));
     const seen = new Set();
     const out = [];
     for (const v of [...defaults, ...custom]) {
       // "Other" isn't a real term — it's the escape hatch that opens "+ Add New" — so it's
       // never listed among the regular options; it's appended once at the very end below.
-      if (!v || v === 'Other' || seen.has(v)) continue;
+      if (!v || v === 'Other' || seen.has(v) || hidden.has(v)) continue;
       seen.add(v);
       out.push(v);
     }
@@ -2407,6 +2429,90 @@
         tierMoved, tierMerged, hadTier: !!oldTier,
         vocabMoved, vocabMerged, hadVocab: oldVocab
       };
+    });
+  }
+
+  /* ---------------- Booking category rename/removal ----------------
+     Mirrors renameOrganization above, but for `meetings.category` — the vocabulary term itself,
+     not a per-booking snapshot, so every meeting carrying it is relabeled, not left alone.
+     'consult', 'training' and 'assisted session' are protected: reports.js's consult-specific
+     filters/funnel stages, category_policies' follow_assisted link (training reads
+     'assisted session'.staff_pct by that literal name), and Settings' dedicated training/
+     assisted-session policy rows all assume these three names exist verbatim. */
+  const PROTECTED_BOOKING_CATEGORIES = ['consult', 'training', 'assisted session'];
+  function protectedBookingCategories() {
+    return PROTECTED_BOOKING_CATEGORIES.slice();
+  }
+
+  function countBookingCategoryRefs(name) {
+    return (row('SELECT COUNT(*) as c FROM meetings WHERE category=?', [name]) || { c: 0 }).c || 0;
+  }
+
+  function renameBookingCategory(oldName, newName) {
+    oldName = String(oldName || '').trim();
+    newName = String(newName || '').trim();
+    if (!oldName || !newName || oldName === newName) return null;
+    if (PROTECTED_BOOKING_CATEGORIES.includes(oldName)) return null;
+
+    const bookings = countBookingCategoryRefs(oldName);
+    // category_policies.category is its PRIMARY KEY: if newName already has its own policy row,
+    // this is a merge (target wins, old row dropped) rather than a raced UPDATE onto that key —
+    // same reasoning as group_discounts/group_tiers in renameOrganization above.
+    const oldHasPolicy = !!row('SELECT 1 as x FROM category_policies WHERE category=?', [oldName]);
+    const targetHasPolicy = !!row('SELECT 1 as x FROM category_policies WHERE category=?', [newName]);
+    const merged = !!(oldHasPolicy && targetHasPolicy);
+    const builtins = (global.CONST && global.CONST.BOOKING_CATEGORY) || [];
+    const hidden = hiddenVocab('BOOKING_CATEGORY');
+
+    return transaction(() => {
+      if (bookings) run('UPDATE meetings SET category=? WHERE category=?', [newName, oldName]);
+
+      if (oldHasPolicy) {
+        if (targetHasPolicy) {
+          run('DELETE FROM category_policies WHERE category=?', [oldName]);
+        } else {
+          run('UPDATE category_policies SET category=? WHERE category=?', [newName, oldName]);
+        }
+      }
+
+      // newName only needs a vocab row if it isn't already a visible (unhidden) CONST built-in —
+      // a built-in doesn't need a vocab entry to show up in vocabList().
+      const newIsVisibleBuiltin = builtins.includes(newName) && !hidden.includes(newName);
+      if (!newIsVisibleBuiltin) {
+        run('INSERT OR IGNORE INTO vocab (category, value) VALUES (?,?)', ['BOOKING_CATEGORY', newName]);
+      }
+      run("DELETE FROM vocab WHERE category='BOOKING_CATEGORY' AND value=?", [oldName]);
+
+      const nextHidden = hidden.slice();
+      if (builtins.includes(oldName) && !nextHidden.includes(oldName)) nextHidden.push(oldName);
+      const idx = nextHidden.indexOf(newName);
+      if (idx !== -1) nextHidden.splice(idx, 1);
+      setConfig('hidden_vocab_BOOKING_CATEGORY', JSON.stringify(nextHidden));
+
+      markDirty();
+      return { bookings, merged };
+    });
+  }
+
+  function removeBookingCategory(name) {
+    name = String(name || '').trim();
+    if (!name) return false;
+    if (PROTECTED_BOOKING_CATEGORIES.includes(name)) return false;
+    if (countBookingCategoryRefs(name) > 0) return false;
+
+    const builtins = (global.CONST && global.CONST.BOOKING_CATEGORY) || [];
+    return transaction(() => {
+      run('DELETE FROM category_policies WHERE category=?', [name]);
+      run("DELETE FROM vocab WHERE category='BOOKING_CATEGORY' AND value=?", [name]);
+      if (builtins.includes(name)) {
+        const hidden = hiddenVocab('BOOKING_CATEGORY');
+        if (!hidden.includes(name)) {
+          hidden.push(name);
+          setConfig('hidden_vocab_BOOKING_CATEGORY', JSON.stringify(hidden));
+        }
+      }
+      markDirty();
+      return true;
     });
   }
 
@@ -3047,6 +3153,14 @@
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (3, 'acknowledgement', 'Core facility acknowledged in State Health Initiative renewal report', 'State Health Initiative #4401 — Year 2 progress report', ?)`, [day(-10)]);
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (1, 'dataset', 'Intravital CAR-T 4D time-lapse volumes (raw + segmented)', 'NAS-Bioimaging-Vol4 dataset DOI pending', ?)`, [day(-1)]);
 
+    // --- #39 begin ---
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED, Fiji', 'Screening Protocol Design & STED Parameter Setup']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED, Napari', 'Extended Resonant-Scan Session for Synaptic Density Screening']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji, Napari', 'Open Office Hours: Image Analysis Pipeline Consultation']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Extended CAR-T Time-Lapse Re-acquisition (Automated Multipoint)']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'New User Training: Zeiss Lightsheet Z.1 Acquisition Basics']);
+    // --- #39 end ---
+
     markDirty();
     return true;
   }
@@ -3152,6 +3266,11 @@
     listAllOrgNames,
     countOrgRefs,
     renameOrganization,
+    hiddenVocab,
+    countBookingCategoryRefs,
+    protectedBookingCategories,
+    renameBookingCategory,
+    removeBookingCategory,
     seedSampleData,
     clearAllData
   };

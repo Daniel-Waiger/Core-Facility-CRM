@@ -92,11 +92,11 @@ describe('exports (R3): facility-wide XLSX carries the same "(Retired)" suffix a
     const bcRows = sheetRows(wbAll, 'Bookings & Costs');
     const bcRow = bcRows.find((r) => r[2] === 'Session');
     assert.ok(bcRow, 'the seeded booking must appear on the Bookings & Costs sheet');
-    // header: [Project Code, Project, Booking, Grant, Tier, Status, Date, Start, End, Instruments,
-    //          Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %, Before Tax,
-    //          Effective Tax %, Total Cost]
-    assert.match(bcRow[9], /Scope A \(Retired\)/, 'Bookings & Costs Instruments column must carry "(Retired)"');
-    assert.match(bcRow[10], /Sam \(Retired\)/, 'Bookings & Costs Facility Staff column must carry "(Retired)"');
+    // header: [Project Code, Project, Booking, Tags, Grant, Tier, Status, Date, Start, End,
+    //          Instruments, Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %,
+    //          Before Tax, Effective Tax %, Total Cost]
+    assert.match(bcRow[10], /Scope A \(Retired\)/, 'Bookings & Costs Instruments column must carry "(Retired)"');
+    assert.match(bcRow[11], /Sam \(Retired\)/, 'Bookings & Costs Facility Staff column must carry "(Retired)"');
   });
 });
 
@@ -117,11 +117,11 @@ describe('exports (R4): DOCX/PDF money follows the same waived-cancellation rule
     Exports.exportXlsx(liveProject);
     const wbProj = app.captured[app.captured.length - 1];
     const mtRows = sheetRows(wbProj, 'Meetings');
-    // header: [Meeting Title, Grant, Tier, Category, Status, Date, Start, End, Attendees, Notes,
-    //          Action Items, Subtotal, Before Tax, Total Cost]
+    // header: [Meeting Title, Grant, Tier, Category, Tags, Status, Date, Start, End, Attendees,
+    //          Notes, Action Items, Subtotal, Before Tax, Total Cost]
     const waivedXlsxRow = mtRows.find((r) => r[0] === 'Waived');
     assert.ok(waivedXlsxRow);
-    assert.equal(waivedXlsxRow[13], 0, 'XLSX Total Cost must already be zeroed for a waived cancellation');
+    assert.equal(waivedXlsxRow[14], 0, 'XLSX Total Cost must already be zeroed for a waived cancellation');
 
     // DOCX — must now match: the Cost paragraph's Total must also read as 0 (formatted via
     // UI.fmtMoney), not the raw stored total_cost of 150.
@@ -148,13 +148,13 @@ describe('exports (R4): DOCX/PDF money follows the same waived-cancellation rule
     assert.deepEqual(bcRows[0].slice(-3), ['Before Tax', 'Effective Tax %', 'Charged Total'], 'the money columns must read Before Tax / Effective Tax % / Charged Total, in that order');
     const bcRow = bcRows.find((r) => r[2] === 'Waived');
     assert.ok(bcRow, 'the waived booking must appear on the facility-wide Bookings & Costs sheet');
-    // header: [Project Code, Project, Booking, Grant, Tier, Status, Date, Start, End, Instruments,
-    //          Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %, Before Tax,
-    //          Effective Tax %, Charged Total]
-    assert.equal(bcRow[11], 150, 'Subtotal must stay the unwaived snapshot (150), unchanged by waiving the charge');
-    assert.equal(bcRow[15], 150, 'Before Tax must likewise stay the unwaived snapshot (150)');
-    assert.equal(bcRow[16], '', 'Effective Tax % is blank — nothing was actually billed to derive a rate from');
-    assert.equal(bcRow[17], 0, 'Charged Total must be zeroed for a waived cancellation');
+    // header: [Project Code, Project, Booking, Tags, Grant, Tier, Status, Date, Start, End,
+    //          Instruments, Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %,
+    //          Before Tax, Effective Tax %, Charged Total]
+    assert.equal(bcRow[12], 150, 'Subtotal must stay the unwaived snapshot (150), unchanged by waiving the charge');
+    assert.equal(bcRow[16], 150, 'Before Tax must likewise stay the unwaived snapshot (150)');
+    assert.equal(bcRow[17], '', 'Effective Tax % is blank — nothing was actually billed to derive a rate from');
+    assert.equal(bcRow[18], 0, 'Charged Total must be zeroed for a waived cancellation');
   });
 });
 

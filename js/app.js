@@ -88,6 +88,29 @@
   }
   function orgNames() { return unionNames(distinctPeopleCol('organization'), DB.vocabList('ORG')); }
   function deptNames() { return unionNames(distinctPeopleCol('department'), DB.vocabList('DEPT')); }
+  // Suggestions for the booking Tags field: every BOOKING_TAG vocab term merged with every tag
+  // already used on an existing booking (the comma-joined `meetings.tags` display column, split
+  // with UI.parseTags) — same unionNames-style merge as orgNames/deptNames above, so a tag typed
+  // once shows up as a suggestion on every booking dialog afterward, not only via the vocab table.
+  function bookingTagSuggestions() {
+    const used = DB.rows("SELECT tags FROM meetings WHERE TRIM(COALESCE(tags,''))<>''")
+      .flatMap((r) => UI.parseTags(r.tags));
+    return unionNames(DB.vocabList('BOOKING_TAG'), used);
+  }
+  // Free-text tags input with a <datalist> of suggestions (bookingTagSuggestions above) — unlike
+  // vocabField/listPickerField this never forces a single selection, since a booking can carry
+  // several comma-separated tags at once. Same label text as the project dialogs' Tags field.
+  function tagsField(id, value) {
+    const suggestions = bookingTagSuggestions();
+    return `
+    <div class="field">
+      <label>Tags (comma-separated)</label>
+      <input class="input" id="${id}" list="${id}-list" value="${esc(value)}" placeholder="e.g. SIM, TIRF, Fiji, Napari" />
+      <datalist id="${id}-list">
+        ${suggestions.map((t) => `<option value="${esc(t)}"></option>`).join('')}
+      </datalist>
+    </div>`;
+  }
 
   /* ---------------- Helper: Editable Vocabulary Dropdowns ----------------
      A <select> backed by DB.vocabList(category) (built-in CONST terms plus any
@@ -1417,6 +1440,8 @@
       case 'email-open-blank': return void (window.location.href = 'mailto:');
       case 'bom-group-revoke': return handleGroupRevoke(el.closest('.modal'), el.closest('.modal')._bomIds);
       case 'bom-group-apply': return handleGroupReapply(el.closest('.modal'), el.closest('.modal')._bomIds);
+      case 'category-rename': return renameCategoryFromSettings(el.dataset.category);
+      case 'category-remove': return removeCategoryFromSettings(el.dataset.category);
 
       // Custom KV Fields CRUD
       case 'kv-add': return addKV();
@@ -3514,6 +3539,7 @@
           ${groupSelectField('bk-group', '')}
           ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bk-category', label: 'Category', placeholder: '-- Select Category --' })}
         </div>
+        ${tagsField('bk-tags', '')}
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
@@ -3593,6 +3619,7 @@
     const category = (m.querySelector('#bk-category') || {}).value || '';
     const note = readNote(m, 'bk-note');
     const actions = m.querySelector('#bk-act').value.trim();
+    const tags = UI.joinTags(UI.parseTags((m.querySelector('#bk-tags') || {}).value || ''));
 
     const ownerIds = readTokenIds(m, 'owner');
     const instIds = readTokenIds(m, 'inst');
@@ -3664,9 +3691,9 @@
     // Same BOM snapshot (rates read once, at save time) for every occurrence — deliberate:
     // identical recurring sessions are priced at today's rates, not recomputed per occurrence.
     function insertBookingRow(dateStr) {
-      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct, category_staff_pct)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct]);
+      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct, category_staff_pct, tags)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct, tags]);
       const inserted = DB.row('SELECT last_insert_rowid() as id');
       const mid = inserted ? inserted.id : null;
       if (mid) {
@@ -3684,6 +3711,7 @@
     // only way this loop can now fail is a genuine error (bad row, thrown save), and a repeating
     // booking must not create some occurrences and silently drop the rest of them.
     DB.transaction(() => { dates.forEach((d) => insertBookingRow(d)); });
+    UI.parseTags(tags).forEach((t) => DB.addVocab('BOOKING_TAG', t));
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast(dates.length > 1 ? `${dates.length} bookings created` : 'Booking saved');
@@ -3720,6 +3748,7 @@
           ${groupSelectField('bke-group', mt.group_org || '')}
           ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bke-category', label: 'Category', selected: mt.category || '', placeholder: '-- Select Category --' })}
         </div>
+        ${tagsField('bke-tags', mt.tags || '')}
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
@@ -3792,6 +3821,7 @@
     const category = (m.querySelector('#bke-category') || {}).value || '';
     const note = readNote(m, 'bke-note');
     const actions = m.querySelector('#bke-act').value.trim();
+    const tags = UI.joinTags(UI.parseTags((m.querySelector('#bke-tags') || {}).value || ''));
 
     const ownerIds = readTokenIds(m, 'owner');
     const instIds = readTokenIds(m, 'inst');
@@ -3881,7 +3911,7 @@
     DB.transaction(() => {
       DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
                 discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
-                tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
+                tier_id=?, tier_overhead_pct=?, category_staff_pct=?, tags=?, updated_at=datetime('now') WHERE id=?`,
         [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct,
          pricedChanged ? bom.subtotal : stored.subtotal,
          pricedChanged ? bom.beforeTax : stored.total_before_tax,
@@ -3890,6 +3920,7 @@
          pricedChanged ? bom.tierId : stored.tier_id,
          pricedChanged ? bom.tierOverheadPct : stored.tier_overhead_pct,
          pricedChanged ? bom.categoryStaffPct : stored.category_staff_pct,
+         tags,
          id]);
 
       // Attendees (who was there, not what it cost) always rebuild from the form regardless.
@@ -3910,6 +3941,7 @@
         });
       }
     });
+    UI.parseTags(tags).forEach((t) => DB.addVocab('BOOKING_TAG', t));
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Booking updated');
@@ -4603,6 +4635,54 @@
         hintEl.textContent = `→ billing at assisted session's ${assistedPct}% (the disabled value above is ignored)`;
       }
     }
+  }
+
+  // Renames a booking category everywhere it appears (meetings.category, its category_policies
+  // row, and the BOOKING_CATEGORY vocab) via DB.renameBookingCategory — see that function's
+  // comments in db.js for the merge-vs-plain-rename distinction. consult/training/assisted
+  // session are protected (Views.settings() omits the button for them entirely), so this is
+  // never called for one, but DB.renameBookingCategory also refuses them defensively.
+  function renameCategoryFromSettings(cat) {
+    const bookings = DB.countBookingCategoryRefs(cat);
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Rename Category</span></div>
+      <div class="body"><div class="stack">
+        <p class="mt-0 mb-8">This renames the category on every booking that uses it (${bookings} booking${bookings === 1 ? '' : 's'}).</p>
+        <div class="field"><label>New Name *</label><input class="input" id="cat-rename-to" value="${esc(cat)}" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" id="cat-rename-go">${ic('check')} Rename Category</button>
+      </div>`, (modalEl) => {
+      modalEl.querySelector('#cat-rename-go').onclick = () => {
+        const newName = modalEl.querySelector('#cat-rename-to').value.trim();
+        if (!newName) { UI.toast('Enter a new name', 'error'); return; }
+        if (newName === cat) { UI.toast('That’s already the current name', 'error'); return; }
+        const result = DB.renameBookingCategory(cat, newName);
+        if (!result) { UI.toast('Rename failed', 'error'); return; }
+        UI.toast(result.merged
+          ? `Category merged into "${newName}" on ${result.bookings} booking${result.bookings === 1 ? '' : 's'}`
+          : `Category renamed on ${result.bookings} booking${result.bookings === 1 ? '' : 's'}`);
+        UI.closeDim(modalEl.closest('.modal-dim'));
+        refresh();
+      };
+    });
+  }
+
+  // Removes a booking category from the category list — only offered once no booking uses it
+  // (DB.countBookingCategoryRefs === 0); otherwise the admin is pointed at rename instead, since
+  // a category still in use can't just vanish out from under its bookings.
+  async function removeCategoryFromSettings(cat) {
+    const refs = DB.countBookingCategoryRefs(cat);
+    if (refs > 0) {
+      UI.toast(`This category is still used by ${refs} booking${refs === 1 ? '' : 's'} — rename it instead.`, 'error');
+      return;
+    }
+    const ok = await UI.confirmModal('Remove Category', `Remove "${cat}" from the category list?`, { danger: true, confirmText: 'Remove' });
+    if (!ok) return;
+    DB.removeBookingCategory(cat);
+    UI.toast(`Category "${cat}" removed`);
+    refresh();
   }
 
   // Rename/merge a lab name everywhere it appears (people.organization, meetings.group_org, and

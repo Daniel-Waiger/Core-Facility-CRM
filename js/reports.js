@@ -122,7 +122,7 @@
   function loadMeetingsInRange(from, to, facts) {
     return memo(facts, 'meetings', () => DB.rows(`
       SELECT mt.id, mt.project_id, mt.title, mt.date, mt.start_time, mt.end_time, mt.group_org,
-             mt.total_cost, mt.is_cancelled, mt.billing_retained, mt.category,
+             mt.total_cost, mt.is_cancelled, mt.billing_retained, mt.category, mt.tags,
              p.code AS project_code, p.title AS project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       WHERE ${RANGE_SQL}
@@ -806,6 +806,45 @@
     return { periods, categories, rows };
   }
 
+  /* ---------------- Card — Booking Tags ----------------
+     `meetings.tags` is a free-text, comma-joined column (same shape as `meetings.category`'s
+     sibling), split with UI.parseTags in JS — never a SQL aggregate query, because a single booking can
+     carry several tags, and this aggregation deliberately counts that booking once under EACH tag
+     it carries. That means the Bookings column below does not sum to the number of distinct
+     bookings in the range: a two-tag booking contributes 1 to two different rows. Hours use
+     UI.hoursBetween exactly like every other hour figure in this file. Occupancy rule: cancelled
+     bookings are excluded entirely (rule 1) — a cancellation never held its slot, so it never
+     "did" whatever its tags describe. */
+  function computeBookingTagRows(from, to, facts) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'bookingTagRows', () => computeBookingTagRowsImpl(from, to, facts));
+  }
+  function computeBookingTagRowsImpl(from, to, facts) {
+    const meetings = loadMeetingsInRange(from, to, facts).filter((m) => !m.is_cancelled); // rule 1
+
+    const byTag = new Map(); // tag -> { bookings, hours }
+    let taggedBookings = 0;
+    let untaggedBookings = 0;
+    meetings.forEach((m) => {
+      const tags = UI.parseTags(m.tags);
+      if (!tags.length) { untaggedBookings++; return; }
+      taggedBookings++;
+      const hours = UI.hoursBetween(m.start_time, m.end_time);
+      tags.forEach((tag) => {
+        if (!byTag.has(tag)) byTag.set(tag, { bookings: 0, hours: 0 });
+        const entry = byTag.get(tag);
+        entry.bookings += 1;
+        entry.hours += hours;
+      });
+    });
+
+    const rows = Array.from(byTag.entries()).map(([tag, v]) => ({ tag, bookings: v.bookings, hours: v.hours }));
+    rows.sort((a, b) => (b.hours - a.hours) || (b.bookings - a.bookings) || a.tag.localeCompare(b.tag));
+
+    return { rows, taggedBookings, untaggedBookings };
+  }
+
   /* ================================================================================
      Card — Funnel analysis with project outputs (ROADMAP 3.3)
      consult -> project created -> active (first booking) -> milestones progressing ->
@@ -1265,6 +1304,7 @@
         date: m.date || '',
         title: m.title || '',
         category: m.category || '',
+        tags: m.tags || '',
         project: m.project_id == null ? 'Facility-wide' : (m.project_code ? m.project_code + ' — ' + m.project_title : m.project_title),
         lab: m.group_org || '',
         instruments: insts.join(', '),
@@ -1309,7 +1349,7 @@
     return Object.assign({ key, label, type, get, required: false }, opts || {});
   }
 
-  const CUSTOM_REPORT_ENTITY_ORDER = ['instrument', 'staff', 'projects', 'consults', 'service', 'stewardship', 'activitymix', 'funnel', 'bookings'];
+  const CUSTOM_REPORT_ENTITY_ORDER = ['instrument', 'staff', 'projects', 'consults', 'service', 'stewardship', 'activitymix', 'funnel', 'bookings', 'bookingtags'];
 
   const ENTITY_DEFS = {
     instrument: {
@@ -1478,6 +1518,7 @@
         ccol('date', 'Date', 'text', (r) => r.date || '—'),
         ccol('title', 'Title', 'text', (r) => r.title || '—'),
         ccol('category', 'Category', 'text', (r) => r.category || '—'),
+        ccol('tags', 'Tags', 'text', (r) => r.tags || '—'),
         ccol('project', 'Project', 'text', (r) => r.project),
         ccol('lab', 'Lab / Group', 'text', (r) => r.lab || '—'),
         ccol('instruments', 'Instruments', 'text', (r) => r.instruments || '—'),
@@ -1486,6 +1527,16 @@
         ccol('staffHours', 'Staff Hours', 'hours', (r) => r.staffHours),
         ccol('status', 'Status', 'text', (r) => r.status),
         ccol('cost', 'Cost', 'money', (r) => r.cost)
+      ]
+    },
+    bookingtags: {
+      label: 'Booking Tags',
+      notes: ['A booking carrying several tags is counted once under each of them, so the Bookings column can exceed the number of distinct bookings in the range. Cancelled bookings are excluded entirely.'],
+      buildRows: (from, to, facts) => computeBookingTagRows(from, to, facts).rows,
+      columns: [
+        ccol('tag', 'Tag', 'text', (r) => r.tag, { required: true }),
+        ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
+        ccol('hours', 'Booked Hours', 'hours', (r) => r.hours)
       ]
     }
   };
@@ -1573,6 +1624,7 @@
     const svc = computeServiceEntryRows(from, to, facts);
     const breadth = computeBreadthRows(from, to, facts);
     const mix = computeActivityMixRows(from, to, facts);
+    const tagRows = computeBookingTagRows(from, to, facts);
     const funnel = computeFunnelRows(from, to, facts);
     const labConsultsOn = getLabConsultsEnabled();
 
@@ -1885,6 +1937,25 @@
     </div>
 
     <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('tag')} Booking Tags</span></div></div>
+      ${!tagRows.rows.length ? global.Views.emptyState('tag', 'No tagged bookings in this range', 'Add tags to a booking — the instrument mode or software used, for example — to see them counted here.') : `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Tag</th><th>Bookings</th><th>Booked Hours</th></tr></thead>
+          <tbody>
+            ${tagRows.rows.map((r) => `
+              <tr>
+                <td style="font-weight:600">${esc(r.tag)}</td>
+                <td class="mono small">${r.bookings}</td>
+                <td class="mono small">${fmtHours(r.hours)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+      <div class="faint small mt-8">Cancelled bookings are excluded; a booking with several tags is counted once under each of them, so bookings do not sum to the number of distinct bookings shown; ${tagRows.untaggedBookings} untagged booking${tagRows.untaggedBookings === 1 ? '' : 's'} in range not shown.</div>
+    </div>
+
+    <div class="card mb-16">
       <div class="row mb-8"><div class="grow"><span class="card-title">${ic('target')} Funnel: Consult to Output</span></div></div>
       ${!funnel.stages.some((s) => s.count > 0) ? global.Views.emptyState('target', 'No funnel activity in this range', 'Widen the date range or add consults, projects, bookings, milestones and outputs.') : `
       <div class="mb-16">${chartFunnel(funnel.stages)}</div>
@@ -1938,6 +2009,7 @@
     computeServiceEntryRows,
     computeBreadthRows,
     computeActivityMixRows,
+    computeBookingTagRows,
     computeFunnelRows,
     computeBookingRows,
     getLabConsultsEnabled,

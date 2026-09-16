@@ -3,6 +3,17 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Bookings can now carry tags**, entered in either booking dialog and shown as chips in a project's bookings list, the Project Costs table and the calendar. (#39)
+- **A new Booking Tags report card** shows bookings and booked hours per tag, with cancelled bookings excluded and a booking with more than one tag counted under each of them; also available as a custom-report entity and as a sheet in the Reports export. (#39)
+- **Tags travel with exports**: a Tags column in the per-project spreadsheet and the facility-wide Meetings and Bookings & Costs sheets, and a Tags line per booking in the Word and PDF reports. (#39)
+- **A few demo bookings now carry tags**, so the new report and columns have something to show out of the box. (#39)
+
+### Changed
+- **Booking categories can now be renamed or removed from Settings → Category Billing.** Renaming a category updates every booking that uses it; removing one is only offered once nothing uses it anymore, and consult, training and assisted session are protected from either change. (#39)
+
 ## [1.11.0] — 2026-09-12
 
 An adversarial review of the whole app — every screen driven in a real browser, the money and
