@@ -3,7 +3,7 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.12.0] — 2026-09-16
 
 ### Added
 - **Bookings can now carry tags**, entered in either booking dialog and shown as chips in a project's bookings list, the Project Costs table and the calendar. (#39)

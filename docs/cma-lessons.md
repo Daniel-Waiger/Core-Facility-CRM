@@ -307,3 +307,16 @@ Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos
   is what the file actually contains before trusting the tree.
 
 - **No version bumps, ever, on these branches.** `index.html ?v=`, `sw.js CACHE_VERSION/PRECACHE_URLS`, `js/consts.js APP_VERSION` stay untouched; CHANGELOG bullets go under `## [Unreleased]`.
+
+## Also learned in the parallel #39 and #41 runs (2026-09-16)
+
+Distilled by the #39 and #41 learners on their own branches; carried over here when the three branches were merged.
+
+- **Record the failing-test baseline once at run start and put it in every brief.** Ten verifiers re-triaged the same three HEAD failures, two reached different counts, and several reached for `git stash` to prove it. Write criteria as "no new failures beyond this list", never as "the suite exits 0" when the baseline is red.
+- **`wiring.test.js` and `boot-ready-signal.test.js` are source-scrapers** and the repo's most brittle tests: they break on CRLF and on any reshaping of `boot()` or `handleAct()`. A scraper that throws before its first assertion never ran; do not dismiss it as environmental.
+- **Literal expected output of a runnable one-liner in the verification criteria** produced 10 of 10 first-try passes in the #39 run with zero retries.
+- **A planner must not ban vocabulary its own scope statement uses** (#39 T10's "column" ban against its own brief). Cross-format export claims need per-format wording: DOCX and PDF render a "Tags:" line, not a column.
+- **A hide mechanism needs a matching stylesheet rule.** #41 T5's bare `hidden` attribute was defeated by `.field { display: flex }`, invisible to `node --check` and the unit suite; caught only by rendering the dialog. A task's verification must only assert on that task's own files and on counts verified at HEAD.
+- **Reproduce a suspected pre-existing failure on an independent clone or via `git show HEAD:<path>`,** never by mutating the working tree, and show the reproduction in the verdict.
+- **Exit Plan Mode before dispatching execute workflows.** Subagents inherit it and refuse to edit; attempt 1 of every execute run on 2026-09-16 was wasted this way.
+- **Recover an interrupted parallel run by patch + fresh LF clone**, discarding the mid-flight task's half-written file before resuming with a nonce so only the lost task and its successors re-run.
