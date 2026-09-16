@@ -2269,6 +2269,16 @@
     const endOk = !rec.expires_on || rec.expires_on >= asOf;
     return !!(startOk && endOk);
   }
+  // Built on trainingActiveOn: a record failing the check is either 'expired' (past its
+  // expires_on) or, when trained_on hasn't arrived yet, 'pending' — the sign-off exists but
+  // isn't in force yet, which is a materially different thing to show an auditor than "expired".
+  // Returns 'valid' | 'expired' | 'pending'. Single source for both Views.personDetail's badge
+  // and the Activity Certificate export's Status column, so the two can never disagree.
+  function trainingStatusOn(rec, asOf) {
+    if (trainingActiveOn(rec, asOf)) return 'valid';
+    if (rec.trained_on && rec.trained_on > asOf) return 'pending';
+    return 'expired';
+  }
   // Same rule as trainingActiveOn above, evaluated in SQL so a full instrument list can be
   // annotated in one query rather than N+1 JS-side calls. Returns one row per instrument that
   // has at least one currently-active trainee; an instrument with none simply isn't in the
@@ -3438,6 +3448,7 @@
     countProjectRefs,
     countGrantRefs,
     trainingActiveOn,
+    trainingStatusOn,
     trainedUserCountsAsOf,
     listPersonTraining,
     listInstrumentTraining,

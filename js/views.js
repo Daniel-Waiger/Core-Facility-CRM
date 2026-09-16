@@ -866,14 +866,16 @@
             <thead><tr><th>Instrument</th><th>Level</th><th>Trained On</th><th>Trainer</th><th>Expires On</th><th>Note</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
               ${training.map((rec) => {
-                const expired = !global.DB.trainingActiveOn(rec, global.UI.today());
+                const status = global.DB.trainingStatusOn(rec, global.UI.today());
+                const statusBadge = status === 'expired' ? ' <span class="badge warning">Expired</span>'
+                  : status === 'pending' ? ' <span class="badge neutral">Not Yet Valid</span>' : '';
                 return `
                 <tr>
                   <td class="small font-medium">${esc(global.UI.retiredName(rec.instrument_name, rec.instrument_retired))}</td>
                   <td><span class="badge primary">${esc(rec.level)}</span></td>
                   <td class="mono small faint">${fmt(rec.trained_on)}</td>
                   <td class="small">${rec.trainer_name ? esc(global.UI.retiredName(rec.trainer_name, rec.trainer_retired)) : '—'}</td>
-                  <td class="mono small faint">${rec.expires_on ? fmt(rec.expires_on) : 'No expiry'}${expired ? ' <span class="badge warning">Expired</span>' : ''}</td>
+                  <td class="mono small faint">${rec.expires_on ? fmt(rec.expires_on) : 'No expiry'}${statusBadge}</td>
                   <td class="faint small">${dv(rec.note)}</td>
                   <td style="text-align:right;white-space:nowrap">
                     <button class="btn btn-ghost btn-xs" data-act="training-edit" data-id="${rec.id}" title="Edit Training Record">${ic('edit')}</button>
@@ -914,18 +916,21 @@
   }
 
   function instruments() {
-    const allRows = global.DB.rows(`
+    const rawRows = global.DB.rows(`
       SELECT i.*,
              (SELECT COUNT(*) FROM project_instruments pi JOIN projects p ON p.id = pi.project_id
                 WHERE pi.instrument_id = i.id AND p.is_archived=0) as proj_count,
              (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
                 FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
-                WHERE ist.instrument_id = i.id) as supervisors,
-             (SELECT COUNT(DISTINCT t.person_id) FROM person_instrument_training t
-                WHERE t.instrument_id=i.id AND (t.trained_on='' OR t.trained_on<=?)
-                  AND (t.expires_on='' OR t.expires_on IS NULL OR t.expires_on>=?)) AS trained_users
+                WHERE ist.instrument_id = i.id) as supervisors
       FROM instruments i
-      ORDER BY i.is_retired, i.name`, [global.UI.today(), global.UI.today()]);
+      ORDER BY i.is_retired, i.name`);
+    // Trained Users: one shared rule with Reports' stewardship card (DB.trainedUserCountsAsOf) —
+    // NULL trained_on means "no start restriction", same as trainingActiveOn — rather than a
+    // second, drifted inline subquery (see reports.js's loadTrainedUserCounts for the same
+    // `.find(...) || {trained_users: 0}` annotation pattern).
+    const trainedByInstrument = new Map(global.DB.trainedUserCountsAsOf(global.UI.today()).map((r) => [r.instrument_id, r.trained_users]));
+    const allRows = rawRows.map((r) => Object.assign({}, r, { trained_users: trainedByInstrument.get(r.id) || 0 }));
     const retiredCount = allRows.filter((r) => r.is_retired).length;
 
     const qLower = (instrumentFilter.query || '').trim().toLowerCase();
@@ -1705,7 +1710,7 @@
           <div class="row mb-8 cat-policy-row" style="gap:14px;align-items:center;flex-wrap:wrap" data-category="${esc(p.category)}">
             <span class="small font-medium" style="min-width:130px">${esc(p.category)}</span>
             ${global.DB.protectedBookingCategories().includes(p.category) ? '' : `<button class="btn btn-ghost btn-xs" data-act="category-rename" data-category="${esc(p.category)}" title="Rename Category">${ic('edit')}</button>
-            <button class="btn btn-ghost btn-xs" data-act="category-remove" data-category="${esc(p.category)}" title="Remove Category">${ic('trash')}</button>`}
+            ${global.DB.countBookingCategoryRefs(p.category) > 0 ? '' : `<button class="btn btn-ghost btn-xs" data-act="category-remove" data-category="${esc(p.category)}" title="Remove Category">${ic('trash')}</button>`}`}
             <div class="field" style="margin:0">
               <label class="small faint">Staff %</label>
               <input type="number" min="0" max="100" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} ${p.category === 'assisted session' ? 'oninput="window.App && window.App.syncCategoryBillingHints && window.App.syncCategoryBillingHints()"' : ''} />
