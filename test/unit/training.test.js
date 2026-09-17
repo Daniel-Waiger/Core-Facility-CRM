@@ -423,12 +423,12 @@ describe('#47 removeTraining via app.internals', () => {
 });
 
 describe('#47 demo seed', () => {
-  test('seedSampleData() loads 9 training rows covering valid, expired, not-yet-valid and NULL-start, and booking #1 still totals 589.95', async () => {
+  test('seedSampleData() loads 16 training rows covering valid, expired, not-yet-valid and NULL-start, and booking #1 still totals 589.95', async () => {
     const { DB, UI } = await freshDb({ search: '?demo=1' });
     const ok = await DB.seedSampleData({ force: true });
     assert.equal(ok, true);
 
-    assert.equal(DB.row('SELECT COUNT(*) c FROM person_instrument_training').c, 9, 'the demo dataset must seed exactly 9 training rows');
+    assert.equal(DB.row('SELECT COUNT(*) c FROM person_instrument_training').c, 16, 'the demo dataset must seed exactly 16 training rows');
 
     const today = UI.today();
     const statuses = DB.rows('SELECT * FROM person_instrument_training').map((r) => DB.trainingStatusOn(r, today));

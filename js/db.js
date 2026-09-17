@@ -3451,6 +3451,287 @@
     run(`INSERT INTO project_outputs (project_id, type, title, reference, authors, url, acknowledges_facility, date)
          VALUES (1, 'poster', 'Intravital imaging of CAR-T infiltration kinetics in solid tumours', 'AAI Immunology 2026 — poster P-412', 'Chen, A.; Rostova, E.', 'https://example.org/posters/aai-2026-p412', 0, ?)`, [day(-45)]);
     // --- #41 end ---
+    // --- 1.13 begin ---
+    // 17 more bookings across every optical instrument (Leica SP8 FALCON id 1, Olympus FV3000 id 2,
+    // Zeiss Lightsheet Z.1 id 3, Nikon AX R Resonant id 4, Glacios Cryo-TEM id 5), spread over the
+    // three seed labs' new roster members (ids 9-17) and staffed by David Kim (6), Priya Anand (7)
+    // and Tom Alvarez (8) — so pickers, instrument profiles and the Dashboard agenda have real depth
+    // beyond the original handful of bookings. Every attendee list goes through peopleIds, never a
+    // hand-written attendees string, so the denormalized display column and meeting_people never
+    // drift (see CLAUDE.md's "The database is relational" section). None of these dates coincide
+    // with an existing seeded booking's date, so there is nothing to check them against for
+    // instrument/staff overlap; the new ones are checked against each other below.
+
+    // B1 — Lena Okafor and Jonah Reyes join Alex Chen's project on the Leica for an intravital
+    // acquisition session; David Kim runs it.
+    seedBooking({
+      projectId: 1,
+      grantId: 1,
+      title: 'Intravital Acquisition Session: CAR-T Infiltration Time-Lapse',
+      date: day(-42), start: '10:00', end: '12:00',
+      instruments: [{ id: 1 }], // Leica SP8 FALCON
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [9, 10], // Lena Okafor, Jonah Reyes
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Acquired matched intravital fields on the Leica SP8 FALCON for the CAR-T infiltration time-lapse dataset.',
+      actions: 'Jonah to begin infiltration-depth quantification on the new stacks.',
+      category: 'assisted session'
+    });
+
+    // B2 — Samir Haddad and Yuki Tanaka run a resonant-scan session for the synaptic density
+    // project on the Nikon AX R.
+    seedBooking({
+      projectId: 2,
+      grantId: 2,
+      title: 'Resonant-Scan Session: Synaptic Density Field Survey',
+      date: day(-35), start: '13:00', end: '15:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [12, 13], // Samir Haddad, Yuki Tanaka
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Surveyed additional hippocampal fields on the Nikon AX R Resonant for the synaptic density dataset.',
+      actions: 'Yuki to log field coordinates for re-acquisition consistency.',
+      category: 'assisted session'
+    });
+
+    // B3 — Ines Ferreira and Noa Levi's first Zeiss Lightsheet training, run by Priya Anand.
+    seedBooking({
+      projectId: 3,
+      grantId: 3,
+      title: 'New User Training: Zeiss Lightsheet Z.1 for Islet Clearing',
+      date: day(-28), start: '09:00', end: '11:00',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [15, 16], // Ines Ferreira, Noa Levi
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Walked Ines and Noa through cleared-islet mounting and multi-view acquisition on the Z.1.',
+      actions: '',
+      category: 'training'
+    });
+
+    // B4 — Lena Okafor's follow-up multiphoton session on the Olympus FV3000.
+    seedBooking({
+      projectId: 1,
+      title: 'Multiphoton Follow-up: CAR-T Infiltration Depth Series',
+      date: day(-25), start: '14:00', end: '16:00',
+      instruments: [{ id: 2 }], // Olympus FV3000
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [9], // Lena Okafor
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Ran a deeper z-series on the Olympus FV3000 to extend the infiltration-depth quantification.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B5 — a short walk-in consult for Yuki Tanaka and Grace Mbeki, no instrument billed, Tom
+    // Alvarez's time billed at the 1-hour floor.
+    seedBooking({
+      projectId: 2,
+      title: 'Culture Prep Consult for Upcoming Imaging Block',
+      date: day(-21), start: '09:00', end: '09:45',
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [13, 14], // Yuki Tanaka, Grace Mbeki
+      note: 'Discussed hippocampal culture timing ahead of the next resonant-scan block.',
+      actions: '',
+      category: 'consult'
+    });
+
+    // B6/B7/B8 — the weekly trio: Samir Haddad's recurring calcium-imaging block on the Nikon AX R,
+    // same title across all three weeks so the Reports screen can show it as a recurring series.
+    seedBooking({
+      projectId: 2,
+      title: 'Weekly Calcium Imaging Block',
+      date: day(-21), start: '11:00', end: '13:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [12], // Samir Haddad
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Weekly recurring resonant-scan block for the synaptic density calcium-imaging series.',
+      actions: '',
+      category: 'assisted session'
+    });
+    seedBooking({
+      projectId: 2,
+      title: 'Weekly Calcium Imaging Block',
+      date: day(-14), start: '11:00', end: '13:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [12], // Samir Haddad
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Weekly recurring resonant-scan block for the synaptic density calcium-imaging series.',
+      actions: '',
+      category: 'assisted session'
+    });
+    seedBooking({
+      projectId: 2,
+      title: 'Weekly Calcium Imaging Block',
+      date: day(-7), start: '11:00', end: '13:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [12], // Samir Haddad
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Weekly recurring resonant-scan block for the synaptic density calcium-imaging series.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B9 — Jonah Reyes and Ruth Adler run an unattended Leica acquisition with no facility staff
+    // billed (self-sufficient users, per their training level below).
+    seedBooking({
+      projectId: 1,
+      title: 'Unattended Overnight Time-Lapse Re-acquisition',
+      date: day(-14), start: '09:00', end: '12:00',
+      instruments: [{ id: 1 }], // Leica SP8 FALCON
+      peopleIds: [10, 11], // Jonah Reyes, Ruth Adler
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Re-ran the overnight multipoint acquisition on the Leica SP8 FALCON after a chamber refill.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B10 — Noa Levi's grid-screening session on the Glacios, billed per grid like the earlier
+    // Cryo-EM booking above.
+    seedBooking({
+      projectId: 3,
+      title: 'Cryo-EM Grid Screening: Islet Organoid Follow-up',
+      date: day(-12), start: '10:00', end: '12:00',
+      instruments: [{ id: 5, amount: 4 }], // Glacios Cryo-TEM, $45/grid x 4 grids screened
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [16], // Noa Levi
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Screened 4 follow-up grids from the organoid prep for ice thickness before full collection.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B11 — Ines Ferreira and Ben Carter's Zeiss Lightsheet session, run by Tom Alvarez.
+    seedBooking({
+      projectId: 3,
+      title: 'Lightsheet Volume Reacquisition: Organoid Batch QC',
+      date: day(-5), start: '13:00', end: '15:00',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [15, 17], // Ines Ferreira, Ben Carter
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Re-acquired two organoid volumes flagged for stitching artifacts during batch QC.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B12 — a short consult for Ruth Adler with David Kim, no instrument billed.
+    seedBooking({
+      projectId: 1,
+      title: 'Chamber Prep Consult Ahead of Next Time-Lapse',
+      date: day(-2), start: '10:00', end: '10:30',
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [11], // Ruth Adler
+      note: 'Discussed intravital chamber prep timing for the next unattended acquisition run.',
+      actions: '',
+      category: 'consult'
+    });
+
+    // B13 — today's first booking, so the Dashboard agenda and the Olympus FV3000 profile have
+    // something scheduled today: Lena Okafor and Alex Chen on the FV3000.
+    seedBooking({
+      projectId: 1,
+      title: 'Multiphoton Session: CAR-T Infiltration Depth Series, Round 2',
+      date: day(0), start: '09:00', end: '11:00',
+      instruments: [{ id: 2 }], // Olympus FV3000
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [9, 4], // Lena Okafor, Alex Chen
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Second round of the infiltration-depth z-series on the Olympus FV3000.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B14 — today's second booking, on the Leica: Samir Haddad and Yuki Tanaka's first STED
+    // training, run by Tom Alvarez.
+    seedBooking({
+      projectId: 2,
+      title: 'New User Training: Leica SP8 FALCON STED Basics',
+      date: day(0), start: '13:00', end: '15:00',
+      instruments: [{ id: 1 }], // Leica SP8 FALCON
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [12, 13], // Samir Haddad, Yuki Tanaka
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Walked Samir and Yuki through STED depletion alignment and immersion oil selection on the Leica SP8 FALCON.',
+      actions: '',
+      category: 'training'
+    });
+
+    // B15 — Maya Patel and Samir Haddad's resonant-scan session on the Nikon AX R.
+    seedBooking({
+      projectId: 2,
+      title: 'Resonant-Scan Session: Synaptic Density Follow-up Fields',
+      date: day(3), start: '09:00', end: '11:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [5, 12], // Maya Patel, Samir Haddad
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Acquired follow-up resonant fields for the synaptic density dataset.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B16 — Noa Levi's second Zeiss Lightsheet session, run by Priya Anand.
+    seedBooking({
+      projectId: 3,
+      title: 'Lightsheet Volume Reacquisition: Islet Clearing Follow-up',
+      date: day(7), start: '10:00', end: '12:00',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [16], // Noa Levi
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Re-acquired a cleared-islet volume flagged for a mounting artifact.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B17 — a short future consult for Jonah Reyes with Tom Alvarez, no instrument billed.
+    seedBooking({
+      projectId: 1,
+      title: 'Image Analysis Consult: Infiltration Quantification Pipeline',
+      date: day(14), start: '11:00', end: '11:30',
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [10], // Jonah Reyes
+      note: 'Planned walk-through of the batch quantification pipeline for the infiltration-depth series.',
+      actions: '',
+      category: 'consult'
+    });
+
+    // Reused tags (from the existing STED/Fiji/Napari/Lightsheet/Grant Planning/Workshop set only)
+    // so the tag picker's counts read above 1 for several tags. The trio share one title, so one
+    // UPDATE tags all three weekly bookings at once.
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED, Napari', 'Weekly Calcium Imaging Block']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Multiphoton Session: CAR-T Infiltration Depth Series, Round 2']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'New User Training: Zeiss Lightsheet Z.1 for Islet Clearing']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'Lightsheet Volume Reacquisition: Islet Clearing Follow-up']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Unattended Overnight Time-Lapse Re-acquisition']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED', 'New User Training: Leica SP8 FALCON STED Basics']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Napari', 'Image Analysis Consult: Infiltration Quantification Pipeline']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Intravital Acquisition Session: CAR-T Infiltration Time-Lapse']);
+
+    // Training rows for the new roster members (ids 9-17), same column list as trainingRows above.
+    const newTrainingRows = [
+      // Lena Okafor, trained on the Olympus FV3000 (2) by David Kim; no expiry set.
+      [9, 2, 'Regular', day(-60), 6, '', ''],
+      // Jonah Reyes, trained on the Leica SP8 FALCON (1) by David Kim; expires well in the future.
+      [10, 1, 'Regular', day(-40), 6, day(325), ''],
+      // Ruth Adler, trained on the Leica SP8 FALCON (1) by Tom Alvarez; no expiry set.
+      [11, 1, 'Regular', day(-30), 8, '', ''],
+      // Samir Haddad, Super User on the Nikon AX R Resonant (4), trained by David Kim — runs the
+      // weekly calcium block independently.
+      [12, 4, 'Super User', day(-150), 6, '', 'Runs the weekly calcium block independently'],
+      // Yuki Tanaka, trained on the Nikon AX R Resonant (4) by David Kim; no expiry set.
+      [13, 4, 'Regular', day(-33), 6, '', ''],
+      // Ines Ferreira, trained on the Zeiss Lightsheet Z.1 (3) by Priya Anand; expires in the future.
+      [15, 3, 'Regular', day(-27), 7, day(338), ''],
+      // Noa Levi, trained on the Glacios Cryo-TEM (5) by Priya Anand; no expiry set.
+      [16, 5, 'Regular', day(-20), 7, '', '']
+    ];
+    newTrainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
+    // --- 1.13 end ---
 
     markDirty();
     return true;

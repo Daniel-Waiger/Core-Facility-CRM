@@ -14,6 +14,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - Training levels are now **Regular** and **Super User**; records saved as 'User' are renamed automatically on load and on restore.
 - The person profile shows one role pill, coloured by role (PI, Facility Staff, everyone else), and the People list uses the same colouring.
+- **A fuller demo dataset**: each lab has three more members with real roles, 17 more bookings across every optical instrument (two of them today, so the Dashboard agenda and instrument profiles have something to show), reused tags so the tag picker shows counts, and training records for the new members.
 
 ## [1.12.1] — 2026-09-17
 
