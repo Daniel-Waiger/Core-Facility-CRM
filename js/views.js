@@ -39,6 +39,23 @@
       WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
       ORDER BY m.due_date ASC LIMIT 10`, [now]);
 
+    const todayStr = now;
+    const agendaDate = new Date().toLocaleDateString(DATE_LOCALE, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    const bookingsToday = global.DB.rows(`
+      SELECT m.id, m.title, m.start_time, m.end_time, m.is_cancelled, m.project_id, p.title AS project_title,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id=mi.instrument_id WHERE mi.meeting_id=m.id) AS instruments,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_staff ms JOIN people pe ON pe.id=ms.person_id WHERE ms.meeting_id=m.id) AS staff
+      FROM meetings m LEFT JOIN projects p ON p.id=m.project_id
+      WHERE m.date=? AND (m.project_id IS NULL OR p.is_archived=0)
+      ORDER BY m.start_time, m.id`, [todayStr]);
+
+    const msToday = global.DB.rows(`
+      SELECT m.id, m.name, m.due_date, m.status, p.id AS project_id, p.title AS project_title
+      FROM milestones m JOIN projects p ON p.id = m.project_id
+      WHERE p.is_archived=0 AND m.due_date=?
+      ORDER BY m.status='done', m.id`, [todayStr]);
+
     return `
     <div class="grid cols-4 mb-16">
       <div class="card stat"><span class="n">${total}</span><span class="l">Total Projects</span></div>
@@ -77,6 +94,47 @@
                 <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
               </span>
             </div>`).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
+        </div>
+      </div>
+    </div>
+    <div class="card mt-16">
+      <div class="card-title">${ic('calendar')} Today's Agenda — ${esc(agendaDate)}</div>
+      <div class="card-body">
+        <div class="grid cols-2">
+          <div>
+            <div class="card-title">Bookings Today (${bookingsToday.length})</div>
+            <div class="card-body">
+              ${bookingsToday.length ? bookingsToday.map((m) => {
+                const start = m.start_time ? m.start_time : 'All day';
+                const end = m.start_time && m.end_time ? m.end_time : '';
+                return `
+                <div class="row milestone-quick-row ${m.is_cancelled ? 'row-retired' : ''}" data-act="edit-booking" data-id="${m.id}" style="cursor:pointer">
+                  <span class="mono small">${esc(start)}${end ? '–' + esc(end) : ''}</span>
+                  <div class="grow">
+                    <div class="font-medium">${esc(m.title)}</div>
+                    <div class="faint small">${m.project_title ? esc(m.project_title) : 'Facility-wide'}${m.instruments ? ' · ' + esc(m.instruments) : ''}${m.staff ? ' · ' + esc(m.staff) : ''}</div>
+                  </div>
+                  ${m.is_cancelled ? '<span class="badge danger">Cancelled</span>' : ''}
+                </div>`;
+              }).join('') : emptyState('calendar', 'No bookings today', 'Bookings dated today will appear here.')}
+            </div>
+          </div>
+          <div>
+            <div class="card-title">Milestones Due Today (${msToday.length})</div>
+            <div class="card-body">
+              ${msToday.length ? msToday.map((m) => `
+                <div class="row milestone-quick-row">
+                  <div class="grow row-link" data-goto="project" data-id="${m.project_id}">
+                    <div class="font-medium">${esc(m.name)}</div>
+                    <div class="faint small">${esc(m.project_title)}</div>
+                  </div>
+                  <span class="ms-quick-meta">
+                    <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(global.UI.msStatusLabel(m.status))}</span>
+                    <span class="mono small">${fmt(m.due_date)}</span>
+                  </span>
+                </div>`).join('') : emptyState('target', 'Nothing due today', 'Milestones due today will appear here.')}
+            </div>
+          </div>
         </div>
       </div>
     </div>`;

@@ -9,6 +9,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 - 'Facility Staff' is a real Role / Position option in the person dialog and People filter, not only demo text.
 - **A tag picker in both booking dialogs**: pick from every tag already used (with how many bookings carry it, cancelled ones included) or type to create a new one; stored tags are unchanged.
 - **An Instrument Profile page**, opened from the Instruments list, with this month's and this year's bookings, booked hours, distinct users and charges (the same figures as Reports), details and supervisors, the next 14 days of bookings, recent activity (user, time, duration, assisting staff, notes, status), trained users and active projects, plus a New Booking button pre-set to that instrument.
+- **Today's Agenda on the Dashboard**: a full-width card under the milestone boxes lists today's bookings (time, title, project or Facility-wide, instruments, staff; cancelled ones marked) and the milestones due today.
 
 ### Changed
 - Training levels are now **Regular** and **Super User**; records saved as 'User' are renamed automatically on load and on restore.
