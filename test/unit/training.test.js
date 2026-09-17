@@ -423,17 +423,19 @@ describe('#47 removeTraining via app.internals', () => {
 });
 
 describe('#47 demo seed', () => {
-  test('seedSampleData() loads 6 training rows (at least one already expired) and booking #1 still totals 589.95', async () => {
+  test('seedSampleData() loads 9 training rows covering valid, expired, not-yet-valid and NULL-start, and booking #1 still totals 589.95', async () => {
     const { DB, UI } = await freshDb({ search: '?demo=1' });
     const ok = await DB.seedSampleData({ force: true });
     assert.equal(ok, true);
 
-    assert.equal(DB.row('SELECT COUNT(*) c FROM person_instrument_training').c, 6, 'the demo dataset must seed exactly 6 training rows');
+    assert.equal(DB.row('SELECT COUNT(*) c FROM person_instrument_training').c, 9, 'the demo dataset must seed exactly 9 training rows');
 
     const today = UI.today();
-    const expiredCount = DB.rows('SELECT * FROM person_instrument_training')
-      .filter((r) => !DB.trainingActiveOn(r, today)).length;
-    assert.ok(expiredCount >= 1, 'at least one seeded training record must already read as expired as of today');
+    const statuses = DB.rows('SELECT * FROM person_instrument_training').map((r) => DB.trainingStatusOn(r, today));
+    assert.ok(statuses.includes('expired'), 'at least one seeded training record must already read as expired as of today');
+    assert.ok(statuses.includes('pending'), 'at least one seeded training record must be scheduled but not yet valid');
+    assert.ok(statuses.includes('valid'), 'at least one seeded training record must be valid today');
+    assert.equal(DB.row('SELECT COUNT(*) c FROM person_instrument_training WHERE trained_on IS NULL').c, 1, 'one seeded record carries a NULL training date, exercising the "no start restriction" rule');
 
     const booking1 = DB.row('SELECT total_cost FROM meetings ORDER BY id ASC LIMIT 1');
     assert.equal(booking1.total_cost, 589.95, 'the seeded regression booking #1 must still total 589.95 — #47 must not have disturbed the money regression triple');

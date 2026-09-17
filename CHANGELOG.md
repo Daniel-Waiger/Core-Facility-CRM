@@ -3,6 +3,11 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.12.1] — 2026-09-17
+
+### Changed
+- **The demo dataset now shows off everything 1.12.0 added.** Research outputs cover every type (publication, acknowledgement, dataset, thesis, software, talk, poster), the acknowledgement records that it acknowledges the facility, and the dataset carries a linked protocol file. Training records include one scheduled but not yet valid, one imported with no recorded date, and one expiring within the month, so all three statuses appear. A facility-defined "workshop" booking category with its own billing policy and one tagged, staff-run workshop booking gives the Settings screen a category with Rename and Remove controls, and every demo person now has a campus and the staff have mobile numbers.
+
 ## [1.12.0] — 2026-09-16
 
 ### Added

@@ -3300,6 +3300,26 @@
     run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji, Napari', 'Open Office Hours: Image Analysis Pipeline Consultation']);
     run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Extended CAR-T Time-Lapse Re-acquisition (Automated Multipoint)']);
     run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'New User Training: Zeiss Lightsheet Z.1 Acquisition Basics']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Grant Planning', 'Walk-in Consult: Choosing an Imaging Modality for a New Grant']);
+
+    // A facility-added booking category, so Settings → Category Billing has a row that carries
+    // the Rename and Remove controls (the four built-ins are protected and show neither). It gets
+    // its own policy row like the built-ins do, and one booking under it — which also means the
+    // Remove control is hidden for it until that booking is gone, exactly the rule the help text
+    // states. No instrument line, so it can't collide with any seeded instrument booking.
+    addVocab('BOOKING_CATEGORY', 'workshop');
+    run("INSERT OR IGNORE INTO category_policies (category, staff_pct, requires_staff, follow_assisted) VALUES ('workshop', 100, 1, 0)");
+    seedBooking({
+      projectId: null,
+      title: 'Image Analysis Workshop: Batch Segmentation in Fiji and Napari',
+      date: day(-6), start: '14:00', end: '16:00',
+      staff: [{ id: 8 }], // Tom Alvarez runs it — a staff-run booking on his profile, not an attendance
+      peopleIds: [4, 5], // Alex Chen, Maya Patel
+      note: 'Hands-on session: building a reproducible batch segmentation pipeline, exporting per-object measurements, and handing results between Fiji and napari.',
+      actions: 'Shared the workshop notebook and sample data; both attendees to try the pipeline on their own stacks before the next office hours.',
+      category: 'workshop'
+    });
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji, Napari, Workshop', 'Image Analysis Workshop: Batch Segmentation in Fiji and Napari']);
     // --- #39 end ---
     // --- #47 begin ---
     // 12. Instrument training records (#47) — a deliberate mix so both the trained-user counter
@@ -3314,7 +3334,15 @@
       [5, 1, 'Super User', day(-200), 6, '', 'Independent after-hours use approved'],
       [1, 2, 'User', day(-400), 6, day(-5), 'Refresher due'],
       [7, 5, 'Super User', day(-300), null, '', ''],
-      [3, 3, 'User', day(-60), 6, day(305), '']
+      [3, 3, 'User', day(-60), 6, day(305), ''],
+      // Scheduled but not yet in force — reads "Not Yet Valid" on the profile and the certificate,
+      // and is excluded from today's Trained Users count (Patel on the Lightsheet, trainer Kim).
+      [5, 3, 'User', day(14), 6, '', 'Onboarding session booked; independent use only after sign-off'],
+      // A record carried over from the old paper sign-off sheet with no known date: NULL trained_on
+      // means "no start restriction", so it counts as trained today (Alvarez on the Leica).
+      [8, 1, 'User', null, 6, '', 'Imported from the pre-2024 sign-off sheet — training date not recorded'],
+      // Valid today but expiring within the month, so a refresher shows up as due soon.
+      [4, 3, 'User', day(-350), 6, day(20), 'Annual refresher due']
     ];
     trainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
 
@@ -3322,8 +3350,11 @@
     run("UPDATE people SET campus='Longwood' WHERE id IN (1,4)");
     run("UPDATE people SET campus='Cambridge' WHERE id IN (2,5)");
     run("UPDATE people SET campus='Main Campus' WHERE id IN (6,7,8)");
+    run("UPDATE people SET campus='Palo Alto' WHERE id=3");
     run("UPDATE people SET mobile='+1 617 555 0142' WHERE id=4");
     run("UPDATE people SET mobile='+1 617 555 0187' WHERE id=6");
+    run("UPDATE people SET mobile='+1 617 555 0163' WHERE id=7");
+    run("UPDATE people SET mobile='+1 617 555 0199' WHERE id=8");
     // --- #47 end ---
     // --- #41 begin ---
     // Backfill the roadmap #41 fields (doi/url/authors/acknowledges_facility/file_id) onto the
@@ -3339,8 +3370,27 @@
     run(`UPDATE project_outputs SET
         url = 'https://example.org/bioimaging/vol4',
         authors = 'Park, S.; Nguyen, H.',
-        acknowledges_facility = 0
+        acknowledges_facility = 0,
+        file_id = (SELECT id FROM files WHERE project_id=1 AND name='CAR-T_Intravital_Protocol_v3.pdf')
       WHERE project_id=1 AND type='dataset'`);
+    // The acknowledgement output is the one type that exists to record this flag, and its dialog
+    // now shows the checkbox — so the seeded one carries it, with a link to where it appeared.
+    run(`UPDATE project_outputs SET
+        acknowledges_facility = 1,
+        url = 'https://example.org/shi/4401/year-2-report'
+      WHERE project_id=3 AND type='acknowledgement'`);
+    // One output per remaining type (thesis, software, talk, poster), each with the fields its
+    // dialog shows, so the type-driven layouts and the exports have real rows to render. Only on
+    // projects 1 and 3 — project 2 stays at zero outputs so the funnel's conversion is still an
+    // honest less-than-100%. All URLs and references are fictional (example.org).
+    run(`INSERT INTO project_outputs (project_id, type, title, reference, authors, url, acknowledges_facility, date)
+         VALUES (3, 'thesis', 'Three-dimensional islet distribution in the cleared murine pancreas', 'PhD thesis, Stanford University School of Medicine', 'Rivera, M.', 'https://example.org/theses/rivera-2026', 1, ?)`, [day(-25)]);
+    run(`INSERT INTO project_outputs (project_id, type, title, reference, authors, url, acknowledges_facility, date)
+         VALUES (1, 'software', 'cart-track: 4D CAR-T infiltration tracking (Fiji script + napari plugin)', 'v1.2.0 release', 'Alvarez, T.; Chen, A.', 'https://example.org/bioimaging/cart-track', 1, ?)`, [day(-15)]);
+    run(`INSERT INTO project_outputs (project_id, type, title, reference, authors, acknowledges_facility, date)
+         VALUES (3, 'talk', 'Whole-organ lightsheet mapping of pancreatic islets: from clearing to counting', 'Bioimaging North America 2026, Boston — invited talk', 'Lin, S.', 1, ?)`, [day(-30)]);
+    run(`INSERT INTO project_outputs (project_id, type, title, reference, authors, url, acknowledges_facility, date)
+         VALUES (1, 'poster', 'Intravital imaging of CAR-T infiltration kinetics in solid tumours', 'AAI Immunology 2026 — poster P-412', 'Chen, A.; Rostova, E.', 'https://example.org/posters/aai-2026-p412', 0, ?)`, [day(-45)]);
     // --- #41 end ---
 
     markDirty();
