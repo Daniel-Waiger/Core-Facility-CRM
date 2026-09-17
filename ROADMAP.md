@@ -118,6 +118,12 @@ REST API, background workers) for the parts LabID has proven, and adds what it l
 billing, and facilities as tenants. Two items are decisions for university IT, not code; they are
 listed first because the rest waits on them. Effort labels are for the server codebase.
 
+Tier 5 bundles "multi-user" with "hosted by university IT." Those are separable, and a narrower
+question — two or three people in one facility, on their own machines, with an audit trail and
+nothing hosted outside the facility — has its own answer that is neither Tier 5 nor Tiers 1–4.
+Concept notes, not roadmap-committed and not a step toward Tier 5:
+[docs/plans/multi-user-local-concept.md](docs/plans/multi-user-local-concept.md).
+
 | # | Item | Effort | Why / how |
 |---|------|--------|-----------|
 | 5.0 | **IT decisions: single sign-on protocol and hosting** | — | Hundreds of users cannot have local accounts, so login must come from the university identity provider, and IT decides which protocol it exposes (SAML, OIDC, LDAP). Hosting decides where the database lives and who backs it up. Neither is code. Building 5.1–5.4 needs neither answer; the phase 1 pilot with real staff needs the host; phase 2, the first login by anyone outside the facility, needs SSO. |
