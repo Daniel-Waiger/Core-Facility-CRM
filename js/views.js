@@ -989,7 +989,7 @@
           <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th title="People with a training record valid today">Trained Users</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
-              <tr class="${r.is_retired ? 'row-retired' : ''}">
+              <tr class="row-link ${r.is_retired ? 'row-retired' : ''}" data-goto="instrument" data-id="${r.id}">
                 <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new bookings">Retired</span>' : ''}</td>
                 <td class="muted small">${esc(r.kind || '—')}</td>
                 <td><span class="badge ${r.status === 'Available' ? 'success' : r.status === 'In-use' ? 'primary' : r.status === 'Down' ? 'danger' : 'warning'}">${esc(r.status)}</span></td>
@@ -1001,6 +1001,7 @@
                 <td class="muted small">${esc(global.UI.unitLabel(r.cost_unit || 'time'))}</td>
                 <td><span class="badge neutral">${r.proj_count} project${r.proj_count === 1 ? '' : 's'}</span></td>
                 <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-ghost btn-xs" data-goto="instrument" data-id="${r.id}" title="Open Profile">${ic('chevron')}</button>
                   <button class="btn btn-ghost btn-xs" data-act="edit-instrument" data-id="${r.id}" title="Edit Instrument">${ic('edit')}</button>
                   ${r.is_retired
                     ? `<button class="btn btn-ghost btn-xs" data-act="restore-instrument" data-id="${r.id}" title="Restore — make available for new bookings again">${ic('rocket')}</button>`
@@ -1010,6 +1011,259 @@
           </tbody>
         </table>
       </div>`}
+    </div>`;
+  }
+
+  // Booking duration as "1h 30m", built on the same UI.hoursBetween minute math the cost
+  // calculator and Reports use — never a second copy of the arithmetic (CLAUDE.md).
+  function durationLabel(start, end) {
+    const h = global.UI.hoursBetween(start, end);
+    if (!h) return '—';
+    const H = Math.floor(h), M = Math.round((h - H) * 60);
+    return H + 'h ' + M + 'm';
+  }
+
+  // A note preview for a table cell: render through UI.noteHtml (the same sanitizer every note
+  // display uses), strip markup back to plain text, decode the handful of entities esc()/
+  // sanitizeHtml can produce, collapse whitespace, and clip to 80 chars with a full-text tooltip.
+  // Plain-text preview of a booking note. Works from the stored string directly rather than
+  // through UI.noteHtml: the output is escaped text, so no sanitizer is needed, and
+  // UI.sanitizeHtml needs a real DOMParser, which the unit-test DOM stub does not have.
+  // Rich-text notes (a small HTML subset) have their tags stripped and entities decoded;
+  // legacy plain-text notes are used as they are.
+  function notePreview(note) {
+    const raw = String(note || '');
+    const full = raw
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!full) return '—';
+    return `<span title="${esc(full)}">${esc(full.length > 80 ? full.slice(0, 79) + '…' : full)}</span>`;
+  }
+
+  function instrumentDetail(id) {
+    const i = global.DB.row('SELECT * FROM instruments WHERE id=?', [id]);
+    if (!i) return emptyState('cpu', 'Instrument not found', 'This instrument may have been deleted.');
+
+    const dv = (v) => (v ? esc(v) : '—');
+    const dvUnit = (n, unit) => (n ? `${n} ${unit}` : '—');
+
+    const supervisors = global.DB.row(`
+      SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') AS names
+      FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
+      WHERE ist.instrument_id = ?`, [i.id]).names;
+
+    // Utilization: same aggregation Reports uses (CLAUDE.md "Reports: aggregation lives in one
+    // place"), plus a distinct-user count Reports has no per-instrument figure for — cancelled
+    // bookings excluded here too, matching the occupancy rule.
+    function utilTile(from, to, prefix) {
+      const facts = global.Reports.makeFacts(from, to);
+      const r = global.Reports.computeInstrumentRows(from, to, facts).rows.find((x) => x.id === i.id)
+        || { bookings: 0, hours: 0, revenue: 0 };
+      const users = global.DB.row(`
+        SELECT COUNT(DISTINCT mp.person_id) AS n
+        FROM meetings m
+        JOIN meeting_instruments mi ON mi.meeting_id=m.id
+        JOIN meeting_people mp ON mp.meeting_id=m.id
+        WHERE mi.instrument_id=? AND m.is_cancelled=0 AND m.date>=? AND m.date<=?`, [i.id, from, to]).n;
+      return `
+        <div class="card stat" data-tile="${prefix}-bookings" data-value="${r.bookings}"><span class="n">${r.bookings}</span><span class="l">Bookings</span></div>
+        <div class="card stat" data-tile="${prefix}-hours" data-value="${r.hours}"><span class="n">${Math.round(r.hours * 100) / 100}</span><span class="l">Booked Hours</span></div>
+        <div class="card stat" data-tile="${prefix}-users" data-value="${users}"><span class="n">${users}</span><span class="l">Distinct Users</span></div>
+        <div class="card stat" data-tile="${prefix}-charges" data-value="${r.revenue}"><span class="n">${esc(global.UI.fmtMoney(r.revenue))}</span><span class="l">Charges</span></div>`;
+    }
+    const now = new Date();
+    const monthFrom = global.UI.ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+    const yearFrom = global.UI.ymd(new Date(now.getFullYear(), 0, 1));
+    const to = today();
+
+    const upcoming = global.DB.rows(`
+      SELECT m.id, m.title, m.date, m.start_time, m.end_time,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM meeting_people mp JOIN people pe ON pe.id = mp.person_id WHERE mp.meeting_id = m.id) AS users,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = m.id) AS assisted
+      FROM meetings m
+      JOIN meeting_instruments mi ON mi.meeting_id=m.id
+      WHERE mi.instrument_id=? AND m.is_cancelled=0 AND m.date>=? AND m.date<=?
+      ORDER BY m.date, m.start_time, m.id`, [i.id, today(), global.UI.todayPlusDays(14)]);
+
+    const activity = global.DB.rows(`
+      SELECT m.id, m.title, m.date, m.start_time, m.end_time, m.note, m.is_cancelled,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM meeting_people mp JOIN people pe ON pe.id = mp.person_id WHERE mp.meeting_id = m.id) AS users,
+             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = m.id) AS assisted
+      FROM meetings m
+      JOIN meeting_instruments mi ON mi.meeting_id=m.id
+      WHERE mi.instrument_id=? AND m.date<=?
+      ORDER BY m.date DESC, m.start_time DESC, m.id DESC
+      LIMIT 25`, [i.id, today()]);
+
+    const training = global.DB.listInstrumentTraining(i.id);
+    const peopleById = new Map(global.DB.rows('SELECT id, name, is_retired FROM people').map((p) => [p.id, p]));
+    function trainerLabel(trainerId) {
+      if (!trainerId) return '—';
+      const p = peopleById.get(trainerId);
+      return p ? esc(global.UI.retiredName(p.name, p.is_retired)) : '—';
+    }
+
+    const projectRows = global.DB.rows(`
+      SELECT p.id, p.code, p.title, p.status, p.is_archived
+      FROM project_instruments pi JOIN projects p ON p.id=pi.project_id
+      WHERE pi.instrument_id=? ORDER BY p.is_archived, p.title`, [i.id]);
+
+    const statusCls = i.status === 'Available' ? 'success' : i.status === 'In-use' ? 'primary' : i.status === 'Down' ? 'danger' : 'warning';
+
+    return `
+    <div class="card mb-16">
+      <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div class="grow">
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <span class="project-title">${esc(global.UI.retiredName(i.name, i.is_retired))}</span>
+            ${i.kind ? `<span class="chip-sm">${esc(i.kind)}</span>` : ''}
+            <span class="badge ${statusCls}">${esc(i.status)}</span>
+            ${i.is_retired ? '<span class="badge neutral">Retired</span>' : ''}
+          </div>
+        </div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" data-goto="instruments">Back to Instruments</button>
+          ${!i.is_retired ? `<button class="btn btn-mint btn-sm" data-act="new-booking" data-date="${today()}" data-inst="${i.id}">${ic('calendar')} New Booking</button>` : ''}
+          <button class="btn btn-primary btn-sm" data-act="edit-instrument" data-id="${i.id}">Edit Instrument</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Utilization Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('target')} Utilization</span></div></div>
+      <div class="card-body">
+        <div class="faint small mb-8">This Month</div>
+        <div class="grid cols-4 mb-16">${utilTile(monthFrom, to, 'month')}</div>
+        <div class="faint small mb-8">This Year</div>
+        <div class="grid cols-4 mb-16">${utilTile(yearFrom, to, 'year')}</div>
+        <div class="faint small">Cancelled bookings are excluded from bookings and hours; charges follow the Project Costs rule.</div>
+      </div>
+    </div>
+
+    <!-- Details Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Details</span></div></div>
+      <div class="card-body">
+        <div class="metadata-grid">
+          <div class="meta-item"><span class="meta-label">Modality / Kind:</span> <span class="meta-val">${dv(i.kind)}</span></div>
+          <div class="meta-item"><span class="meta-label">Status:</span> <span class="meta-val">${dv(i.status)}</span></div>
+          <div class="meta-item"><span class="meta-label">Location:</span> <span class="meta-val">${dv(i.location)}</span></div>
+          <div class="meta-item"><span class="meta-label">Cost:</span> <span class="meta-val">${esc(global.UI.fmtMoney(i.cost || 0))}</span></div>
+          <div class="meta-item"><span class="meta-label">Billed Per:</span> <span class="meta-val">${esc(global.UI.unitLabel(i.cost_unit || 'time'))}</span></div>
+          <div class="meta-item"><span class="meta-label">Min Duration:</span> <span class="meta-val">${dvUnit(i.min_duration_mins, 'min')}</span></div>
+          <div class="meta-item"><span class="meta-label">Max Duration:</span> <span class="meta-val">${dvUnit(i.max_duration_mins, 'min')}</span></div>
+          <div class="meta-item"><span class="meta-label">Min Gap:</span> <span class="meta-val">${dvUnit(i.min_gap_mins, 'min')}</span></div>
+          <div class="meta-item"><span class="meta-label">Min Notice:</span> <span class="meta-val">${dvUnit(i.min_notice_hours, 'h')}</span></div>
+          <div class="meta-item"><span class="meta-label">Supervisors:</span> <span class="meta-val">${supervisors ? esc(supervisors) : '—'}</span></div>
+          <div class="meta-item" style="grid-column: span 2"><span class="meta-label">Config Notes:</span> <span class="meta-val">${dv(i.note)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upcoming Bookings Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('calendar')} Upcoming Bookings</span></div></div>
+      <div class="card-body">
+        ${upcoming.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Date</th><th>Time</th><th>Title</th><th>User</th><th>Assisted</th></tr></thead>
+            <tbody>
+              ${upcoming.map((m) => `
+                <tr class="row-link" data-act="edit-booking" data-id="${m.id}">
+                  <td class="mono small">${fmt(m.date)}</td>
+                  <td class="mono small faint">${m.start_time ? esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : '—'}</td>
+                  <td class="small font-medium">${esc(m.title)}</td>
+                  <td class="small">${m.users ? esc(m.users) : '—'}</td>
+                  <td class="faint small">${m.assisted ? esc(m.assisted) : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('calendar', 'Nothing booked in the next 14 days', 'Upcoming bookings on this instrument will appear here.')}
+      </div>
+    </div>
+
+    <!-- Recent Activity Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('calendar')} Recent Activity</span></div></div>
+      <div class="card-body">
+        ${activity.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>User</th><th>Date</th><th>Start–End</th><th>Duration</th><th>Assisted</th><th>Notes</th><th>Status</th></tr></thead>
+            <tbody>
+              ${activity.map((m) => `
+                <tr class="${m.is_cancelled ? 'row-retired' : ''}">
+                  <td class="small">${m.users ? esc(m.users) : '—'}</td>
+                  <td class="mono small">${fmt(m.date)}</td>
+                  <td class="mono small faint">${m.start_time ? esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : '—'}</td>
+                  <td class="mono small faint">${durationLabel(m.start_time, m.end_time)}</td>
+                  <td class="faint small">${m.assisted ? esc(m.assisted) : '—'}</td>
+                  <td class="faint small">${notePreview(m.note)}</td>
+                  <td>${m.is_cancelled ? '<span class="badge danger">Cancelled</span>' : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="faint small mt-8">Showing the 25 most recent bookings on this instrument. Cancelled bookings are kept and marked.</div>`
+        : emptyState('calendar', 'No bookings yet', 'Bookings on this instrument will show up here.')}
+      </div>
+    </div>
+
+    <!-- Trained Users Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('cpu')} Trained Users</span></div></div>
+      <div class="card-body">
+        ${training.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Person</th><th>Level</th><th>Trained On</th><th>Trainer</th><th>Expires On</th></tr></thead>
+            <tbody>
+              ${training.map((rec) => {
+                const status = global.DB.trainingStatusOn(rec, global.UI.today());
+                const statusBadgeHtml = status === 'expired' ? ' <span class="badge warning">Expired</span>'
+                  : status === 'pending' ? ' <span class="badge neutral">Not Yet Valid</span>' : '';
+                return `
+                <tr>
+                  <td class="row-link small font-medium" data-goto="person" data-id="${rec.person_id}">${esc(global.UI.retiredName(rec.person_name, rec.person_retired))}</td>
+                  <td><span class="badge primary">${esc(rec.level)}</span></td>
+                  <td class="mono small faint">${fmt(rec.trained_on)}</td>
+                  <td class="small">${trainerLabel(rec.trainer_id)}</td>
+                  <td class="mono small faint">${rec.expires_on ? fmt(rec.expires_on) : 'No expiry'}${statusBadgeHtml}</td>
+                </tr>`; }).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('cpu', 'No trained users yet', 'Training records are added from a person\'s profile.')}
+      </div>
+    </div>
+
+    <!-- Active Projects Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('folder')} Active Projects</span></div></div>
+      <div class="card-body">
+        ${projectRows.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Code</th><th>Title</th><th>Status</th></tr></thead>
+            <tbody>
+              ${projectRows.map((r) => `
+                <tr class="row-link ${r.is_archived ? 'row-retired' : ''}" data-goto="project" data-id="${r.id}">
+                  <td class="mono small">${esc(r.code)}</td>
+                  <td class="font-medium small">${esc(r.title)}</td>
+                  <td>${statusBadge(r.status)}${r.is_archived ? ' <span class="badge neutral">Archived</span>' : ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('folder', 'No projects yet', 'Projects this instrument is assigned to will appear here.')}
+      </div>
     </div>`;
   }
 
@@ -1881,6 +2135,7 @@
     setPeopleFilter,
     personDetail,
     instruments,
+    instrumentDetail,
     setInstrumentFilter,
     calendar,
     setCalMode,
