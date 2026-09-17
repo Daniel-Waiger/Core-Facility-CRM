@@ -247,7 +247,7 @@
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
     instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
-    level TEXT NOT NULL DEFAULT 'User',
+    level TEXT NOT NULL DEFAULT 'Regular',
     trained_on TEXT DEFAULT '',
     trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
     expires_on TEXT DEFAULT '',
@@ -641,7 +641,7 @@
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
           instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
-          level TEXT NOT NULL DEFAULT 'User',
+          level TEXT NOT NULL DEFAULT 'Regular',
           trained_on TEXT DEFAULT '',
           trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
           expires_on TEXT DEFAULT '',
@@ -663,6 +663,12 @@
     try { db.exec("ALTER TABLE project_outputs ADD COLUMN acknowledges_facility INTEGER DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE project_outputs ADD COLUMN file_id INTEGER REFERENCES files(id) ON DELETE SET NULL"); } catch (_) {}
     // --- #41 end ---
+    // --- 1.13 begin ---
+    // 1.13 renamed the entry training level from 'User' to 'Regular'. Idempotent; runs on boot
+    // and on restore (restoreBackup goes through this same migrate()), so a pre-1.13 backup
+    // reads back with the current vocabulary.
+    try { db.exec("UPDATE person_instrument_training SET level='Regular' WHERE level='User'"); } catch (_) {}
+    // --- 1.13 end ---
   }
 
   // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
@@ -2029,6 +2035,31 @@
     run('INSERT OR IGNORE INTO vocab (category, value) VALUES (?,?)', [category, v]);
   }
 
+  // Usage counts for the booking dialogs' tag picker. Deliberately counts every booking that
+  // carries the tag, cancelled ones included — this is a tag's usage history, not an occupancy
+  // figure (see CLAUDE.md's "Occupancy excludes all cancelled bookings", which this is not).
+  // Merge is case-insensitive with the first spelling encountered winning, same rule as
+  // app.js's unionNames: meetings in id order first (so an earlier booking's casing wins over a
+  // later one's), then any BOOKING_TAG vocab terms not yet seen (added at count 0).
+  function bookingTagCounts() {
+    const counts = new Map(); // lowercased tag -> { tag, count }
+    const meetingRows = rows("SELECT tags FROM meetings WHERE TRIM(COALESCE(tags,''))!='' ORDER BY id");
+    for (const r of meetingRows) {
+      const tags = global.UI.parseTags(r.tags);
+      for (const t of tags) {
+        const key = t.toLowerCase();
+        const entry = counts.get(key);
+        if (entry) entry.count += 1;
+        else counts.set(key, { tag: t, count: 1 });
+      }
+    }
+    for (const t of vocabList('BOOKING_TAG')) {
+      const key = t.toLowerCase();
+      if (!counts.has(key)) counts.set(key, { tag: t, count: 0 });
+    }
+    return Array.from(counts.values()).sort((a, b) => (b.count - a.count) || a.tag.localeCompare(b.tag));
+  }
+
   /* ---------------- App-wide config (billing rates, etc.) ----------------
      A tiny key/value store, same idea as `vocab` above, but for single settings
      rather than dropdown lists. Lives in the DB (not localStorage) so it travels
@@ -2255,7 +2286,7 @@
 
   /* ---------------- Instrument training (#47) ----------------
      person_instrument_training records who is cleared to run an instrument unsupervised
-     ('User') or to also train/supervise others on it ('Super User'), when they were signed
+     ('Regular') or to also train/supervise others on it ('Super User'), when they were signed
      off, who signed them off, and an optional expiry. A row is "active" — currently valid,
      for gating a booking or for counting toward an instrument's trained-user total — exactly
      when today (or whatever reference date the caller asks about) falls on or after
@@ -2318,9 +2349,11 @@
   // screen listing who is currently cleared to use it).
   function listInstrumentTraining(instrumentId) {
     return rows(
-      `SELECT pit.*, p.name AS person_name, p.is_retired AS person_retired
+      `SELECT pit.*, p.name AS person_name, p.is_retired AS person_retired,
+              tr.name AS trainer_name, tr.is_retired AS trainer_retired
        FROM person_instrument_training pit
        LEFT JOIN people p ON p.id = pit.person_id
+       LEFT JOIN people tr ON tr.id = pit.trainer_id
        WHERE pit.instrument_id = ?
        ORDER BY p.name`,
       [instrumentId]
@@ -2818,11 +2851,22 @@
       ['Dr. Elena Rostova', 'PI', 'Bio-Photonics Lab', 'Harvard Immunology', 'elena.rostova@harvard.edu', 'Specializes in deep-tissue intravital 2-photon imaging', 0, 0],
       ['Prof. Marcus Thorne', 'PI', 'Neural Dynamics Institute', 'MIT', 'mthorne@mit.edu', 'Synaptic plasticity & optogenetics grant leader', 0, 0],
       ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy', 'Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening', 0, 0],
-      ['Alex Chen', 'Researcher', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses', 0, 0],
-      ['Maya Patel', 'Researcher', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays', 0, 0],
+      ['Alex Chen', 'Postdoc', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses', 0, 0],
+      ['Maya Patel', 'PhD', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays', 0, 0],
       ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', '', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer', 1, 95],
       ['Dr. Priya Anand', 'Facility Staff', 'Bioimaging Core Facility', '', 'panand@corefacility.edu', 'Cryo-EM specialist overseeing grid vitrification and Glacios operation', 1, 110],
-      ['Tom Alvarez', 'Facility Staff', 'Bioimaging Core Facility', '', 'talvarez@corefacility.edu', 'Image analysis specialist supporting the Imaris/Fiji quantification pipeline', 1, 80]
+      ['Tom Alvarez', 'Facility Staff', 'Bioimaging Core Facility', '', 'talvarez@corefacility.edu', 'Image analysis specialist supporting the Imaris/Fiji quantification pipeline', 1, 80],
+      // 9-17: additional lab members across the three seed labs, added so pickers/reports have a
+      // realistic roster depth beyond each lab's PI + one trainee + one staffer.
+      ['Dr. Lena Okafor', 'Postdoc', 'Bio-Photonics Lab', 'Harvard Immunology', 'lokafor@harvard.edu', 'Postdoc developing intravital acquisition protocols alongside Alex Chen', 0, 0],
+      ['Jonah Reyes', 'PhD', 'Bio-Photonics Lab', 'Harvard Immunology', 'jreyes@harvard.edu', 'PhD student analyzing CAR-T infiltration time-lapse datasets', 0, 0],
+      ['Ruth Adler', 'Technician', 'Bio-Photonics Lab', 'Harvard Immunology', 'radler@harvard.edu', 'Lab technician preparing intravital imaging chambers and animal prep', 0, 0],
+      ['Dr. Samir Haddad', 'Postdoc', 'Neural Dynamics Institute', 'MIT', 'shaddad@mit.edu', 'Postdoc running STED synaptic screening alongside Maya Patel', 0, 0],
+      ['Yuki Tanaka', 'MSc', 'Neural Dynamics Institute', 'MIT', 'ytanaka@mit.edu', 'MSc student culturing hippocampal preparations for synaptic assays', 0, 0],
+      ['Grace Mbeki', 'Technician', 'Neural Dynamics Institute', 'MIT', 'gmbeki@mit.edu', 'Lab technician maintaining culture plates and imaging consumables', 0, 0],
+      ['Dr. Ines Ferreira', 'Postdoc', 'Therapeutics & Onco-Therapy', 'Stanford', 'iferreira@stanford.edu', 'Postdoc leading organoid drug-screen imaging pipelines', 0, 0],
+      ['Noa Levi', 'PhD', 'Therapeutics & Onco-Therapy', 'Stanford', 'nlevi@stanford.edu', 'PhD student quantifying islet volume reconstructions', 0, 0],
+      ['Ben Carter', 'Undergrad', 'Therapeutics & Onco-Therapy', 'Stanford', 'bcarter@stanford.edu', 'Undergraduate assistant handling organoid plate prep and data logging', 0, 0]
     ];
     for (const p of peopleData) {
       run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', p);
@@ -2873,8 +2917,11 @@
     }
     const grantUserPairs = [
       [1, 1], [1, 4], // CAR-T R01 — Elena Rostova, Alex Chen
+      [1, 9], [1, 10], // CAR-T R01 — Dr. Lena Okafor, Jonah Reyes
       [2, 2], [2, 5], // Brain Research Grant — Marcus Thorne, Maya Patel
-      [3, 3]          // Islet Imaging State Grant — Sarah Lin
+      [2, 12],        // Brain Research Grant — Dr. Samir Haddad
+      [3, 3],         // Islet Imaging State Grant — Sarah Lin
+      [3, 16]         // Islet Imaging State Grant — Noa Levi
     ];
     for (const [grantId, personId] of grantUserPairs) {
       run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [grantId, personId]);
@@ -2959,12 +3006,21 @@
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 1, "Principal Investigator")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 4, "Lead Operator & Image Analyst")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 6, "Core Optical Specialist")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 9, "Postdoc")');  // Dr. Lena Okafor
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 10, "Student")');  // Jonah Reyes
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 11, "Technician")'); // Ruth Adler
 
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 2, "Principal Investigator")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 5, "Lead Researcher")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 12, "Postdoc")'); // Dr. Samir Haddad
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 13, "Student")'); // Yuki Tanaka
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 14, "Technician")'); // Grace Mbeki
 
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 3, "Principal Investigator")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 6, "Core Facility Support")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 15, "Postdoc")'); // Dr. Ines Ferreira
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 16, "Student")'); // Noa Levi
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 17, "Student")'); // Ben Carter
 
     // 5. Project Instruments Mappings
     run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (1, 2)'); // Olympus FV3000
@@ -3329,20 +3385,20 @@
     // expired record (Rostova on the FV3000, so the FV3000's trained-user count excludes her and
     // counts only Chen), and a second expired-but-refresher-flagged record (Kim on the Leica).
     const trainingRows = [
-      [4, 2, 'User', day(-120), 6, '', 'Trained on the FV3000 for intravital time-lapses'],
-      [4, 4, 'User', day(-90), 6, day(275), ''],
+      [4, 2, 'Regular', day(-120), 6, '', 'Trained on the FV3000 for intravital time-lapses'],
+      [4, 4, 'Regular', day(-90), 6, day(275), ''],
       [5, 1, 'Super User', day(-200), 6, '', 'Independent after-hours use approved'],
-      [1, 2, 'User', day(-400), 6, day(-5), 'Refresher due'],
+      [1, 2, 'Regular', day(-400), 6, day(-5), 'Refresher due'],
       [7, 5, 'Super User', day(-300), null, '', ''],
-      [3, 3, 'User', day(-60), 6, day(305), ''],
+      [3, 3, 'Regular', day(-60), 6, day(305), ''],
       // Scheduled but not yet in force — reads "Not Yet Valid" on the profile and the certificate,
       // and is excluded from today's Trained Users count (Patel on the Lightsheet, trainer Kim).
-      [5, 3, 'User', day(14), 6, '', 'Onboarding session booked; independent use only after sign-off'],
+      [5, 3, 'Regular', day(14), 6, '', 'Onboarding session booked; independent use only after sign-off'],
       // A record carried over from the old paper sign-off sheet with no known date: NULL trained_on
       // means "no start restriction", so it counts as trained today (Alvarez on the Leica).
-      [8, 1, 'User', null, 6, '', 'Imported from the pre-2024 sign-off sheet — training date not recorded'],
+      [8, 1, 'Regular', null, 6, '', 'Imported from the pre-2024 sign-off sheet — training date not recorded'],
       // Valid today but expiring within the month, so a refresher shows up as due soon.
-      [4, 3, 'User', day(-350), 6, day(20), 'Annual refresher due']
+      [4, 3, 'Regular', day(-350), 6, day(20), 'Annual refresher due']
     ];
     trainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
 
@@ -3351,10 +3407,15 @@
     run("UPDATE people SET campus='Cambridge' WHERE id IN (2,5)");
     run("UPDATE people SET campus='Main Campus' WHERE id IN (6,7,8)");
     run("UPDATE people SET campus='Palo Alto' WHERE id=3");
+    run("UPDATE people SET campus='Longwood' WHERE id IN (9,10,11)");
+    run("UPDATE people SET campus='Cambridge' WHERE id IN (12,13,14)");
+    run("UPDATE people SET campus='Palo Alto' WHERE id IN (15,16,17)");
     run("UPDATE people SET mobile='+1 617 555 0142' WHERE id=4");
     run("UPDATE people SET mobile='+1 617 555 0187' WHERE id=6");
     run("UPDATE people SET mobile='+1 617 555 0163' WHERE id=7");
     run("UPDATE people SET mobile='+1 617 555 0199' WHERE id=8");
+    run("UPDATE people SET mobile='+1 617 555 0211' WHERE id=9");
+    run("UPDATE people SET mobile='+1 617 555 0233' WHERE id=12");
     // --- #47 end ---
     // --- #41 begin ---
     // Backfill the roadmap #41 fields (doi/url/authors/acknowledges_facility/file_id) onto the
@@ -3392,6 +3453,265 @@
     run(`INSERT INTO project_outputs (project_id, type, title, reference, authors, url, acknowledges_facility, date)
          VALUES (1, 'poster', 'Intravital imaging of CAR-T infiltration kinetics in solid tumours', 'AAI Immunology 2026 — poster P-412', 'Chen, A.; Rostova, E.', 'https://example.org/posters/aai-2026-p412', 0, ?)`, [day(-45)]);
     // --- #41 end ---
+    // --- 1.13 begin ---
+    // 17 more bookings across every instrument (Leica SP8 FALCON id 1, Olympus FV3000 id 2,
+    // Zeiss Lightsheet Z.1 id 3, Nikon AX R Resonant id 4, Glacios Cryo-TEM id 5), spread over the
+    // three seed labs' new roster members (ids 9-17) and staffed by David Kim (6), Priya Anand (7)
+    // and Tom Alvarez (8) — so pickers, instrument profiles and the Dashboard agenda have real depth
+    // beyond the original handful of bookings. Every attendee list goes through peopleIds, never a
+    // hand-written attendees string, so the denormalized display column and meeting_people never
+    // drift (see CLAUDE.md's "The database is relational" section). None of these dates coincide
+    // with an existing seeded booking's date, so there is nothing to check them against for
+    // instrument/staff overlap; the new ones are checked against each other below.
+
+    // B1 — Lena Okafor and Jonah Reyes join Alex Chen's project on the Leica for an intravital
+    // acquisition session; David Kim runs it.
+    seedBooking({
+      projectId: 1,
+      grantId: 1,
+      title: 'Intravital Acquisition Session: CAR-T Infiltration Time-Lapse',
+      date: day(-42), start: '10:00', end: '12:00',
+      instruments: [{ id: 1 }], // Leica SP8 FALCON
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [9, 10], // Lena Okafor, Jonah Reyes
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Acquired matched intravital fields on the Leica SP8 FALCON for the CAR-T infiltration time-lapse dataset.',
+      actions: 'Jonah to begin infiltration-depth quantification on the new stacks.',
+      category: 'assisted session'
+    });
+
+    // B2 — Samir Haddad and Yuki Tanaka run a resonant-scan session for the synaptic density
+    // project on the Nikon AX R.
+    seedBooking({
+      projectId: 2,
+      grantId: 2,
+      title: 'Resonant-Scan Session: Synaptic Density Field Survey',
+      date: day(-35), start: '13:00', end: '15:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [12, 13], // Samir Haddad, Yuki Tanaka
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Surveyed additional hippocampal fields on the Nikon AX R Resonant for the synaptic density dataset.',
+      actions: 'Yuki to log field coordinates for re-acquisition consistency.',
+      category: 'assisted session'
+    });
+
+    // B3 — Ines Ferreira and Noa Levi's first Zeiss Lightsheet training, run by Priya Anand.
+    seedBooking({
+      projectId: 3,
+      grantId: 3,
+      title: 'New User Training: Zeiss Lightsheet Z.1 for Islet Clearing',
+      date: day(-28), start: '09:00', end: '11:00',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [15, 16], // Ines Ferreira, Noa Levi
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Walked Ines and Noa through cleared-islet mounting and multi-view acquisition on the Z.1.',
+      actions: '',
+      category: 'training'
+    });
+
+    // B4 — Lena Okafor's follow-up multiphoton session on the Olympus FV3000.
+    seedBooking({
+      projectId: 1,
+      title: 'Multiphoton Follow-up: CAR-T Infiltration Depth Series',
+      date: day(-25), start: '14:00', end: '16:00',
+      instruments: [{ id: 2 }], // Olympus FV3000
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [9], // Lena Okafor
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Ran a deeper z-series on the Olympus FV3000 to extend the infiltration-depth quantification.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B5 — a short walk-in consult for Yuki Tanaka and Grace Mbeki, no instrument billed, Tom
+    // Alvarez's time billed at the 1-hour floor.
+    seedBooking({
+      projectId: 2,
+      title: 'Culture Prep Consult for Upcoming Imaging Block',
+      date: day(-21), start: '09:00', end: '09:45',
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [13, 14], // Yuki Tanaka, Grace Mbeki
+      note: 'Discussed hippocampal culture timing ahead of the next resonant-scan block.',
+      actions: '',
+      category: 'consult'
+    });
+
+    // B6/B7/B8 — the weekly trio: Samir Haddad's recurring calcium-imaging block on the Nikon AX R,
+    // same title across all three weeks so the demo shows a repeating weekly block.
+    [day(-21), day(-14), day(-7)].forEach((date) => seedBooking({
+      projectId: 2,
+      title: 'Weekly Calcium Imaging Block',
+      date, start: '11:00', end: '13:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [12], // Samir Haddad
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Weekly recurring resonant-scan block for the synaptic density calcium-imaging series.',
+      actions: '',
+      category: 'assisted session'
+    }));
+
+    // B9 — Jonah Reyes and Ruth Adler run an unattended Leica acquisition with no facility staff
+    // billed (self-sufficient users, per their training level below).
+    seedBooking({
+      projectId: 1,
+      title: 'Unattended Overnight Time-Lapse Re-acquisition',
+      date: day(-14), start: '09:00', end: '12:00',
+      instruments: [{ id: 1 }], // Leica SP8 FALCON
+      peopleIds: [10, 11], // Jonah Reyes, Ruth Adler
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Re-ran the overnight multipoint acquisition on the Leica SP8 FALCON after a chamber refill.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B10 — Noa Levi's grid-screening session on the Glacios, billed per grid like the earlier
+    // Cryo-EM booking above.
+    seedBooking({
+      projectId: 3,
+      title: 'Cryo-EM Grid Screening: Islet Organoid Follow-up',
+      date: day(-12), start: '10:00', end: '12:00',
+      instruments: [{ id: 5, amount: 4 }], // Glacios Cryo-TEM, $45/grid x 4 grids screened
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [16], // Noa Levi
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Screened 4 follow-up grids from the organoid prep for ice thickness before full collection.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B11 — Ines Ferreira and Ben Carter's Zeiss Lightsheet session, run by Tom Alvarez.
+    seedBooking({
+      projectId: 3,
+      title: 'Lightsheet Volume Reacquisition: Organoid Batch QC',
+      date: day(-5), start: '13:00', end: '15:00',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [15, 17], // Ines Ferreira, Ben Carter
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Re-acquired two organoid volumes flagged for stitching artifacts during batch QC.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B12 — a short consult for Ruth Adler with David Kim, no instrument billed.
+    seedBooking({
+      projectId: 1,
+      title: 'Chamber Prep Consult Ahead of Next Time-Lapse',
+      date: day(-2), start: '10:00', end: '10:30',
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [11], // Ruth Adler
+      note: 'Discussed intravital chamber prep timing for the next unattended acquisition run.',
+      actions: '',
+      category: 'consult'
+    });
+
+    // B13 — today's first booking, so the Dashboard agenda and the Olympus FV3000 profile have
+    // something scheduled today: Lena Okafor and Alex Chen on the FV3000.
+    seedBooking({
+      projectId: 1,
+      title: 'Multiphoton Session: CAR-T Infiltration Depth Series, Round 2',
+      date: day(0), start: '09:00', end: '11:00',
+      instruments: [{ id: 2 }], // Olympus FV3000
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [9, 4], // Lena Okafor, Alex Chen
+      groupOrg: 'Bio-Photonics Lab',
+      note: 'Second round of the infiltration-depth z-series on the Olympus FV3000.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B14 — today's second booking, on the Leica: Samir Haddad and Yuki Tanaka's first STED
+    // training, run by Tom Alvarez.
+    seedBooking({
+      projectId: 2,
+      title: 'New User Training: Leica SP8 FALCON STED Basics',
+      date: day(0), start: '13:00', end: '15:00',
+      instruments: [{ id: 1 }], // Leica SP8 FALCON
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [12, 13], // Samir Haddad, Yuki Tanaka
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Walked Samir and Yuki through STED depletion alignment and immersion oil selection on the Leica SP8 FALCON.',
+      actions: '',
+      category: 'training'
+    });
+
+    // B15 — Maya Patel and Samir Haddad's resonant-scan session on the Nikon AX R.
+    seedBooking({
+      projectId: 2,
+      title: 'Resonant-Scan Session: Synaptic Density Follow-up Fields',
+      date: day(3), start: '09:00', end: '11:00',
+      instruments: [{ id: 4 }], // Nikon AX R Resonant
+      staff: [{ id: 6 }], // David Kim
+      peopleIds: [5, 12], // Maya Patel, Samir Haddad
+      groupOrg: 'Neural Dynamics Institute',
+      note: 'Acquired follow-up resonant fields for the synaptic density dataset.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B16 — Noa Levi's second Zeiss Lightsheet session, run by Priya Anand.
+    seedBooking({
+      projectId: 3,
+      title: 'Lightsheet Volume Reacquisition: Islet Clearing Follow-up',
+      date: day(7), start: '10:00', end: '12:00',
+      instruments: [{ id: 3 }], // Zeiss Lightsheet Z.1
+      staff: [{ id: 7 }], // Dr. Priya Anand
+      peopleIds: [16], // Noa Levi
+      groupOrg: 'Therapeutics & Onco-Therapy',
+      note: 'Re-acquired a cleared-islet volume flagged for a mounting artifact.',
+      actions: '',
+      category: 'assisted session'
+    });
+
+    // B17 — a short future consult for Jonah Reyes with Tom Alvarez, no instrument billed.
+    seedBooking({
+      projectId: 1,
+      title: 'Image Analysis Consult: Infiltration Quantification Pipeline',
+      date: day(14), start: '11:00', end: '11:30',
+      staff: [{ id: 8 }], // Tom Alvarez
+      peopleIds: [10], // Jonah Reyes
+      note: 'Planned walk-through of the batch quantification pipeline for the infiltration-depth series.',
+      actions: '',
+      category: 'consult'
+    });
+
+    // Reused tags (from the existing STED/Fiji/Napari/Lightsheet/Grant Planning/Workshop set only)
+    // so the tag picker's counts read above 1 for several tags. The trio share one title, so one
+    // UPDATE tags all three weekly bookings at once.
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED, Napari', 'Weekly Calcium Imaging Block']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Multiphoton Session: CAR-T Infiltration Depth Series, Round 2']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'New User Training: Zeiss Lightsheet Z.1 for Islet Clearing']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'Lightsheet Volume Reacquisition: Islet Clearing Follow-up']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Unattended Overnight Time-Lapse Re-acquisition']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED', 'New User Training: Leica SP8 FALCON STED Basics']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Napari', 'Image Analysis Consult: Infiltration Quantification Pipeline']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Intravital Acquisition Session: CAR-T Infiltration Time-Lapse']);
+
+    // Training rows for the new roster members (ids 9-17), same column list as trainingRows above.
+    const newTrainingRows = [
+      // Lena Okafor, trained on the Olympus FV3000 (2) by David Kim; no expiry set.
+      [9, 2, 'Regular', day(-60), 6, '', ''],
+      // Jonah Reyes, trained on the Leica SP8 FALCON (1) by David Kim; expires well in the future.
+      [10, 1, 'Regular', day(-40), 6, day(325), ''],
+      // Ruth Adler, trained on the Leica SP8 FALCON (1) by Tom Alvarez; no expiry set.
+      [11, 1, 'Regular', day(-30), 8, '', ''],
+      // Samir Haddad, Super User on the Nikon AX R Resonant (4), trained by David Kim — runs the
+      // weekly calcium block with David Kim assisting.
+      [12, 4, 'Super User', day(-150), 6, '', 'Cleared for independent resonant-scan use'],
+      // Yuki Tanaka, trained on the Nikon AX R Resonant (4) by David Kim; no expiry set.
+      [13, 4, 'Regular', day(-33), 6, '', ''],
+      // Ines Ferreira, trained on the Zeiss Lightsheet Z.1 (3) by Priya Anand; expires in the future.
+      [15, 3, 'Regular', day(-27), 7, day(338), ''],
+      // Noa Levi, trained on the Glacios Cryo-TEM (5) by Priya Anand; no expiry set.
+      [16, 5, 'Regular', day(-20), 7, '', ''],
+      // Noa Levi (16) on the Zeiss Lightsheet (3) — signed off at the B3 training session with Ines.
+      [16, 3, 'Regular', day(-28), 7, '', '']
+    ];
+    newTrainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
+    // --- 1.13 end ---
 
     markDirty();
     return true;
@@ -3451,6 +3771,7 @@
     projectFlags,
     vocabList,
     addVocab,
+    bookingTagCounts,
     getConfig,
     getConfigNum,
     setConfig,

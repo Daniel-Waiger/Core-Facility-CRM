@@ -92,6 +92,21 @@ describe('every screen renders', { skip }, () => {
     assert.ok(/[\d,]+\.\d\d/.test(info.txt), 'expected money formatted to two decimals');
   });
 
+  test('instrument profile renders, with its activity and training cards', async () => {
+    const id = await page.evaluate(() => DB.row('SELECT id FROM instruments ORDER BY id LIMIT 1').id);
+    const info = await viewText('instrument', id);
+    assert.ok(info.len > 500, `instrument profile rendered only ${info.len} characters`);
+    assert.ok(/Recent Activity/.test(info.txt), `expected a Recent Activity card: ${info.txt.slice(0, 300)}`);
+    assert.ok(/Trained Users/.test(info.txt), `expected a Trained Users card: ${info.txt.slice(0, 300)}`);
+    assert.ok(/Booked Hours/.test(info.txt), `expected a Booked Hours figure: ${info.txt.slice(0, 300)}`);
+  });
+
+  test('a stale instrument id falls back to the Instruments list', async () => {
+    await page.evaluate(() => { location.hash = '#/instrument/99999'; });
+    await page.waitForTimeout(450);
+    assert.equal(await page.evaluate(() => location.hash), '#/instruments');
+  });
+
   test('instrument cost carries a currency symbol and a worded unit', async () => {
     // Both read as bare numbers before 1.10.0: a rate showed as "450" beside a raw "time".
     const info = await viewText('instruments');

@@ -204,4 +204,4 @@ function fakeBookingModal({ prefix, title = '', date = '', start = '', end = '',
   return modal;
 }
 
-module.exports = { freshApp, fakeBookingModal };
+module.exports = { freshApp, fakeBookingModal, installFileReaderStub };

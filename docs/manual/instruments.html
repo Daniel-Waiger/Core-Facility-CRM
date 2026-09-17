@@ -34,6 +34,7 @@
         <li>Track an instrument's operational status (available, in use, in maintenance, or down).</li>
         <li>Retire an instrument that's gone out of service without losing its booking history.</li>
         <li>Assign an instrument to a project.</li>
+        <li>Open an instrument's profile to see its utilization, upcoming bookings, recent activity and trained users all in one place.</li>
       </ul>
     </section>
 
@@ -112,6 +113,20 @@
       <div class="callout tip">
         <p><strong>💡 Tip.</strong> Use the Status filter on the Instruments screen to quickly see everything that's down or in maintenance.</p>
       </div>
+    </section>
+
+    <section>
+      <h2 id="instrument-profile">The instrument profile</h2>
+      <p>Open an instrument's profile from the chevron on its row in the Instruments list, or by clicking anywhere on the row itself, the same way you open a person's profile.</p>
+      <p>The profile leads with a <strong>Utilization</strong> card, split into <strong>this month</strong> and <strong>this year</strong> (whole calendar month and year, the same ranges as the Reports screen's This Month and This Year): bookings, booked hours, distinct users, and line charges. Cancelled bookings never count toward bookings, hours or users here — a cancellation means the slot was never actually held. Line Charges follows the same cancellation rule as everywhere else (a cancelled booking's charge counts only if it was retained rather than waived) and, as on the Reports screen, is the raw instrument charge for each booking before that booking's discount, overhead and tax, so it will not match a project's Total Cost.</p>
+      <p>Below that sits a <strong>Details</strong> card (kind, status, location, cost and billing unit, duration and gap rules, minimum notice, supervisors and configuration notes), then the <strong>next 14 days</strong> of upcoming bookings on this instrument (today's included), and a <strong>Recent Activity</strong> table of its last 25 past bookings — with columns for User, Date, Start–End, Duration, Assisted, Notes and Status, cancelled ones included and marked so the record stays complete.</p>
+      <p>The page finishes with who's <strong>trained</strong> on this instrument and at what level, and every <strong>project</strong> it is assigned to, archived ones marked. A <strong>New Booking</strong> button on the profile opens the booking form with this instrument already selected, so scheduling a session on the equipment you're already looking at takes one click.</p>
+      <figure class="shot">
+        <img src="../screenshots/73-instrument-profile.png" alt="Instrument profile page showing utilization tiles, details, upcoming bookings and trained users" loading="lazy"
+             onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph">Snapshot pending — ../screenshots/73-instrument-profile.png</div>
+        <figcaption>An instrument's profile: utilization, details, upcoming bookings, recent activity, trained users and projects.</figcaption>
+      </figure>
     </section>
 
     <section>

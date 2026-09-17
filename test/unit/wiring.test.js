@@ -150,6 +150,16 @@ describe('data-nav completeness', () => {
     assert.ok(!hashRoutes.has('project'), 'expected "project" to be ABSENT from HASH_ROUTES (it is reached via route(), not a hash nav target)');
     assert.ok(titleKeys.has('project'), 'expected "project" in TITLES (reached via route(), not data-nav)');
 
+    // Same asymmetry for 'person': reached via route('person', id) / data-goto="person", never
+    // data-nav, so it belongs in TITLES but must stay out of HASH_ROUTES.
+    assert.ok(!hashRoutes.has('person'), 'expected "person" to be ABSENT from HASH_ROUTES (it is reached via route(), not a hash nav target)');
+    assert.ok(titleKeys.has('person'), 'expected "person" in TITLES (reached via route(), not data-nav)');
+
+    // Same asymmetry for 'instrument': reached via route('instrument', id) / data-goto="instrument",
+    // never data-nav, so it belongs in TITLES but must stay out of HASH_ROUTES.
+    assert.ok(!hashRoutes.has('instrument'), 'expected "instrument" to be ABSENT from HASH_ROUTES (it is reached via route(), not a hash nav target)');
+    assert.ok(titleKeys.has('instrument'), 'expected "instrument" in TITLES (reached via route(), not data-nav)');
+
     const missingFromRoutes = [...navValues].filter((v) => !hashRoutes.has(v));
     assert.deepEqual(missingFromRoutes, [], `data-nav values missing from HASH_ROUTES: ${missingFromRoutes.join(', ')}`);
 

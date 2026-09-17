@@ -364,3 +364,63 @@ describe('#39 (7): DB.renameBookingCategory / DB.removeBookingCategory', () => {
     assert.equal(DB.removeBookingCategory('consult'), false, 'removeBookingCategory must refuse a protected category name');
   });
 });
+
+describe('1.13 DB.bookingTagCounts', () => {
+  test('a booking tagged \'SIM, Fiji\' counts once under each tag', async () => {
+    const { DB } = await freshDb();
+    const { liveProject } = seedFixture(DB);
+    DB.run("INSERT INTO meetings (project_id, title, date, tags) VALUES (?, 'Session', '2026-01-05', 'SIM, Fiji')", [liveProject]);
+
+    const counts = DB.bookingTagCounts();
+    const sim = counts.find((r) => r.tag === 'SIM');
+    const fiji = counts.find((r) => r.tag === 'Fiji');
+    assert.ok(sim, 'SIM must appear');
+    assert.ok(fiji, 'Fiji must appear');
+    assert.equal(sim.count, 1);
+    assert.equal(fiji.count, 1);
+  });
+
+  test('a cancelled booking tagged \'sim\' still counts and merges into \'SIM\' (first spelling wins)', async () => {
+    const { DB } = await freshDb();
+    const { liveProject } = seedFixture(DB);
+    DB.run("INSERT INTO meetings (project_id, title, date, tags) VALUES (?, 'A', '2026-01-05', 'SIM, Fiji')", [liveProject]);
+    DB.run("INSERT INTO meetings (project_id, title, date, tags, is_cancelled) VALUES (?, 'B', '2026-01-06', 'sim', 1)", [liveProject]);
+
+    const counts = DB.bookingTagCounts();
+    const sim = counts.find((r) => r.tag.toLowerCase() === 'sim');
+    assert.ok(sim, 'a sim/SIM tag row must appear');
+    assert.equal(sim.tag, 'SIM', 'the first spelling encountered (id order) must win, not the cancelled booking\'s lowercase spelling');
+    assert.equal(sim.count, 2, 'the cancelled booking must still be counted — this is a usage history, not an occupancy figure');
+  });
+
+  test('DB.addVocab(\'BOOKING_TAG\',\'Napari\') with no booking appears with count 0', async () => {
+    const { DB } = await freshDb();
+    seedFixture(DB);
+    DB.addVocab('BOOKING_TAG', 'Napari');
+
+    const counts = DB.bookingTagCounts();
+    const napari = counts.find((r) => r.tag === 'Napari');
+    assert.ok(napari, 'a vocab-only tag with no booking must still appear');
+    assert.equal(napari.count, 0);
+  });
+
+  test('ordering is count desc then name asc', async () => {
+    const { DB } = await freshDb();
+    const { liveProject } = seedFixture(DB);
+    // Zeta appears on two bookings; Mid and Alpha share a count of 1 so the name tiebreak is
+    // genuinely exercised (Alpha before Mid); Beta is vocab-only at count 0.
+    DB.run("INSERT INTO meetings (project_id, title, date, tags) VALUES (?, 'A', '2026-01-05', 'Zeta, Mid')", [liveProject]);
+    DB.run("INSERT INTO meetings (project_id, title, date, tags) VALUES (?, 'B', '2026-01-06', 'Alpha, Zeta')", [liveProject]);
+    DB.addVocab('BOOKING_TAG', 'Beta');
+
+    const counts = DB.bookingTagCounts();
+    assert.deepEqual(counts.map((r) => r.tag), ['Zeta', 'Alpha', 'Mid', 'Beta'], 'Zeta (2) first; Alpha and Mid both count 1 and sort by name; Beta (0) last');
+    assert.deepEqual(counts.map((r) => r.count), [2, 1, 1, 0]);
+  });
+
+  test('an empty database with no vocab returns []', async () => {
+    const { DB } = await freshDb();
+    seedFixture(DB);
+    assert.deepEqual(DB.bookingTagCounts(), [], 'no tagged bookings and no BOOKING_TAG vocab means an empty list');
+  });
+});
