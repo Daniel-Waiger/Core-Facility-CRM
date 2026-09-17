@@ -3105,21 +3105,27 @@
 
     function sync() { hidden.value = UI.joinTags(selected); }
 
+    // Known tags not yet selected, narrowed by the lowercased search term (one filtering site,
+    // shared by the dropdown and by Enter/blur resolution — mirrors mountTokenPicker's single render).
+    function unselectedMatching(term) {
+      const selectedLower = new Set(selected.map((t) => t.toLowerCase()));
+      const opts = known.filter((k) => !selectedLower.has(k.tag.toLowerCase()));
+      return term ? opts.filter((k) => k.tag.toLowerCase().includes(term)) : opts;
+    }
+
     function render() {
       list.innerHTML = selected.map((t) =>
         `<span class="token" data-tag="${esc(t)}"><button type="button" class="token-x" aria-label="Remove ${esc(t)}">&times;</button>${esc(t)}</span>`
       ).join('');
       const term = (search.value || '').trim().toLowerCase();
-      const selectedLower = new Set(selected.map((t) => t.toLowerCase()));
-      let options = known.filter((k) => !selectedLower.has(k.tag.toLowerCase()));
-      if (term) options = options.filter((k) => k.tag.toLowerCase().includes(term));
+      const options = unselectedMatching(term);
       let html = options.map((k) =>
         `<button type="button" class="tag-option" data-tag="${esc(k.tag)}">${esc(k.tag)} <span class="tag-count">×${k.count}</span></button>`
       ).join('');
       const typed = search.value.trim();
       if (typed) {
-        const existsKnown = known.some((k) => k.tag.toLowerCase() === typed.toLowerCase());
-        const existsSelected = selectedLower.has(typed.toLowerCase());
+        const existsKnown = known.some((k) => k.tag.toLowerCase() === term);
+        const existsSelected = selected.some((t) => t.toLowerCase() === term);
         if (!existsKnown && !existsSelected) {
           html += `<button type="button" class="tag-option tag-create" data-create="${esc(typed)}">Create “${esc(typed)}”</button>`;
         }
@@ -3153,9 +3159,7 @@
       const term = typed.toLowerCase();
       const exactKnown = known.find((k) => k.tag.toLowerCase() === term);
       if (exactKnown) { select(exactKnown.tag); return; }
-      const selectedLower = new Set(selected.map((t) => t.toLowerCase()));
-      let visible = known.filter((k) => !selectedLower.has(k.tag.toLowerCase()));
-      visible = visible.filter((k) => k.tag.toLowerCase().includes(term));
+      const visible = unselectedMatching(term);
       if (visible.length === 1) { select(visible[0].tag); return; }
       create(typed);
     }
@@ -5943,7 +5947,7 @@
   function openTodayModal() {
     const todayStr = UI.today();
     const dateObj = new Date();
-    const dateFormatted = dateObj.toLocaleDateString(UI.DATE_LOCALE, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const dateFormatted = UI.fmtLongDate(dateObj);
 
     // Milestones due today
     const msToday = DB.rows(`

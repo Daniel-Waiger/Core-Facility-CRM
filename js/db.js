@@ -2043,7 +2043,7 @@
   // later one's), then any BOOKING_TAG vocab terms not yet seen (added at count 0).
   function bookingTagCounts() {
     const counts = new Map(); // lowercased tag -> { tag, count }
-    const meetingRows = rows("SELECT tags FROM meetings WHERE TRIM(COALESCE(tags,''))<>'' ORDER BY id");
+    const meetingRows = rows("SELECT tags FROM meetings WHERE TRIM(COALESCE(tags,''))!='' ORDER BY id");
     for (const r of meetingRows) {
       const tags = global.UI.parseTags(r.tags);
       for (const t of tags) {
@@ -2349,9 +2349,11 @@
   // screen listing who is currently cleared to use it).
   function listInstrumentTraining(instrumentId) {
     return rows(
-      `SELECT pit.*, p.name AS person_name, p.is_retired AS person_retired
+      `SELECT pit.*, p.name AS person_name, p.is_retired AS person_retired,
+              tr.name AS trainer_name, tr.is_retired AS trainer_retired
        FROM person_instrument_training pit
        LEFT JOIN people p ON p.id = pit.person_id
+       LEFT JOIN people tr ON tr.id = pit.trainer_id
        WHERE pit.instrument_id = ?
        ORDER BY p.name`,
       [instrumentId]
@@ -3538,10 +3540,10 @@
 
     // B6/B7/B8 — the weekly trio: Samir Haddad's recurring calcium-imaging block on the Nikon AX R,
     // same title across all three weeks so the demo shows a repeating weekly block.
-    seedBooking({
+    [day(-21), day(-14), day(-7)].forEach((date) => seedBooking({
       projectId: 2,
       title: 'Weekly Calcium Imaging Block',
-      date: day(-21), start: '11:00', end: '13:00',
+      date, start: '11:00', end: '13:00',
       instruments: [{ id: 4 }], // Nikon AX R Resonant
       staff: [{ id: 6 }], // David Kim
       peopleIds: [12], // Samir Haddad
@@ -3549,31 +3551,7 @@
       note: 'Weekly recurring resonant-scan block for the synaptic density calcium-imaging series.',
       actions: '',
       category: 'assisted session'
-    });
-    seedBooking({
-      projectId: 2,
-      title: 'Weekly Calcium Imaging Block',
-      date: day(-14), start: '11:00', end: '13:00',
-      instruments: [{ id: 4 }], // Nikon AX R Resonant
-      staff: [{ id: 6 }], // David Kim
-      peopleIds: [12], // Samir Haddad
-      groupOrg: 'Neural Dynamics Institute',
-      note: 'Weekly recurring resonant-scan block for the synaptic density calcium-imaging series.',
-      actions: '',
-      category: 'assisted session'
-    });
-    seedBooking({
-      projectId: 2,
-      title: 'Weekly Calcium Imaging Block',
-      date: day(-7), start: '11:00', end: '13:00',
-      instruments: [{ id: 4 }], // Nikon AX R Resonant
-      staff: [{ id: 6 }], // David Kim
-      peopleIds: [12], // Samir Haddad
-      groupOrg: 'Neural Dynamics Institute',
-      note: 'Weekly recurring resonant-scan block for the synaptic density calcium-imaging series.',
-      actions: '',
-      category: 'assisted session'
-    });
+    }));
 
     // B9 — Jonah Reyes and Ruth Adler run an unattended Leica acquisition with no facility staff
     // billed (self-sufficient users, per their training level below).

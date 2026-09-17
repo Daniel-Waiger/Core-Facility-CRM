@@ -21,7 +21,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const { freshDb, seedFixture } = require('./helpers/sqlite');
-const { freshApp } = require('./helpers/app-harness');
+const { freshApp, installFileReaderStub } = require('./helpers/app-harness');
 const { loadApp, readSource, REPO } = require('./helpers/load-module');
 
 function lastId(DB) { return DB.row('SELECT last_insert_rowid() as id').id; }
@@ -514,17 +514,7 @@ describe('1.13 training level rename', () => {
     seedFixture(DB);
     DB.run("INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on) VALUES (1,1,'User','2026-01-01')");
 
-    if (typeof globalThis.FileReader === 'undefined') {
-      globalThis.FileReader = class FileReader {
-        readAsDataURL(blob) {
-          blob.arrayBuffer().then((buf) => {
-            this.result = `data:${blob.type || 'application/octet-stream'};base64,${Buffer.from(buf).toString('base64')}`;
-            if (this.onload) this.onload();
-          }).catch((e) => { this.error = e; if (this.onerror) this.onerror(); });
-        }
-      };
-    }
-
+    installFileReaderStub();
     const backup = await DB.buildBackup();
     await DB.restoreBackup(backup);
 

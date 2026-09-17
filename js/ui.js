@@ -616,6 +616,10 @@
     const dt = new Date(String(d).slice(0, 10) + 'T00:00:00');
     return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString(DATE_LOCALE);
   }
+  // "Thursday, September 17, 2026" — the long form the Today's Agenda card and dialog share.
+  function fmtLongDate(d) {
+    return d.toLocaleDateString(DATE_LOCALE, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  }
   /* 'YYYY-MM-DD' for a Date's LOCAL calendar day.
      Why not toISOString().slice(0,10)? A Date is a single instant, and toISOString() re-describes
      that instant in UTC. Local midnight at a UTC+ offset (Israel is UTC+2/+3) happened while it
@@ -1081,6 +1085,7 @@
     sanitizeHtml,
     noteHtml,
     fmtDate,
+    fmtLongDate,
     computeBookingBOM,
     bookingPricedInputsChanged,
     ymd,

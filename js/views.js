@@ -17,6 +17,22 @@
   }
 
   /* ---------------- Dashboard ---------------- */
+  // One milestone line for the Dashboard's quick lists (Upcoming / Overdue / Due Today): name and
+  // project (click opens the project), a clickable status badge, and the due date.
+  function msQuickRow(m, badgeCls, badgeLabel, dateStyle) {
+    return `
+            <div class="row milestone-quick-row">
+              <div class="grow row-link" data-goto="project" data-id="${m.project_id}">
+                <div class="font-medium">${esc(m.name)}</div>
+                <div class="faint small">${esc(m.project_title)}</div>
+              </div>
+              <span class="ms-quick-meta">
+                <span class="badge ${badgeCls} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(badgeLabel)}</span>
+                <span class="mono small"${dateStyle ? ` style="${dateStyle}"` : ''}>${fmt(m.due_date)}</span>
+              </span>
+            </div>`;
+  }
+
   function dashboard() {
     const now = today();
     const counts = {};
@@ -39,8 +55,7 @@
       WHERE p.is_archived=0 AND m.due_date IS NOT NULL AND m.due_date < ? AND m.status != 'done'
       ORDER BY m.due_date ASC LIMIT 10`, [now]);
 
-    const todayStr = now;
-    const agendaDate = new Date().toLocaleDateString(DATE_LOCALE, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const agendaDate = global.UI.fmtLongDate(new Date());
 
     const bookingsToday = global.DB.rows(`
       SELECT m.id, m.title, m.start_time, m.end_time, m.is_cancelled, m.project_id, p.title AS project_title,
@@ -48,13 +63,13 @@
              (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_staff ms JOIN people pe ON pe.id=ms.person_id WHERE ms.meeting_id=m.id) AS staff
       FROM meetings m LEFT JOIN projects p ON p.id=m.project_id
       WHERE m.date=? AND (m.project_id IS NULL OR p.is_archived=0)
-      ORDER BY m.start_time, m.id`, [todayStr]);
+      ORDER BY m.start_time, m.id`, [now]);
 
     const msToday = global.DB.rows(`
       SELECT m.id, m.name, m.due_date, m.status, p.id AS project_id, p.title AS project_title
       FROM milestones m JOIN projects p ON p.id = m.project_id
       WHERE p.is_archived=0 AND m.due_date=?
-      ORDER BY m.status='done', m.id`, [todayStr]);
+      ORDER BY m.status='done', m.id`, [now]);
 
     return `
     <div class="grid cols-4 mb-16">
@@ -67,33 +82,13 @@
       <div class="card">
         <div class="card-title">${ic('target')} Upcoming Milestones (Next 30 Days)</div>
         <div class="card-body">
-          ${upcoming.length ? upcoming.map((m) => `
-            <div class="row milestone-quick-row">
-              <div class="grow row-link" data-goto="project" data-id="${m.project_id}">
-                <div class="font-medium">${esc(m.name)}</div>
-                <div class="faint small">${esc(m.project_title)}</div>
-              </div>
-              <span class="ms-quick-meta">
-                <span class="badge ${m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(global.UI.msStatusLabel(m.status))}</span>
-                <span class="mono small">${fmt(m.due_date)}</span>
-              </span>
-            </div>`).join('') : emptyState('calendar', 'Nothing due soon', 'No pending milestones in the next 30 days.')}
+          ${upcoming.length ? upcoming.map((m) => msQuickRow(m, m.status === 'in-progress' ? 'primary' : 'neutral', global.UI.msStatusLabel(m.status))).join('') : emptyState('calendar', 'Nothing due soon', 'No pending milestones in the next 30 days.')}
         </div>
       </div>
       <div class="card">
         <div class="card-title" style="color:var(--danger)">${ic('alert')} Overdue Milestones</div>
         <div class="card-body">
-          ${overdue.length ? overdue.map((m) => `
-            <div class="row milestone-quick-row">
-              <div class="grow row-link" data-goto="project" data-id="${m.project_id}">
-                <div class="font-medium">${esc(m.name)}</div>
-                <div class="faint small">${esc(m.project_title)}</div>
-              </div>
-              <span class="ms-quick-meta">
-                <span class="badge danger clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(global.UI.msStatusLabel('overdue'))}</span>
-                <span class="mono small" style="color:var(--danger)">${fmt(m.due_date)}</span>
-              </span>
-            </div>`).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
+          ${overdue.length ? overdue.map((m) => msQuickRow(m, 'danger', global.UI.msStatusLabel('overdue'), 'color:var(--danger)')).join('') : emptyState('check', 'All clear', 'No overdue milestones across any active project.')}
         </div>
       </div>
     </div>
@@ -122,17 +117,7 @@
           <div>
             <div class="card-title">Milestones Due Today (${msToday.length})</div>
             <div class="card-body">
-              ${msToday.length ? msToday.map((m) => `
-                <div class="row milestone-quick-row">
-                  <div class="grow row-link" data-goto="project" data-id="${m.project_id}">
-                    <div class="font-medium">${esc(m.name)}</div>
-                    <div class="faint small">${esc(m.project_title)}</div>
-                  </div>
-                  <span class="ms-quick-meta">
-                    <span class="badge ${m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral'} clickable" data-act="toggle-ms-status" data-id="${m.id}" title="Click to set status">${esc(global.UI.msStatusLabel(m.status))}</span>
-                    <span class="mono small">${fmt(m.due_date)}</span>
-                  </span>
-                </div>`).join('') : emptyState('target', 'Nothing due today', 'Milestones due today will appear here.')}
+              ${msToday.length ? msToday.map((m) => msQuickRow(m, m.status === 'done' ? 'success' : m.status === 'in-progress' ? 'primary' : 'neutral', global.UI.msStatusLabel(m.status))).join('') : emptyState('target', 'Nothing due today', 'Milestones due today will appear here.')}
             </div>
           </div>
         </div>
@@ -1084,10 +1069,8 @@
     return H + 'h ' + M + 'm';
   }
 
-  // A note preview for a table cell: render through UI.noteHtml (the same sanitizer every note
-  // display uses), strip markup back to plain text, decode the handful of entities esc()/
-  // sanitizeHtml can produce, collapse whitespace, and clip to 80 chars with a full-text tooltip.
-  // Plain-text preview of a booking note. Works from the stored string directly rather than
+  // Plain-text preview of a booking note for a table cell, clipped to 80 chars with a full-text
+  // tooltip. Works from the stored string directly rather than
   // through UI.noteHtml: the output is escaped text, so no sanitizer is needed, and
   // UI.sanitizeHtml needs a real DOMParser, which the unit-test DOM stub does not have.
   // Rich-text notes (a small HTML subset) have their tags stripped and entities decoded;
@@ -1146,23 +1129,22 @@
     const yearFrom = global.UI.ymd(new Date(now.getFullYear(), 0, 1));
     const yearTo = global.UI.ymd(new Date(now.getFullYear(), 11, 31));
 
-    const upcoming = global.DB.rows(`
-      SELECT m.id, m.title, m.date, m.start_time, m.end_time,
+    // Attendee and assisting-staff name lists, shared by the two booking queries below.
+    const usersAssistedSql = `
              (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
                 FROM meeting_people mp JOIN people pe ON pe.id = mp.person_id WHERE mp.meeting_id = m.id) AS users,
              (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
-                FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = m.id) AS assisted
+                FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = m.id) AS assisted`;
+
+    const upcoming = global.DB.rows(`
+      SELECT m.id, m.title, m.date, m.start_time, m.end_time, ${usersAssistedSql}
       FROM meetings m
       JOIN meeting_instruments mi ON mi.meeting_id=m.id
       WHERE mi.instrument_id=? AND m.is_cancelled=0 AND m.date>=? AND m.date<=?
       ORDER BY m.date, m.start_time, m.id`, [i.id, today(), global.UI.todayPlusDays(14)]);
 
     const activity = global.DB.rows(`
-      SELECT m.id, m.title, m.date, m.start_time, m.end_time, m.note, m.is_cancelled,
-             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
-                FROM meeting_people mp JOIN people pe ON pe.id = mp.person_id WHERE mp.meeting_id = m.id) AS users,
-             (SELECT GROUP_CONCAT(pe.name || CASE WHEN pe.is_retired THEN ' (Retired)' ELSE '' END, ', ')
-                FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = m.id) AS assisted
+      SELECT m.id, m.title, m.date, m.start_time, m.end_time, m.note, m.is_cancelled, ${usersAssistedSql}
       FROM meetings m
       JOIN meeting_instruments mi ON mi.meeting_id=m.id
       WHERE mi.instrument_id=? AND m.date<?
@@ -1170,12 +1152,6 @@
       LIMIT 25`, [i.id, today()]);
 
     const training = global.DB.listInstrumentTraining(i.id);
-    const peopleById = new Map(global.DB.rows('SELECT id, name, is_retired FROM people').map((p) => [p.id, p]));
-    function trainerLabel(trainerId) {
-      if (!trainerId) return '—';
-      const p = peopleById.get(trainerId);
-      return p ? esc(global.UI.retiredName(p.name, p.is_retired)) : '—';
-    }
 
     const projectRows = global.DB.rows(`
       SELECT p.id, p.code, p.title, p.status, p.is_archived
@@ -1302,7 +1278,7 @@
                   <td class="row-link small font-medium" data-goto="person" data-id="${rec.person_id}">${esc(global.UI.retiredName(rec.person_name, rec.person_retired))}</td>
                   <td><span class="badge primary">${esc(rec.level)}</span></td>
                   <td class="mono small faint">${fmt(rec.trained_on)}</td>
-                  <td class="small">${trainerLabel(rec.trainer_id)}</td>
+                  <td class="small">${rec.trainer_name ? esc(global.UI.retiredName(rec.trainer_name, rec.trainer_retired)) : '—'}</td>
                   <td class="mono small faint">${rec.expires_on ? fmt(rec.expires_on) : 'No expiry'}${statusBadgeHtml}</td>
                 </tr>`; }).join('')}
             </tbody>
