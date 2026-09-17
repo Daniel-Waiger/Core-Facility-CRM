@@ -223,6 +223,11 @@
     return `<span class="badge ${map[s] || 'neutral'}">${esc(s)}</span>`;
   }
 
+  function typeBadge(type) {
+    const map = { 'PI': 'primary', 'Facility Staff': 'success' };
+    return `<span class="badge ${map[type] || 'neutral'}">${esc(type || '—')}</span>`;
+  }
+
   /* ---------------- Project detail ---------------- */
   function projectDetail(id) {
     const p = global.DB.row(`
@@ -720,7 +725,7 @@
             ${rows.map((r) => `
               <tr class="row-link ${r.is_retired ? 'row-retired' : ''}" data-goto="person" data-id="${r.id}">
                 <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
-                <td><span class="badge neutral">${esc(r.type)}</span></td>
+                <td>${typeBadge(r.type)}</td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td>${r.department ? `<span class="chip-sm" style="font-weight:600">${esc(r.department)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="muted small tbl-email" title="${esc(r.email || '')}">${esc(r.email || '—')}</td>
@@ -780,8 +785,7 @@
         <div class="grow">
           <div class="row" style="gap:10px;flex-wrap:wrap">
             <span class="project-title">${esc(global.UI.retiredName(p.name, p.is_retired))}</span>
-            <span class="badge neutral">${esc(p.type)}</span>
-            ${p.is_staff ? `<span class="badge success" data-tooltip="Billable by the hour on bookings">Facility Staff</span>` : ''}
+            ${typeBadge(p.type)}
           </div>
         </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -1885,6 +1889,7 @@
     navCalendar,
     calToday,
     statusBadge,
+    typeBadge,
     // Hour-grid layout helpers factored out of the week calendar, reused by the per-instrument
     // resource timeline (calendarTimeline, roadmap 1.4): time->px, an event's {top,height} block,
     // and hour-row markup.

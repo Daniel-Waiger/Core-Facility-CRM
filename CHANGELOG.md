@@ -10,6 +10,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Training levels are now **Regular** and **Super User**; records saved as 'User' are renamed automatically on load and on restore.
+- The person profile shows one role pill, coloured by role (PI, Facility Staff, everyone else), and the People list uses the same colouring.
 
 ## [1.12.1] — 2026-09-17
 

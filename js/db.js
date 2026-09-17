@@ -2035,6 +2035,31 @@
     run('INSERT OR IGNORE INTO vocab (category, value) VALUES (?,?)', [category, v]);
   }
 
+  // Usage counts for the booking dialogs' tag picker. Deliberately counts every booking that
+  // carries the tag, cancelled ones included — this is a tag's usage history, not an occupancy
+  // figure (see CLAUDE.md's "Occupancy excludes all cancelled bookings", which this is not).
+  // Merge is case-insensitive with the first spelling encountered winning, same rule as
+  // app.js's unionNames: meetings in id order first (so an earlier booking's casing wins over a
+  // later one's), then any BOOKING_TAG vocab terms not yet seen (added at count 0).
+  function bookingTagCounts() {
+    const counts = new Map(); // lowercased tag -> { tag, count }
+    const meetingRows = rows("SELECT tags FROM meetings WHERE TRIM(COALESCE(tags,''))<>'' ORDER BY id");
+    for (const r of meetingRows) {
+      const tags = global.UI.parseTags(r.tags);
+      for (const t of tags) {
+        const key = t.toLowerCase();
+        const entry = counts.get(key);
+        if (entry) entry.count += 1;
+        else counts.set(key, { tag: t, count: 1 });
+      }
+    }
+    for (const t of vocabList('BOOKING_TAG')) {
+      const key = t.toLowerCase();
+      if (!counts.has(key)) counts.set(key, { tag: t, count: 0 });
+    }
+    return Array.from(counts.values()).sort((a, b) => (b.count - a.count) || a.tag.localeCompare(b.tag));
+  }
+
   /* ---------------- App-wide config (billing rates, etc.) ----------------
      A tiny key/value store, same idea as `vocab` above, but for single settings
      rather than dropdown lists. Lives in the DB (not localStorage) so it travels
@@ -3457,6 +3482,7 @@
     projectFlags,
     vocabList,
     addVocab,
+    bookingTagCounts,
     getConfig,
     getConfigNum,
     setConfig,
