@@ -3452,7 +3452,7 @@
          VALUES (1, 'poster', 'Intravital imaging of CAR-T infiltration kinetics in solid tumours', 'AAI Immunology 2026 — poster P-412', 'Chen, A.; Rostova, E.', 'https://example.org/posters/aai-2026-p412', 0, ?)`, [day(-45)]);
     // --- #41 end ---
     // --- 1.13 begin ---
-    // 17 more bookings across every optical instrument (Leica SP8 FALCON id 1, Olympus FV3000 id 2,
+    // 17 more bookings across every instrument (Leica SP8 FALCON id 1, Olympus FV3000 id 2,
     // Zeiss Lightsheet Z.1 id 3, Nikon AX R Resonant id 4, Glacios Cryo-TEM id 5), spread over the
     // three seed labs' new roster members (ids 9-17) and staffed by David Kim (6), Priya Anand (7)
     // and Tom Alvarez (8) — so pickers, instrument profiles and the Dashboard agenda have real depth
@@ -3537,7 +3537,7 @@
     });
 
     // B6/B7/B8 — the weekly trio: Samir Haddad's recurring calcium-imaging block on the Nikon AX R,
-    // same title across all three weeks so the Reports screen can show it as a recurring series.
+    // same title across all three weeks so the demo shows a repeating weekly block.
     seedBooking({
       projectId: 2,
       title: 'Weekly Calcium Imaging Block',
@@ -3721,14 +3721,16 @@
       // Ruth Adler, trained on the Leica SP8 FALCON (1) by Tom Alvarez; no expiry set.
       [11, 1, 'Regular', day(-30), 8, '', ''],
       // Samir Haddad, Super User on the Nikon AX R Resonant (4), trained by David Kim — runs the
-      // weekly calcium block independently.
-      [12, 4, 'Super User', day(-150), 6, '', 'Runs the weekly calcium block independently'],
+      // weekly calcium block with David Kim assisting.
+      [12, 4, 'Super User', day(-150), 6, '', 'Cleared for independent resonant-scan use'],
       // Yuki Tanaka, trained on the Nikon AX R Resonant (4) by David Kim; no expiry set.
       [13, 4, 'Regular', day(-33), 6, '', ''],
       // Ines Ferreira, trained on the Zeiss Lightsheet Z.1 (3) by Priya Anand; expires in the future.
       [15, 3, 'Regular', day(-27), 7, day(338), ''],
       // Noa Levi, trained on the Glacios Cryo-TEM (5) by Priya Anand; no expiry set.
-      [16, 5, 'Regular', day(-20), 7, '', '']
+      [16, 5, 'Regular', day(-20), 7, '', ''],
+      // Noa Levi (16) on the Zeiss Lightsheet (3) — signed off at the B3 training session with Ines.
+      [16, 3, 'Regular', day(-28), 7, '', '']
     ];
     newTrainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
     // --- 1.13 end ---

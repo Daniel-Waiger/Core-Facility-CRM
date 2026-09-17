@@ -8,13 +8,13 @@ This project uses [Semantic Versioning](https://semver.org/).
 ### Added
 - 'Facility Staff' is a real Role / Position option in the person dialog and People filter, not only demo text.
 - **A tag picker in both booking dialogs**: pick from every tag already used (with how many bookings carry it, cancelled ones included) or type to create a new one; stored tags are unchanged.
-- **An Instrument Profile page**, opened from the Instruments list, with this month's and this year's bookings, booked hours, distinct users and charges (the same figures as Reports), details and supervisors, the next 14 days of bookings, recent activity (user, time, duration, assisting staff, notes, status), trained users and active projects, plus a New Booking button pre-set to that instrument.
+- **An Instrument Profile page**, opened from the Instruments list, with this month's and this year's bookings, booked hours, distinct users and line charges (bookings, hours and line charges come from the same aggregation and the same whole-month / whole-year ranges as the Reports screen), details and supervisors, the next 14 days of bookings, recent activity (user, time, duration, assisting staff, notes, status), trained users and active projects, plus a New Booking button pre-set to that instrument.
 - **Today's Agenda on the Dashboard**: a full-width card under the milestone boxes lists today's bookings (time, title, project or Facility-wide, instruments, staff; cancelled ones marked) and the milestones due today.
 
 ### Changed
 - Training levels are now **Regular** and **Super User**; records saved as 'User' are renamed automatically on load and on restore.
-- The person profile shows one role pill, coloured by role (PI, Facility Staff, everyone else), and the People list uses the same colouring.
-- **A fuller demo dataset**: each lab has three more members with real roles, 17 more bookings across every optical instrument (two of them today, so the Dashboard agenda and instrument profiles have something to show), reused tags so the tag picker shows counts, and training records for the new members.
+- The person profile shows one role pill instead of two: it reads the Role / Position and is green when the person is Facility Staff (the billing flag); PIs are blue. The People list uses the same colouring.
+- **A fuller demo dataset**: each lab has three more members with real roles, 17 more bookings across every instrument (two of them today, so the Dashboard agenda and instrument profiles have something to show), reused tags so the tag picker shows counts, and training records for the new members.
 
 ## [1.12.1] — 2026-09-17
 

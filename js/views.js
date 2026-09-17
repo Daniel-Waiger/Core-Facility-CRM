@@ -281,9 +281,12 @@
     return `<span class="badge ${map[s] || 'neutral'}">${esc(s)}</span>`;
   }
 
-  function typeBadge(type) {
-    const map = { 'PI': 'primary', 'Facility Staff': 'success' };
-    return `<span class="badge ${map[type] || 'neutral'}">${esc(type || '—')}</span>`;
+  // One role pill per person. Green means the billing flag (people.is_staff), which is what the
+  // staff picker, Rate/hr and exports key on — the free-text Role / Position alone never makes a
+  // person billable, so a role of 'Facility Staff' without the flag stays neutral.
+  function typeBadge(type, isStaff) {
+    if (isStaff) return `<span class="badge success" data-tooltip="Billable by the hour on bookings">${esc(type || 'Facility Staff')}</span>`;
+    return `<span class="badge ${type === 'PI' ? 'primary' : 'neutral'}">${esc(type || '—')}</span>`;
   }
 
   /* ---------------- Project detail ---------------- */
@@ -783,7 +786,7 @@
             ${rows.map((r) => `
               <tr class="row-link ${r.is_retired ? 'row-retired' : ''}" data-goto="person" data-id="${r.id}">
                 <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
-                <td>${typeBadge(r.type)}</td>
+                <td>${typeBadge(r.type, r.is_staff)}</td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td>${r.department ? `<span class="chip-sm" style="font-weight:600">${esc(r.department)}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="muted small tbl-email" title="${esc(r.email || '')}">${esc(r.email || '—')}</td>
@@ -843,7 +846,7 @@
         <div class="grow">
           <div class="row" style="gap:10px;flex-wrap:wrap">
             <span class="project-title">${esc(global.UI.retiredName(p.name, p.is_retired))}</span>
-            ${typeBadge(p.type)}
+            ${typeBadge(p.type, p.is_staff)}
           </div>
         </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -1113,9 +1116,11 @@
       FROM instrument_staff ist JOIN people pe ON pe.id = ist.person_id
       WHERE ist.instrument_id = ?`, [i.id]).names;
 
-    // Utilization: same aggregation Reports uses (CLAUDE.md "Reports: aggregation lives in one
-    // place"), plus a distinct-user count Reports has no per-instrument figure for — cancelled
-    // bookings excluded here too, matching the occupancy rule.
+    // Utilization: bookings / hours / line charges come from the same aggregation the Reports
+    // screen renders (CLAUDE.md "Reports: aggregation lives in one place"). Distinct users is a
+    // direct query here: Reports computes the same figure inside computeStewardshipRows (grouped
+    // by supervisor, via loadAttendeeLines), which is too heavy for one profile — this query must
+    // keep the same rule as that one: attendees of this instrument's non-cancelled bookings.
     function utilTile(from, to, prefix) {
       const facts = global.Reports.makeFacts(from, to);
       const r = global.Reports.computeInstrumentRows(from, to, facts).rows.find((x) => x.id === i.id)
@@ -1130,12 +1135,16 @@
         <div class="card stat" data-tile="${prefix}-bookings" data-value="${r.bookings}"><span class="n">${r.bookings}</span><span class="l">Bookings</span></div>
         <div class="card stat" data-tile="${prefix}-hours" data-value="${r.hours}"><span class="n">${Math.round(r.hours * 100) / 100}</span><span class="l">Booked Hours</span></div>
         <div class="card stat" data-tile="${prefix}-users" data-value="${users}"><span class="n">${users}</span><span class="l">Distinct Users</span></div>
-        <div class="card stat" data-tile="${prefix}-charges" data-value="${r.revenue}"><span class="n">${esc(global.UI.fmtMoney(r.revenue))}</span><span class="l">Charges</span></div>`;
+        <div class="card stat" data-tile="${prefix}-charges" data-value="${r.revenue}"><span class="n">${esc(global.UI.fmtMoney(r.revenue))}</span><span class="l">Line Charges</span></div>`;
     }
+    // Whole calendar month / year, exactly the ranges the Reports screen's "This Month" and
+    // "This Year" presets use (see setPreset in reports.js), so the two screens agree on the
+    // same labels. Local-calendar dates via UI.ymd — never toISOString.
     const now = new Date();
     const monthFrom = global.UI.ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+    const monthTo = global.UI.ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
     const yearFrom = global.UI.ymd(new Date(now.getFullYear(), 0, 1));
-    const to = today();
+    const yearTo = global.UI.ymd(new Date(now.getFullYear(), 11, 31));
 
     const upcoming = global.DB.rows(`
       SELECT m.id, m.title, m.date, m.start_time, m.end_time,
@@ -1156,7 +1165,7 @@
                 FROM meeting_staff ms JOIN people pe ON pe.id = ms.person_id WHERE ms.meeting_id = m.id) AS assisted
       FROM meetings m
       JOIN meeting_instruments mi ON mi.meeting_id=m.id
-      WHERE mi.instrument_id=? AND m.date<=?
+      WHERE mi.instrument_id=? AND m.date<?
       ORDER BY m.date DESC, m.start_time DESC, m.id DESC
       LIMIT 25`, [i.id, today()]);
 
@@ -1183,7 +1192,6 @@
             <span class="project-title">${esc(global.UI.retiredName(i.name, i.is_retired))}</span>
             ${i.kind ? `<span class="chip-sm">${esc(i.kind)}</span>` : ''}
             <span class="badge ${statusCls}">${esc(i.status)}</span>
-            ${i.is_retired ? '<span class="badge neutral">Retired</span>' : ''}
           </div>
         </div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -1199,10 +1207,10 @@
       <div class="row mb-8"><div class="grow"><span class="card-title">${ic('target')} Utilization</span></div></div>
       <div class="card-body">
         <div class="faint small mb-8">This Month</div>
-        <div class="grid cols-4 mb-16">${utilTile(monthFrom, to, 'month')}</div>
+        <div class="grid cols-4 mb-16">${utilTile(monthFrom, monthTo, 'month')}</div>
         <div class="faint small mb-8">This Year</div>
-        <div class="grid cols-4 mb-16">${utilTile(yearFrom, to, 'year')}</div>
-        <div class="faint small">Cancelled bookings are excluded from bookings and hours; charges follow the Project Costs rule.</div>
+        <div class="grid cols-4 mb-16">${utilTile(yearFrom, yearTo, 'year')}</div>
+        <div class="faint small">Whole calendar month and year, the same ranges as the Reports screen's This Month / This Year. Cancelled bookings are excluded from bookings, hours and distinct users. Line Charges follows the cancellation rule used everywhere else (a cancelled booking's charge counts only if it was retained) and is the raw instrument-charge line for each booking, before that booking's discount, overhead and tax — so it will not match a project's Total Cost.</div>
       </div>
     </div>
 
@@ -1271,7 +1279,7 @@
             </tbody>
           </table>
         </div>
-        <div class="faint small mt-8">Showing the 25 most recent bookings on this instrument. Cancelled bookings are kept and marked.</div>`
+        <div class="faint small mt-8">Showing the 25 most recent past bookings on this instrument; today's sessions are listed under Upcoming Bookings. Cancelled bookings are kept and marked.</div>`
         : emptyState('calendar', 'No bookings yet', 'Bookings on this instrument will show up here.')}
       </div>
     </div>
@@ -1303,9 +1311,9 @@
       </div>
     </div>
 
-    <!-- Active Projects Card -->
+    <!-- Projects Card -->
     <div class="card mb-16">
-      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('folder')} Active Projects</span></div></div>
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('folder')} Projects</span></div></div>
       <div class="card-body">
         ${projectRows.length ? `
         <div class="tbl-wrap">

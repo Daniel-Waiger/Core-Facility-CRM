@@ -201,7 +201,7 @@ should not invent parallel tables for data that already has a home:
 
 - **People / labs** → `people` rows, with `people.organization` set to the lab/PI group
   name. A new organization name should also get a row in the `vocab` table under category
-  `ORG` (the same table `DB.orgNames()`/the "+ Add New" picker flow already reads), so it
+  `ORG` (the same table `DB.vocabList('ORG')` and app.js's `orgNames()` merge behind the "+ Add New" picker already read), so it
   shows up as a normal selectable organization rather than a one-off string that only
   this one imported person happens to have.
 - **Instruments** → `instruments` rows, with `instruments.cost_unit` set to whatever unit

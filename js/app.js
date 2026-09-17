@@ -3125,7 +3125,10 @@
         }
       }
       dropdown.innerHTML = html;
-      const show = document.activeElement === search && dropdown.innerHTML !== '';
+      // Stay open while focus is anywhere inside the picker, so Tab can reach the option buttons
+      // and Enter/Space on one of them activates it (a search-only check hid the list 150ms after
+      // focus moved to the first option, making it unreachable by keyboard).
+      const show = wrap.contains(document.activeElement) && dropdown.innerHTML !== '';
       dropdown.hidden = !show;
       sync();
     }
@@ -3140,15 +3143,41 @@
       select(tag);
     }
 
+    // Resolve whatever is typed in the search box the way Enter does: an exact (case-insensitive)
+    // known tag wins, then a single remaining match, otherwise the text becomes a new tag. Also
+    // run when focus leaves the picker, so text typed and then abandoned for the Save button is
+    // committed rather than silently dropped (the savers read only the hidden input).
+    function resolveTyped() {
+      const typed = search.value.trim();
+      if (!typed) return;
+      const term = typed.toLowerCase();
+      const exactKnown = known.find((k) => k.tag.toLowerCase() === term);
+      if (exactKnown) { select(exactKnown.tag); return; }
+      const selectedLower = new Set(selected.map((t) => t.toLowerCase()));
+      let visible = known.filter((k) => !selectedLower.has(k.tag.toLowerCase()));
+      visible = visible.filter((k) => k.tag.toLowerCase().includes(term));
+      if (visible.length === 1) { select(visible[0].tag); return; }
+      create(typed);
+    }
+
     search.addEventListener('input', render);
     search.addEventListener('focus', render);
-    search.addEventListener('blur', () => { setTimeout(() => { dropdown.hidden = true; }, 150); });
+    // focusout bubbles from the search box AND the option buttons; only act once focus has
+    // genuinely left the whole picker (checked after the browser has moved it).
+    wrap.addEventListener('focusout', () => {
+      setTimeout(() => {
+        if (wrap.contains(document.activeElement)) return;
+        resolveTyped();
+        dropdown.hidden = true;
+      }, 150);
+    });
     dropdown.addEventListener('mousedown', (e) => e.preventDefault());
     dropdown.addEventListener('click', (e) => {
       const opt = e.target.closest('.tag-option');
       if (!opt) return;
       if (opt.dataset.create != null) create(opt.dataset.create);
       else if (opt.dataset.tag != null) select(opt.dataset.tag);
+      search.focus(); // keep the keyboard flow inside the box after a pick
     });
     list.addEventListener('click', (e) => {
       const x = e.target.closest('.token-x');
@@ -3169,15 +3198,7 @@
       if (e.key !== 'Enter') return;
       e.preventDefault();
       e.stopPropagation();
-      const typed = search.value.trim();
-      const term = typed.toLowerCase();
-      const exactKnown = known.find((k) => k.tag.toLowerCase() === term);
-      if (typed && exactKnown) { select(exactKnown.tag); return; }
-      const selectedLower = new Set(selected.map((t) => t.toLowerCase()));
-      let visible = known.filter((k) => !selectedLower.has(k.tag.toLowerCase()));
-      if (term) visible = visible.filter((k) => k.tag.toLowerCase().includes(term));
-      if (typed && visible.length === 1) { select(visible[0].tag); return; }
-      if (typed) { create(typed); return; }
+      resolveTyped();
     });
     render();
   }

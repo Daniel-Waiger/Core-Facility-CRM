@@ -166,29 +166,38 @@ describe('Instrument Profile', () => {
     assert.ok(!upcomingCard.includes('Cancelled Soon Session'), 'a cancelled booking must never appear in Upcoming Bookings, however soon it falls');
   });
 
-  test('Utilization tiles equal Reports.computeInstrumentRows for the same range', async () => {
+  test('Utilization tiles equal Reports.computeInstrumentRows over the whole calendar month (the Reports This Month range), and Distinct Users ignores a cancelled booking\'s attendee', async () => {
     const { DB, UI, Views, Reports } = await freshApp();
-    const { scopeA, alice } = seedFixture(DB);
+    const { scopeA, alice, sam } = seedFixture(DB);
 
+    // The tiles cover the WHOLE calendar month, exactly like the Reports screen's "This Month"
+    // preset (setPreset in reports.js) — so a booking later this month must be counted too.
     const now = new Date();
     const monthFrom = UI.ymd(new Date(now.getFullYear(), now.getMonth(), 1));
-    const to = UI.today();
-    // "Another day" per the brief, but still inside the [monthFrom, to] range this test reads
-    // (docs/cma-lessons.md #47 T5 lesson) — monthFrom itself always qualifies, and only equals
-    // `to` on the 1st of the month, which is fine too.
-    const day2 = monthFrom !== to ? monthFrom : to;
+    const monthTo = UI.ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    const today = UI.today();
 
-    DB.run("INSERT INTO meetings (title, date, start_time, end_time, total_cost) VALUES ('Live Booking', ?, '09:00', '11:00', 200)", [to]);
+    DB.run("INSERT INTO meetings (title, date, start_time, end_time, total_cost) VALUES ('Live Booking', ?, '09:00', '11:00', 200)", [today]);
     const liveId = lastId(DB);
     DB.run('INSERT INTO meeting_instruments (meeting_id, instrument_id, line_cost) VALUES (?,?,200)', [liveId, scopeA]);
     DB.run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [liveId, alice]);
 
+    // Dated the last day of the month: at or after today, inside the Reports range, and the
+    // case a month-to-date range would silently drop.
+    DB.run("INSERT INTO meetings (title, date, start_time, end_time, total_cost) VALUES ('Month-End Booking', ?, '09:00', '10:00', 100)", [monthTo]);
+    const lateId = lastId(DB);
+    DB.run('INSERT INTO meeting_instruments (meeting_id, instrument_id, line_cost) VALUES (?,?,100)', [lateId, scopeA]);
+    DB.run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [lateId, alice]);
+
+    // Cancelled but retained: bills, but never counts as a booking, hours, or a distinct user —
+    // its attendee is a DIFFERENT person so the users tile would read 2 if the filter were lost.
     DB.run(
       "INSERT INTO meetings (title, date, start_time, end_time, total_cost, is_cancelled, billing_retained) VALUES ('Retained Cancelled Booking', ?, '09:00', '10:00', 100, 1, 1)",
-      [day2]
+      [monthFrom]
     );
     const cancelId = lastId(DB);
     DB.run('INSERT INTO meeting_instruments (meeting_id, instrument_id, line_cost) VALUES (?,?,100)', [cancelId, scopeA]);
+    DB.run('INSERT INTO meeting_people (meeting_id, person_id) VALUES (?,?)', [cancelId, sam]);
 
     const html = Views.instrumentDetail(scopeA);
 
@@ -199,16 +208,43 @@ describe('Instrument Profile', () => {
       return m[1];
     }
 
-    const report = Reports.computeInstrumentRows(monthFrom, to).rows.find((r) => r.id === scopeA);
-    assert.ok(report, 'computeInstrumentRows must have a row for this instrument over the same range');
-    assert.equal(report.bookings, 1, 'a retained-cancelled booking must not count toward occupancy bookings');
-    assert.equal(report.hours, 2, 'only the live booking\'s hours count toward occupancy hours');
-    assert.equal(report.revenue, 300, 'a retained cancellation still bills, so revenue includes both line costs');
+    const report = Reports.computeInstrumentRows(monthFrom, monthTo).rows.find((r) => r.id === scopeA);
+    assert.ok(report, 'computeInstrumentRows must have a row for this instrument over the whole month');
+    assert.equal(report.bookings, 2, 'the live booking and the month-end booking count; the retained cancellation does not');
+    assert.equal(report.hours, 3, 'only non-cancelled hours count (2 + 1)');
+    assert.equal(report.revenue, 400, 'a retained cancellation still bills, so revenue includes all three line costs');
 
-    assert.equal(Number(tileValue('month', 'bookings')), report.bookings, 'the month-bookings tile must equal computeInstrumentRows');
-    assert.equal(Number(tileValue('month', 'hours')), report.hours, 'the month-hours tile must equal computeInstrumentRows');
-    assert.equal(Number(tileValue('month', 'charges')), report.revenue, 'the month-charges tile must equal computeInstrumentRows');
-    assert.equal(Number(tileValue('month', 'users')), 1, 'one distinct attendee (alice) on the live booking must count as 1 in month-users');
+    assert.equal(Number(tileValue('month', 'bookings')), report.bookings, 'the month-bookings tile must equal computeInstrumentRows over the whole month');
+    assert.equal(Number(tileValue('month', 'hours')), report.hours, 'the month-hours tile must equal computeInstrumentRows over the whole month');
+    assert.equal(Number(tileValue('month', 'charges')), report.revenue, 'the month-charges tile must equal computeInstrumentRows over the whole month');
+    assert.equal(Number(tileValue('month', 'users')), 1, 'alice on two live bookings is one distinct user; the cancelled booking\'s attendee (sam) must not count');
+    assert.ok(html.includes('Line Charges'), 'the money tile is labelled Line Charges, like the Reports screen');
+  });
+
+  test('Notes preview strips rich-text markup, decodes entities and clips long notes, without needing a DOMParser', async () => {
+    const { DB, UI, Views } = await freshApp();
+    const { scopeA } = seedFixture(DB);
+
+    DB.run("INSERT INTO meetings (title, date, start_time, end_time, note) VALUES ('Rich Note', ?, '09:00', '10:00', '<p>Realigned <b>depletion</b> laser &amp; retested</p><ul><li>ok</li></ul>')", [UI.todayPlusDays(-1)]);
+    const richId = lastId(DB);
+    DB.run('INSERT INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [richId, scopeA]);
+
+    const longText = 'x'.repeat(120);
+    DB.run("INSERT INTO meetings (title, date, start_time, end_time, note) VALUES ('Long Note', ?, '09:00', '10:00', ?)", [UI.todayPlusDays(-2), longText]);
+    const longId = lastId(DB);
+    DB.run('INSERT INTO meeting_instruments (meeting_id, instrument_id) VALUES (?,?)', [longId, scopeA]);
+
+    const html = Views.instrumentDetail(scopeA); // must not throw under Node (no DOMParser here)
+    const rows = cardRows(html, 'Recent Activity Card');
+    assert.equal(rows.length, 2);
+    const rich = rows.find((r) => r.includes('Realigned'));
+    assert.ok(rich, 'the rich note row must render');
+    assert.ok(rich.includes('Realigned depletion laser &amp; retested ok'), 'markup stripped and the ampersand decoded then re-escaped for HTML');
+    assert.ok(!rich.includes('<b>'), 'no raw markup from the note may reach the page');
+    const long = rows.find((r) => r.includes('xxxxxxxx'));
+    assert.ok(long, 'the long note row must render');
+    assert.ok(long.includes('x'.repeat(79) + '…'), 'a note over 80 characters is clipped to 79 plus an ellipsis');
+    assert.ok(long.includes(`title="${longText}"`), 'the full note text stays available in the title attribute');
   });
 
   test('Trained Users lists DB.listInstrumentTraining rows with level and status badge', async () => {

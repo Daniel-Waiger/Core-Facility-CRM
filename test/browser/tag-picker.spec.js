@@ -87,6 +87,39 @@ describe('booking Tags field: mountTagPicker', { skip }, () => {
     await page.waitForTimeout(200);
   });
 
+  test('keyboard: Tab reaches the first option and Enter selects it; typed text left behind is committed when focus leaves the picker', async () => {
+    await page.evaluate(() => App.route('calendar'));
+    await page.waitForTimeout(400);
+    await page.click('[data-act="new-booking"]');
+    await page.waitForSelector('.modal #bk-tags', { state: 'attached' });
+    const search = '.modal .tag-picker[data-for="bk-tags"] .tag-search';
+
+    // Tab from the search box lands on the first option button; the dropdown must stay open
+    // (focus is still inside the picker) and Enter on the button must select that tag.
+    await page.focus(search);
+    await page.waitForTimeout(100);
+    const firstTag = await page.evaluate(() => document.querySelector('.modal .tag-picker[data-for="bk-tags"] .tag-option').dataset.tag);
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(250);
+    const focusState = await page.evaluate(() => ({
+      onOption: document.activeElement.classList.contains('tag-option'),
+      hidden: document.querySelector('.modal .tag-picker[data-for="bk-tags"] .tag-dropdown').hidden,
+    }));
+    assert.equal(focusState.onOption, true, 'Tab from the search box must focus the first tag option');
+    assert.equal(focusState.hidden, false, 'the dropdown must stay open while an option has focus');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(150);
+    assert.equal(await hiddenValue('bk-tags'), firstTag, 'Enter on a focused option must select that tag');
+
+    // Type a new tag and move focus straight to the Title field, as a user heading for Save
+    // would: the pending text becomes a tag instead of being lost.
+    await page.fill(search, 'Leftbehind');
+    await page.focus('.modal #bk-title');
+    await page.waitForTimeout(300);
+    assert.equal(await hiddenValue('bk-tags'), firstTag + ', Leftbehind', 'text left in the box is committed when focus leaves the picker');
+    await page.evaluate(() => window.UI.closeAllModals());
+  });
+
   test('edit-booking dialog seeds its chips from the stored tags string', async () => {
     const seed = await page.evaluate(() => {
       const row = DB.row("SELECT id, tags FROM meetings WHERE tags<>'' ORDER BY id LIMIT 1");
