@@ -26,15 +26,18 @@ A lesson that just restates an architecture rule should be deleted — point at
 
 ## Environment
 
-- **`python3` does not exist on this machine — use `python` (or `py`).**
-  `CLAUDE.md` and `AGENTS.md` both tell agents to run
-  `python3 -m http.server 8000`; that command fails here with
-  "command not found", and an agent that trusts the doc reports the app as
-  unservable. Python 3.14 is installed as `python`. _(2026-09-08)_
+- **Probe the interpreter; neither `CLAUDE.md` nor this file can tell you which
+  machine you are on.** On the 2026-09-08 Windows host `python3` did not exist
+  (Python 3.14 was `python`) and an agent that trusted `CLAUDE.md`'s
+  `python3 -m http.server 8000` reported the app as unservable. On the
+  2026-09-17 Linux container `python3` *is* present and `python` may not be.
+  Run `command -v python3 || command -v python` once and use what answers —
+  do not hardcode either, and do not "fix" the docs for your host.
+  _(2026-09-08, revised 2026-09-17)_
 
 ## Verification
 
-- **"The code looks correct" is not verification in this repo (seen 3×).**
+- **"The code looks correct" is not verification in this repo (seen 4×).**
   `node --check js/<file>.js` proves the file parses and nothing more. A verifier
   must run the test suite AND, for anything touching the UI, actually load the
   app in a browser and exercise the changed path (served over http, not
@@ -42,10 +45,15 @@ A lesson that just restates an architecture rule should be deleted — point at
   state plainly that it did not. A pass issued from a read of the diff alone is a false pass. _(2026-09-08,
   2026-09-10, 2026-09-16: #41 T5 was the run's only failed verdict and its only
   browser-verified one — the verifier loaded the page in headless Chrome and
-  found the feature silently dead; every static and unit check had passed.)_
+  found the feature silently dead; every static and unit check had passed.
+  2026-09-17, 1.13.0: the run's only failed verdict (T7) was again browser-only
+  — every grep, the 334-test unit suite and the 18-test smoke spec passed while
+  New Booking opened from an Instrument Profile silently billed a *different
+  project*. Verifiers that built headless-Chromium harnesses beyond the stated
+  criteria (T4, T5, T7, T8, T13) are the reason 13/13 landed on one retry.)_
 
-- **When a change hides something, prove the hide mechanism has a stylesheet
-  rule behind it.** #41 T5 toggled the bare `hidden` attribute on
+- **A class or attribute only does something if `css/app.css` has a rule that
+  matches *this* element (seen 2×).** #41 T5 toggled the bare `hidden` attribute on
   `[data-out-field]` wrappers, but `css/app.css` `.field { display: flex }`
   outranks the UA `[hidden] { display: none }` and no author `[hidden]` rule
   existed — so every output type showed every field, including ones its
@@ -53,7 +61,11 @@ A lesson that just restates an architecture rule should be deleted — point at
   is set, the DOM is correct, only the cascade is wrong. Grep `css/` for a rule
   matching the hide mechanism (or toggle inline `display:none`/a class instead),
   and open the screen. The retry fixed it with `.field[hidden] { display: none }`.
-  _(2026-09-16)_
+  _(2026-09-16; 2026-09-17 T8: the new Today's Agenda rows reuse `row-retired`
+  to dim a cancelled booking, but the only rule is `.row-retired > td` — a table
+  rule — and the agenda row is a `div`, so nothing dimmed. Before reusing an
+  existing class on a new element shape, grep the selector and check it isn't
+  `table`/child-scoped.)_
 
 - **There is a test suite now — run it, and add to it.** `node --test
   'test/unit/*.test.js'` needs nothing installed; the browser group
@@ -105,13 +117,60 @@ A lesson that just restates an architecture rule should be deleted — point at
   verifier to either fail good work or quietly soften the bar.
 
 - **A verifier may rule a criterion unsatisfiable-as-written and judge the
-  intent — that is a correct verdict, not a soft pass.** _(2026-09-16, #47 T5)_
+  intent — that is a correct verdict, not a soft pass (seen 2×).**
+  _(2026-09-16, #47 T5)_
   The planner's harness seeded a booking dated 2026-03-05 and then asserted
   stewardship rows for 2026-01-01..2026-01-15, so the literal script could never
   print "T5 OK" even though the implementation was right. The verifier passed
   the task and reported the fixture bug. Planners: date fixtures inside the
   ranges their own assertions use; verifiers: say plainly "criterion is faulty,
   here is what I verified instead" rather than failing correct work.
+  _(2026-09-17: 4 of 13 tasks carried a faulty criterion; every verifier judged
+  intent correctly and said so, which is why the run still went 13/13. The four
+  shapes, all avoidable by the planner: a count over a **`sed` line range**
+  that swept in unrelated pre-existing functions (T4's `data-act` range between
+  `mountTokenPicker` and `mountBookingModal`); a **case-insensitive substring**
+  grep that matches existing prose and filenames (T12's `grep -ci modal`
+  hitting "Modality" and `21-new-booking-modal.png`); a `grep -o | sort -u |
+  wc -l` over **multiple files without `-h`**, so GNU grep's filename prefix
+  makes every line unique (T12 printed 18, not 1); and **absolute test totals
+  predicted from sibling tasks' output** (T13 demanded unit ≥340 / browser ≥72
+  / restore "14" against actual 338 / 71 / 13). Anchor counts to a named
+  function's own body or a fenced block, grep case-sensitively for a string that
+  only the new code can contain, and express suite growth as "0 failures and
+  ≥ the measured baseline", never as a predicted total.)_
+
+- **When only a faulty criterion is unmet, the outcome is `done` with a noted
+  discrepancy — not `blocked`.** _(2026-09-17, T13)_ The release task's work
+  (`?v=`, `CACHE_VERSION`, `PRECACHE_URLS`, `APP_VERSION`, the dated CHANGELOG
+  heading) was complete and correct, but three planner-estimated numbers came in
+  low, so the executor reported `blocked`. Nothing was blocked: the shortfall was
+  in tasks the executor was forbidden to touch. `blocked` should mean "I cannot
+  proceed without a decision or another task's output"; using it for "a criterion
+  is wrong" invites an unnecessary retry of correct work. State the true measured
+  figures and propose them as the new baseline (the verifier did: 338 / 71 / 13).
+
+- **A new test suite is only proven by mutating the code it guards.**
+  _(2026-09-17)_ T6's verifier applied **13 single-point mutations** to
+  `instrumentDetail` and confirmed each turned exactly one of the 8 new tests
+  red — but the same technique exposed two tests that guard less than their
+  title: T2's "count desc then name asc" fixture put every tag in its own count
+  tier, so a broken `localeCompare` comparator would still pass, and T6's
+  `month-users` assertion survived deleting the tile's `m.is_cancelled = 0`
+  clause because the cancelled fixture booking had no `meeting_people` row. A
+  green test written *after* the code is the default-vacuous case here. Practice:
+  for every rule a test claims to pin, delete that rule in a scratch copy
+  (`git archive HEAD | tar -x` into the scratchpad) and prove the test goes red;
+  fixtures must contain two rows that differ *only* in the pinned dimension.
+
+- **Harvest the "accepted with nits" list into a fix pass before release.**
+  _(2026-09-17)_ All 13 tasks passed, yet re-reading the verifiers' non-gating
+  problems produced five real defects worth fixing: the `row-retired`-on-a-div
+  CSS gap, a `notePreview` that would throw under Node, a weak ordering test, a
+  seeded training date falling *after* the session it authorised, and three
+  manual sentences wrong on inspection. A `pass: true` verdict with populated
+  `problems` is a work item, not a footnote — scan the whole run's `problems`
+  arrays once the batch is green.
 
 ## The trap that makes work look like it did nothing
 
@@ -122,7 +181,12 @@ A lesson that just restates an architecture rule should be deleted — point at
   asset, so the change is correct on disk and absent in the browser. This is
   the single most likely way a run here ends with "it works" and a user who
   sees nothing. Put the bump in the task graph as its own task, not as a
-  footnote inside another task.
+  footnote inside another task. _(2026-09-17: this worked exactly as intended.
+  1.13.0 deferred the bump to a final release task (T13) and **every** verifier
+  of an intervening `js/`/`css/` task flagged the still-pending bump in its
+  problems list while passing the task. That pairing — own task, plus a standing
+  verifier reminder — is the pattern to repeat; the flag is what stops the
+  release task being dropped when a run ends early.)_
 
 - **`docs/` changes need no version bump and no changelog entry.**
   The versioning rules exist to cache-bust the app shell; the docs page and the
@@ -146,6 +210,24 @@ A lesson that just restates an architecture rule should be deleted — point at
   "selectable = not retired OR already selected here" — a task that adds a
   picker and does not honour it silently destroys history, and no error
   surfaces. See `CLAUDE.md` → "History is preserved".
+
+- **A new hash route inherits `applyRoute`'s shared `ctx`, and an unscoped
+  field silently mis-bills.** _(2026-09-17, T7 — the run's one retry)_
+  `applyRoute` in `js/app.js` held `ctx.project = id ? Number(id) : null`, so
+  `#/instrument/1` and `#/person/6` set `ctx.project = 1`/`6`; `case
+  'new-booking'` forwards `ctx.project`, so New Booking opened from the new
+  Instrument Profile preselected whatever project shared that id. No error, no
+  failing test — money attached to the wrong project. The fix scopes the field
+  to its own route (`name === 'project' && id ? … : null`). Adding a detail
+  route means auditing *every* `ctx.*` field an action reads, and a browser
+  assertion that the dialog opened from the new route has no stray preselection.
+
+- **A renderer that calls `UI.noteHtml` cannot be unit-tested.** _(2026-09-17,
+  T5)_ `noteHtml` needs a real `DOMParser`, so `Views.instrumentDetail` threw
+  under Node for any instrument whose bookings carried a non-empty note — hidden
+  only because the criteria fixture inserted a note-less booking. Either strip
+  tags from the stored string (what the fix did) or accept that the renderer is
+  browser-group-only; a note-less fixture is a trap, not a test.
 
 - **Dates are local calendar days.** `new Date(x).toISOString().slice(0,10)`
   returns *yesterday* east of Greenwich. Any task touching dates must be
@@ -180,7 +262,19 @@ A lesson that just restates an architecture rule should be deleted — point at
   own explanatory comment named the wrong demo person and instrument for four of
   the six rows it described — the rows were right, the prose was not. When a
   task writes data *and* a comment describing it, check the comment against the
-  rows; verifiers should call this out as a nit rather than let it ship.)_
+  rows; verifiers should call this out as a nit rather than let it ship.
+  2026-09-17: both seed tasks' verifiers ran that comment-vs-row audit by name
+  and found every comment correct — the lesson is landing, keep it.)_
+
+- **Demo seed rows must be chronologically coherent with each other, not just
+  individually valid.** _(2026-09-17, T10)_ A new `person_instrument_training`
+  row was dated one day *after* the session it authorised, so the demo showed a
+  user running an instrument before being trained on it. Every criterion passed:
+  counts, conflicts, totals and the 490/546.25/589.95 figures are all
+  per-row/aggregate checks that cannot see a cross-entity ordering mistake. When
+  a task seeds related entities (training → bookings, grants → users, milestones
+  → projects), state the ordering rule in the criteria or read the rows as a
+  story before accepting.
 
 ## Run hygiene
 
@@ -190,6 +284,11 @@ A lesson that just restates an architecture rule should be deleted — point at
   Confirm liveness (`ListAgents`, file mtimes) before reporting progress, and
   **commit each unit of work as it lands** rather than batching at the end —
   what is on disk survives, what is in a dead agent's context does not.
+  _(2026-09-17: the 13-task plan was executed as **one workflow script per
+  dependency batch** (10 scripts), each committing and pushing its verified
+  batch before the next started. Zero data loss across the run, and the retry of
+  T7 replayed only one batch. Batch-per-script is now the default shape for a
+  plan with more than a handful of tasks.)_
 
 - **Recovery after a kill or a clobber must be audited, not assumed.** Agents
   that die after writing leave complete, parseable files; check each survivor's
@@ -258,6 +357,12 @@ A lesson that just restates an architecture rule should be deleted — point at
   readings of a diff, and disagreement becomes impossible to paper over.
   Grep-shaped criteria work the same way ("exactly two `#39 begin`/`#39 end`
   pairs; the first at a line after `ix_project_outputs_project`").
+  _(seen 2×; 2026-09-17's 13-task 1.13.0 plan used the same shape and went 12/13
+  first-try — and the one-liners were quoted back byte-identically by executor
+  and verifier in every accepted verdict, e.g. `31 2 0 true 490 546.25 589.95 1
+  16 1 0 true`. Long composite one-liners that print one line of many fields
+  work well: they pin a dozen invariants, including untouched money figures,
+  without a dozen criteria.)_
 
 - **A planner must not ban vocabulary its own scope statement uses.** T10's
   brief forbade the word "column" in changelog prose while the brief itself (and
@@ -291,11 +396,11 @@ A lesson that just restates an architecture rule should be deleted — point at
 
 Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos\cfc-39`, `cfc-47`, `cfc-41`). They were first set up as **git worktrees of one clone, which share a single stash stack** — a verifier's `git stash` in one worktree swapped #39's and #47's uncommitted work and cost an hour; #41 escaped only by luck, its verifiers used `git stash` too. Fixed by rebuilding as independent clones. **Parallel issues get independent clones, never worktrees.** For every executor and verifier:
 
-- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work.
+- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work. _(Violated again 2026-09-17: T12's executor ran `git stash` / `git stash pop` to establish a pre-task baseline for a grep count. Nothing was lost this time, but the need was entirely served by `git show HEAD:<path>` — a prohibition lands only when the brief names the read-only substitute next to it.)_
 - **To compare against the base commit**, use read-only forms only: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, `git log`. `git stash` is *not* one of them. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
 - **Stay inside your own checkout.** The repo path in your brief is the only directory you may edit. If `git status` shows changes that clearly belong to another issue (#39 tags, #47 training, #41 outputs), stop and report `blocked` with what you saw; do not "clean up".
 - **Line endings are LF** in these clones (`core.autocrlf=false`). Do not introduce CRLF. `test/unit/wiring.test.js` and `boot-ready-signal.test.js` scrape `js/app.js` with LF-anchored patterns: the first #41 clone was made on Windows with `core.autocrlf=true`, so those two tests failed on *every* task until the clones were recreated — burning verifier time on each. Before a run, confirm `git config core.autocrlf` is `false` in the checkout; when a scraper test fails, check line endings before the diff.
-- **Timezone:** inline `TZ='Asia/Jerusalem' node ...` may not reach `process.env.TZ` in this shell; the host clock is already Asia/Jerusalem, so date behaviour is exercised at UTC+ regardless. A test asserting the literal env value is a known environment artefact; say so plainly rather than chasing it.
+- **Timezone:** inline `TZ='Asia/Jerusalem' node ...` was a Windows-shell artefact that did not reach `process.env.TZ` (a test asserting the literal env value then fails for environment reasons — say so plainly rather than chasing it). _(Revised 2026-09-17: on the Linux container the inline form works normally and every suite in the 1.13.0 run was exercised at UTC+ with it. Check `node -e "console.log(process.env.TZ)"` once per environment instead of assuming either behaviour.)_
 - **Reporting `blocked` on a polluted tree is the best possible outcome, not a
   failure.** _(2026-09-16, #47 T7)_ The shared stash stack swapped #39 and #47
   work; the verifier noticed `js/db.js` held a `#39` fence instead of `#47` and
@@ -308,15 +413,15 @@ Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos
 
 - **No version bumps, ever, on these branches.** `index.html ?v=`, `sw.js CACHE_VERSION/PRECACHE_URLS`, `js/consts.js APP_VERSION` stay untouched; CHANGELOG bullets go under `## [Unreleased]`.
 
-## Also learned in the parallel #39 and #41 runs (2026-09-16)
+## Orchestrator mechanics
 
-Distilled by the #39 and #41 learners on their own branches; carried over here when the three branches were merged.
+- **Exit Plan Mode before dispatching execute workflows.** Subagents inherit it
+  and refuse to edit; attempt 1 of every execute run on 2026-09-16 was wasted
+  this way. _(2026-09-16)_
 
-- **Record the failing-test baseline once at run start and put it in every brief.** Ten verifiers re-triaged the same three HEAD failures, two reached different counts, and several reached for `git stash` to prove it. Write criteria as "no new failures beyond this list", never as "the suite exits 0" when the baseline is red.
-- **`wiring.test.js` and `boot-ready-signal.test.js` are source-scrapers** and the repo's most brittle tests: they break on CRLF and on any reshaping of `boot()` or `handleAct()`. A scraper that throws before its first assertion never ran; do not dismiss it as environmental.
-- **Literal expected output of a runnable one-liner in the verification criteria** produced 10 of 10 first-try passes in the #39 run with zero retries.
-- **A planner must not ban vocabulary its own scope statement uses** (#39 T10's "column" ban against its own brief). Cross-format export claims need per-format wording: DOCX and PDF render a "Tags:" line, not a column.
-- **A hide mechanism needs a matching stylesheet rule.** #41 T5's bare `hidden` attribute was defeated by `.field { display: flex }`, invisible to `node --check` and the unit suite; caught only by rendering the dialog. A task's verification must only assert on that task's own files and on counts verified at HEAD.
-- **Reproduce a suspected pre-existing failure on an independent clone or via `git show HEAD:<path>`,** never by mutating the working tree, and show the reproduction in the verdict.
-- **Exit Plan Mode before dispatching execute workflows.** Subagents inherit it and refuse to edit; attempt 1 of every execute run on 2026-09-16 was wasted this way.
-- **Recover an interrupted parallel run by patch + fresh LF clone**, discarding the mid-flight task's half-written file before resuming with a nonce so only the lost task and its successors re-run.
+- **`wiring.test.js` and `boot-ready-signal.test.js` are source-scrapers** and
+  the repo's most brittle tests: they break on CRLF and on any reshaping of
+  `boot()` or `handleAct()`. A scraper that throws before its first assertion
+  never ran — do not dismiss it as environmental. When a task adds a route or a
+  `data-act`, extend the matching completeness assertion in the same task
+  (2026-09-17 T7 did, for both the person and instrument routes). _(seen 2×)_
