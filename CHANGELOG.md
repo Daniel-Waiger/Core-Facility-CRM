@@ -3,7 +3,7 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.13.0] — 2026-09-17
 
 ### Added
 - 'Facility Staff' is a real Role / Position option in the person dialog and People filter, not only demo text.
