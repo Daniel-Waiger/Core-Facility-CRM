@@ -8,6 +8,14 @@
   const today = global.UI.today;
   const DATE_LOCALE = global.UI.DATE_LOCALE;
 
+  // Small inline tag chips for a booking's `tags` column, shared by the Bookings & Syncs card,
+  // the Project Costs table and the calendar chip. Returns '' when there are no tags.
+  function tagChips(tags) {
+    const list = global.UI.parseTags(tags);
+    if (!list.length) return '';
+    return `<span class="chips" style="display:inline-flex;gap:4px;margin-left:6px">${list.map((t) => `<span class="chip-sm">${esc(t)}</span>`).join('')}</span>`;
+  }
+
   /* ---------------- Dashboard ---------------- */
   function dashboard() {
     const now = today();
@@ -254,7 +262,14 @@
     const kv = global.DB.rows('SELECT * FROM kv WHERE project_id=? ORDER BY id ASC', [id]);
     // Research outputs (roadmap 3.3) — the funnel's exit stage. Cloned from the same
     // "load flat, query fresh, no denormalized name column" pattern as kv above.
-    const outputs = global.DB.rows(`SELECT * FROM project_outputs WHERE project_id=? ORDER BY ${global.DB.outputEffDate()} DESC, id DESC`, [id]);
+    // Ordered in JS via DB.outputEffectiveDate (LOCAL calendar day fallback for a blank `date`),
+    // never SQL date(created_at), which is the UTC day — see that helper's comment.
+    const outputs = global.DB.rows(`SELECT po.*, f.name AS file_name, f.kind AS file_kind, f.path AS file_path FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
+      .sort((a, b) => {
+        const ea = global.DB.outputEffectiveDate(a), eb = global.DB.outputEffectiveDate(b);
+        if (ea !== eb) return ea < eb ? 1 : -1;
+        return b.id - a.id;
+      });
     const mtgs = global.DB.rows(`
       SELECT m.*, g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
       FROM meetings m
@@ -385,25 +400,49 @@
     </div>
 
     <!-- Research Outputs Card (roadmap 3.3) — cloned from the Custom Fields card's add/edit/
-         delete pattern above; the funnel's exit stage lives here per-project. -->
-    <div class="card mb-16">
+         delete pattern above; the funnel's exit stage lives here per-project. Rows are clickable
+         (opens the read-only detail); the type badge is a sibling edit-action hit target placed
+         before the row's view button (HTML forbids nesting interactive elements, and buttons
+         can't nest a role="button" span), styled to sit on the same line as the title via flex-wrap.
+         The card itself is a drop zone for dragging a PDF straight onto it; "Attach PDF" opens the
+         same hidden file input by click. -->
+    <div class="card mb-16 output-drop" data-drop-outputs="${p.id}">
       <div class="row mb-8">
         <div class="grow"><span class="card-title">${ic('tag')} Research Outputs</span></div>
+        <button class="btn btn-ghost btn-sm" data-act="output-pick-file" data-project-id="${p.id}">${ic('file-plus')} Attach PDF</button>
         <button class="btn btn-ghost btn-sm" data-act="output-add" data-project-id="${p.id}">${ic('plus')} Add Output</button>
+        <input type="file" accept="application/pdf,.pdf" class="visually-hidden-input" data-output-file-input="${p.id}" hidden>
       </div>
       <div class="card-body">
         ${outputs.length ? `
-        <div class="kv">
-          ${outputs.map((o) => `
-            <div class="kv-row">
-              <span class="k"><span class="badge neutral" style="text-transform:capitalize">${esc(o.type)}</span> ${esc(o.title)}</span>
-              <span class="v">${o.reference ? esc(o.reference) + ' — ' : ''}${o.date ? fmt(o.date) : fmt(o.created_at)}</span>
-              <div class="row" style="gap:4px">
-                <span class="del" role="button" tabindex="0" aria-label="Edit Output" data-act="output-edit" data-id="${o.id}" title="Edit Output">${ic('edit')}</span>
-                <span class="del" role="button" tabindex="0" aria-label="Delete Output" data-act="output-del" data-id="${o.id}" title="Delete Output">${ic('x')}</span>
-              </div>
-            </div>`).join('')}
-        </div>` : emptyState('tag', 'No research outputs yet', 'Log a publication, acknowledgement, dataset, or other output once this project produces one.')}
+        <div class="output-list">
+          ${outputs.map((o) => {
+            const doiHref = global.UI.doiUrl(o.doi);
+            const rawAuthors = o.authors || '';
+            const authors = rawAuthors.length > 80 ? esc(rawAuthors.slice(0, 80)) + '…' : esc(rawAuthors);
+            const dateStr = o.reference ? esc(o.reference) + ' — ' : '';
+            return `
+          <div class="output-row">
+            <span class="badge neutral output-type" role="button" tabindex="0" data-act="output-edit" data-id="${o.id}" title="Edit Output" aria-label="Edit ${esc(o.type)} Output: ${esc(o.title)}" style="text-transform:capitalize">${esc(o.type)}</span>
+            <button type="button" class="output-main" data-act="output-view" data-id="${o.id}" aria-label="View Output: ${esc(o.title)}">
+              <span class="output-title">${esc(o.title)}</span>
+              ${o.acknowledges_facility ? `<span class="badge success">Acknowledged</span>` : ''}
+              ${o.file_name ? `<span class="faint small">${ic('file')} ${esc(o.file_name)}</span>` : ''}
+              <span class="faint small output-meta" style="display:block">${authors ? authors + ' · ' : ''}${dateStr}${fmt(global.DB.outputEffectiveDate(o))}</span>
+            </button>
+            <div class="output-links">
+              ${doiHref ? `<a class="file-link" href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">DOI ${ic('external')}</a>` : ''}
+              ${global.UI.isSafeUrl(o.url) ? `<a class="file-link" href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">Link ${ic('external')}</a>` : ''}
+              ${o.file_kind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${o.file_id}" data-name="${esc(o.file_name)}">Download</button>` : ''}
+              ${o.file_kind === 'link' && global.UI.isSafeUrl(o.file_path) ? `<a class="file-link" href="${esc(o.file_path)}" target="_blank" rel="noopener noreferrer" data-tooltip="${esc(o.file_path)}">File ${ic('external')}</a>` : ''}
+              <span class="del" role="button" tabindex="0" aria-label="Delete Output" data-act="output-del" data-id="${o.id}" title="Delete Output">${ic('x')}</span>
+            </div>
+          </div>`;
+          }).join('')}
+        </div>
+        <div class="drop-hint">${ic('file-plus')} Drop a PDF here or use Attach PDF to log it as an output — the title is read from the file when it has one.</div>
+        ` : `${emptyState('tag', 'No research outputs yet', 'Log a publication, acknowledgement, dataset, or other output once this project produces one.')}
+        <div class="drop-hint">${ic('file-plus')} Drop a PDF here or use Attach PDF to log it as an output — the title is read from the file when it has one.</div>`}
       </div>
     </div>
 
@@ -469,7 +508,7 @@
                 const tierStr = global.DB.tierLabel(m.tier_id);
                 return `
                 <tr class="${m.is_cancelled ? 'row-retired' : ''}">
-                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}</td>
+                  <td class="font-medium small">${esc(m.title)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="${waived ? 'Cancelled — charge dropped, not counted in Project Costs' : 'Cancelled — charge stands and counts toward Project Costs'}">Cancelled${waived ? '' : ' · charged'}</span>` : ''}${tagChips(m.tags)}</td>
                   <td class="small">${bookingGrantStr ? esc(bookingGrantStr) : '<span class="faint">—</span>'}</td>
                   <td class="small">${tierStr === '—' ? '<span class="faint">—</span>' : esc(tierStr)}</td>
                   <td class="mono small faint">${fmt(m.date)}${m.start_time ? ' ' + esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : ''}</td>
@@ -551,7 +590,7 @@
           ${mtgs.length ? mtgs.map((m) => `
             <div class="meeting-box mb-8 ${m.is_cancelled ? 'row-retired' : ''}">
               <div class="row">
-                <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
+                <span class="font-medium grow">${esc(m.title)}${m.category ? ` <span class="badge primary" style="font-size:10.5px">${esc(m.category)}</span>` : ''}${tagChips(m.tags)}${m.is_cancelled ? ` <span class="badge neutral" data-tooltip="Kept on the record; its instrument and staff time is free again">Cancelled${m.billing_retained ? ' · charged' : ''}</span>` : ''}</span>
                 <span class="faint mono small">${fmt(m.date)}</span>
                 <button class="btn btn-ghost btn-sm" data-act="email-attendees" data-id="${m.id}" title="Email Attendees">${ic('mail')}</button>
                 <button class="btn btn-ghost btn-sm" data-act="edit-booking" data-id="${m.id}" title="Edit Booking">${ic('edit')}</button>
@@ -661,7 +700,7 @@
           <colgroup>
             <col style="width:20%"><col style="width:10%"><col style="width:14%"><col style="width:11%">
             <col style="width:10%"><col style="width:9%"><col style="width:56px"><col style="width:120px">
-            <col style="width:78px"><col style="width:78px">
+            <col style="width:78px"><col style="width:110px">
           </colgroup>
           <thead>
             <tr>
@@ -679,7 +718,7 @@
           </thead>
           <tbody>
             ${rows.map((r) => `
-              <tr class="${r.is_retired ? 'row-retired' : ''}">
+              <tr class="row-link ${r.is_retired ? 'row-retired' : ''}" data-goto="person" data-id="${r.id}">
                 <td class="tbl-name">${esc(r.name)}${r.is_retired ? ' <span class="badge neutral" data-tooltip="Kept for history; not offered for new work">Retired</span>' : ''}</td>
                 <td><span class="badge neutral">${esc(r.type)}</span></td>
                 <td>${r.organization ? `<span class="chip-sm" style="font-weight:600">${esc(r.organization)}</span>` : '<span class="faint small">—</span>'}</td>
@@ -690,6 +729,7 @@
                 <td>${r.is_staff ? `<span class="badge success" data-tooltip="Facility Staff — billable by the hour on bookings">${ic('check')}</span>` : '<span class="faint small">—</span>'}</td>
                 <td class="mono small">${r.is_staff ? esc(global.UI.fmtMoney(r.rate || 0)) : '—'}</td>
                 <td style="text-align:right;white-space:nowrap">
+                  <button class="btn btn-ghost btn-xs" data-goto="person" data-id="${r.id}" title="Open Profile">${ic('chevron')}</button>
                   <button class="btn btn-ghost btn-xs" data-act="edit-person" data-id="${r.id}" title="Edit Person">${ic('edit')}</button>
                   ${r.is_retired
                     ? `<button class="btn btn-ghost btn-xs" data-act="restore-person" data-id="${r.id}" title="Restore — make available for new work again">${ic('rocket')}</button>`
@@ -702,6 +742,175 @@
     </div>`;
   }
 
+  /* ---------------- Person detail (#47) ----------------
+     Mirrors projectDetail's shape (header card, then a run of per-topic cards) but for one
+     person: their own details, the projects they're on (as PI or team member), the bookings
+     they were involved in, as an attendee or as the facility staff who ran them (newest first,
+     cancelled ones kept and marked — same rule as Project
+     Costs), their instrument training records, and an Activity Certificate export. */
+  function personDetail(id) {
+    const p = global.DB.row('SELECT * FROM people WHERE id=?', [id]);
+    if (!p) return emptyState('users', 'Person not found', 'This person may have been deleted.');
+
+    const dv = (v) => (v ? esc(v) : '—');
+
+    const projectRows = global.DB.rows(`
+      SELECT p.id, p.code, p.title, p.status, p.is_archived,
+             CASE WHEN p.pi_id=? THEN 'PI' ELSE COALESCE(pp.role,'') END AS role
+      FROM projects p
+      LEFT JOIN project_people pp ON pp.project_id=p.id AND pp.person_id=?
+      WHERE p.pi_id=? OR pp.person_id IS NOT NULL
+      ORDER BY p.is_archived, p.title`, [p.id, p.id, p.id]);
+
+    const activity = global.DB.rows(`
+      SELECT m.id, m.title, m.date, m.start_time, m.end_time, m.category, m.is_cancelled, m.billing_retained, m.project_id, pr.title AS project_title,
+             (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ') FROM meeting_instruments mi JOIN instruments i ON i.id=mi.instrument_id WHERE mi.meeting_id=m.id) AS instruments
+      FROM meetings m
+      LEFT JOIN projects pr ON pr.id=m.project_id
+      WHERE EXISTS (SELECT 1 FROM meeting_people mp WHERE mp.meeting_id=m.id AND mp.person_id=?)
+         OR EXISTS (SELECT 1 FROM meeting_staff ms WHERE ms.meeting_id=m.id AND ms.person_id=?)
+      ORDER BY m.date DESC, m.start_time DESC, m.id DESC
+      LIMIT 25`, [p.id, p.id]);
+
+    const training = global.DB.listPersonTraining(p.id);
+
+    return `
+    <div class="card mb-16">
+      <div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div class="grow">
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            <span class="project-title">${esc(global.UI.retiredName(p.name, p.is_retired))}</span>
+            <span class="badge neutral">${esc(p.type)}</span>
+            ${p.is_staff ? `<span class="badge success" data-tooltip="Billable by the hour on bookings">Facility Staff</span>` : ''}
+          </div>
+        </div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" data-goto="people">Back to People</button>
+          <button class="btn btn-primary btn-sm" data-act="edit-person" data-id="${p.id}">Edit Person</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Personal Details Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('user')} Personal Details</span></div></div>
+      <div class="card-body">
+        <div class="metadata-grid">
+          <div class="meta-item"><span class="meta-label">Full Name:</span> <span class="meta-val">${dv(p.name)}</span></div>
+          <div class="meta-item"><span class="meta-label">Email:</span> <span class="meta-val">${dv(p.email)}</span></div>
+          <div class="meta-item"><span class="meta-label">Mobile:</span> <span class="meta-val">${dv(p.mobile)}</span></div>
+          <div class="meta-item"><span class="meta-label">Lab / Group / Company:</span> <span class="meta-val">${dv(p.organization)}</span></div>
+          <div class="meta-item"><span class="meta-label">Department:</span> <span class="meta-val">${dv(p.department)}</span></div>
+          <div class="meta-item"><span class="meta-label">Campus:</span> <span class="meta-val">${dv(p.campus)}</span></div>
+          ${p.is_staff ? `<div class="meta-item"><span class="meta-label">Rate/hr:</span> <span class="meta-val">${esc(global.UI.fmtMoney(p.rate || 0))}</span></div>` : ''}
+          <div class="meta-item" style="grid-column: span 2"><span class="meta-label">Notes:</span> <span class="meta-val">${dv(p.note)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Projects Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('folder')} Projects</span></div></div>
+      <div class="card-body">
+        ${projectRows.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Code</th><th>Title</th><th>Role</th><th>Status</th></tr></thead>
+            <tbody>
+              ${projectRows.map((r) => `
+                <tr class="row-link ${r.is_archived ? 'row-retired' : ''}" data-goto="project" data-id="${r.id}">
+                  <td class="mono small">${esc(r.code)}</td>
+                  <td class="font-medium small">${esc(r.title)}</td>
+                  <td class="small">${dv(r.role)}</td>
+                  <td>${statusBadge(r.status)}${r.is_archived ? ' <span class="badge neutral">Archived</span>' : ''}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('folder', 'No projects yet', 'Projects this person is part of will appear here.')}
+      </div>
+    </div>
+
+    <!-- Recent Activity Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('calendar')} Recent Activity</span></div></div>
+      <div class="card-body">
+        ${activity.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Date</th><th>Time</th><th>Title</th><th>Project</th><th>Instruments</th><th>Status</th></tr></thead>
+            <tbody>
+              ${activity.map((m) => `
+                <tr class="${m.is_cancelled ? 'row-retired' : ''}">
+                  <td class="mono small">${fmt(m.date)}</td>
+                  <td class="mono small faint">${m.start_time ? esc(m.start_time) + (m.end_time ? '–' + esc(m.end_time) : '') : '—'}</td>
+                  <td class="small font-medium">${esc(m.title)}</td>
+                  <td class="small">${m.project_title ? esc(m.project_title) : 'Facility-wide'}</td>
+                  <td class="faint small">${m.instruments ? esc(m.instruments) : '—'}</td>
+                  <td>${m.is_cancelled ? '<span class="badge danger">Cancelled</span>' : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="faint small mt-8">Showing the 25 most recent bookings this person attended or ran as facility staff. Cancelled bookings are kept and marked.</div>`
+        : emptyState('calendar', 'No bookings yet', 'Bookings this person attends or runs as facility staff will show up here.')}
+      </div>
+    </div>
+
+    <!-- Instrument Training Card -->
+    <div class="card mb-16">
+      <div class="row mb-8">
+        <div class="grow"><span class="card-title">${ic('cpu')} Instrument Training</span></div>
+        <button class="btn btn-primary btn-sm" data-act="training-add" data-person-id="${p.id}">${ic('plus')} Add Training</button>
+      </div>
+      <div class="card-body">
+        ${training.length ? `
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Instrument</th><th>Level</th><th>Trained On</th><th>Trainer</th><th>Expires On</th><th>Note</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${training.map((rec) => {
+                const status = global.DB.trainingStatusOn(rec, global.UI.today());
+                const statusBadge = status === 'expired' ? ' <span class="badge warning">Expired</span>'
+                  : status === 'pending' ? ' <span class="badge neutral">Not Yet Valid</span>' : '';
+                return `
+                <tr>
+                  <td class="small font-medium">${esc(global.UI.retiredName(rec.instrument_name, rec.instrument_retired))}</td>
+                  <td><span class="badge primary">${esc(rec.level)}</span></td>
+                  <td class="mono small faint">${fmt(rec.trained_on)}</td>
+                  <td class="small">${rec.trainer_name ? esc(global.UI.retiredName(rec.trainer_name, rec.trainer_retired)) : '—'}</td>
+                  <td class="mono small faint">${rec.expires_on ? fmt(rec.expires_on) : 'No expiry'}${statusBadge}</td>
+                  <td class="faint small">${dv(rec.note)}</td>
+                  <td style="text-align:right;white-space:nowrap">
+                    <button class="btn btn-ghost btn-xs" data-act="training-edit" data-id="${rec.id}" title="Edit Training Record">${ic('edit')}</button>
+                    <button class="btn btn-ghost btn-xs" data-act="training-del" data-id="${rec.id}" title="Remove Training Record">${ic('trash')}</button>
+                  </td>
+                </tr>`; }).join('')}
+            </tbody>
+          </table>
+        </div>` : emptyState('cpu', 'No training records yet', 'Add the instruments this person has been trained to use.')}
+      </div>
+    </div>
+
+    <!-- Activity Certificate Card -->
+    <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('file')} Activity Certificate</span></div></div>
+      <div class="card-body">
+        <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <div>
+            <label class="faint small" for="cert-from">From</label>
+            <input type="date" class="input" id="cert-from" value="${global.UI.ymd(new Date(new Date().getFullYear(), 0, 1))}">
+          </div>
+          <div>
+            <label class="faint small" for="cert-to">To</label>
+            <input type="date" class="input" id="cert-to" value="${global.UI.today()}">
+          </div>
+          <button class="btn btn-secondary" data-act="export-activity-certificate" data-id="${p.id}">${ic('file')} Export Activity Certificate</button>
+        </div>
+        <div class="faint small mt-8">Exports this person's details, training records and the bookings they attended or ran as facility staff in the range as a spreadsheet.</div>
+      </div>
+    </div>`;
+  }
+
   /* ---------------- Instruments ---------------- */
   let instrumentFilter = { query: '', status: '', kind: '', showRetired: false };
   function setInstrumentFilter(f) {
@@ -710,7 +919,7 @@
   }
 
   function instruments() {
-    const allRows = global.DB.rows(`
+    const rawRows = global.DB.rows(`
       SELECT i.*,
              (SELECT COUNT(*) FROM project_instruments pi JOIN projects p ON p.id = pi.project_id
                 WHERE pi.instrument_id = i.id AND p.is_archived=0) as proj_count,
@@ -719,6 +928,12 @@
                 WHERE ist.instrument_id = i.id) as supervisors
       FROM instruments i
       ORDER BY i.is_retired, i.name`);
+    // Trained Users: one shared rule with Reports' stewardship card (DB.trainedUserCountsAsOf) —
+    // NULL trained_on means "no start restriction", same as trainingActiveOn — rather than a
+    // second, drifted inline subquery (see reports.js's loadTrainedUserCounts for the same
+    // `.find(...) || {trained_users: 0}` annotation pattern).
+    const trainedByInstrument = new Map(global.DB.trainedUserCountsAsOf(global.UI.today()).map((r) => [r.instrument_id, r.trained_users]));
+    const allRows = rawRows.map((r) => Object.assign({}, r, { trained_users: trainedByInstrument.get(r.id) || 0 }));
     const retiredCount = allRows.filter((r) => r.is_retired).length;
 
     const qLower = (instrumentFilter.query || '').trim().toLowerCase();
@@ -765,9 +980,9 @@
         <table class="tbl">
           <colgroup>
             <col style="width:18%"><col style="width:10%"><col style="width:7%"><col style="width:9%">
-            <col style="width:11%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
+            <col style="width:11%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:78px">
           </colgroup>
-          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
+          <thead><tr><th>Instrument Name</th><th>Modality / Kind</th><th>Status</th><th>Location</th><th>Config Notes</th><th>Supervisor(s)</th><th title="People with a training record valid today">Trained Users</th><th>Cost</th><th>Unit</th><th title="Active projects">Active Projects</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
             ${rows.map((r) => `
               <tr class="${r.is_retired ? 'row-retired' : ''}">
@@ -777,6 +992,7 @@
                 <td class="faint small">${esc(r.location || '—')}</td>
                 <td class="faint small">${esc(r.note || '—')}</td>
                 <td class="faint small">${esc(r.supervisors || '—')}</td>
+                <td><span class="badge neutral">${r.trained_users}</span></td>
                 <td class="mono small">${esc(global.UI.fmtMoney(r.cost || 0))}</td>
                 <td class="muted small">${esc(global.UI.unitLabel(r.cost_unit || 'time'))}</td>
                 <td><span class="badge neutral">${r.proj_count} project${r.proj_count === 1 ? '' : 's'}</span></td>
@@ -860,7 +1076,7 @@
       WHERE m.due_date >= ? AND m.due_date <= ?`, [startStr, endStr]);
 
     const mtgs = global.DB.rows(`
-      SELECT m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled, p.id as project_id, p.title as project_title
+      SELECT m.id, m.date, m.start_time, m.end_time, m.title, m.is_cancelled, m.tags, p.id as project_id, p.title as project_title
       FROM meetings m
       LEFT JOIN projects p ON p.id = m.project_id
       WHERE m.date >= ? AND m.date <= ?`, [startStr, endStr]);
@@ -884,6 +1100,7 @@
         cancelled: !!mt.is_cancelled,
         start_time: mt.start_time || '',
         end_time: mt.end_time || '',
+        tags: mt.tags || '',
         project_id: mt.project_id,
         project_title: mt.project_title
       });
@@ -919,11 +1136,12 @@
     const icon = e.kind === 'mt' ? '📅' : '🎯';
     const cls = `ev ${e.kind === 'mt' ? 'mt' : e.status === 'done' ? 'done' : ''} ${e.cancelled ? 'ev-cancelled' : ''}`;
     const dataAttrs = `data-act="${e.kind === 'mt' ? 'edit-booking' : 'edit-milestone'}" data-id="${e.id}"`;
-    const title = `title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}"`;
+    const tagList = global.UI.parseTags(e.tags).join(', ');
+    const title = `title="${e.start_time ? e.start_time + (e.end_time ? '–' + e.end_time : '') + ' ' : ''}${esc(e.name)}${tagList ? ' [' + esc(tagList) + ']' : ''}${e.project_title ? ' (' + esc(e.project_title) + ')' : ''}"`;
     if (!compactable) {
       return `
       <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title}>
-        ${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}
+        ${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}${tagChips(e.tags)}
       </div>`;
     }
     // Resource Timeline chips: a short booking's box (a few percent of a day column) can be too
@@ -936,8 +1154,8 @@
     // readable without relying solely on the title tooltip's hover delay. tabindex makes that
     // keyboard-reachable too, not just mouse-hover.
     return `
-      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title} tabindex="0">
-        <span class="ev-label-full">${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}</span>
+      <div class="${cls}" style="${styleAttr || ''}" ${dataAttrs} ${title} tabindex="0" role="button">
+        <span class="ev-label-full">${icon} ${e.start_time ? `<span class="mono" style="font-size:10px">${esc(e.start_time)}</span> ` : ''}${esc(e.name)}${tagChips(e.tags)}</span>
         <span class="ev-label-compact">${icon} <span class="mono" style="font-size:10px">${esc(e.start_time || '')}</span></span>
         <span class="ev-label-icon">${icon}</span>
       </div>`;
@@ -1322,7 +1540,7 @@
     const autoBackupEnabled = UI.storage.getItem('auto-backup-enabled') !== '0';
     const lastAutoBackup = UI.storage.getItem('last-auto-backup-at');
     const lastAutoBackupLabel = lastAutoBackup ? new Date(lastAutoBackup).toLocaleString() : 'Never yet';
-    const folderStatus = global.App.autoBackupFolderStatus;
+    const folderStatus = (global.App && global.App.autoBackupFolderStatus) || { supported: false, name: null, granted: false };
     const adminOn = UI.storage.getItem('admin-mode') === '1';
     const skipSingleInstrumentPrompt = UI.storage.getItem('skip-single-instrument-prompt') === '1';
     const orgs = global.DB.rows("SELECT DISTINCT organization FROM people WHERE organization IS NOT NULL AND TRIM(organization) != '' ORDER BY organization").map((r) => r.organization);
@@ -1490,10 +1708,12 @@
     <div class="card mb-16">
       <div class="card-title">${ic('tag')} Category Billing</div>
       <div class="card-body">
-        <div class="faint small mb-8">What percent of a Facility Staff member's normal rate a booking category bills, and whether that category requires a facility staff assignee at all. Instrument time is unaffected — tiers and discounts already govern that. An existing booking keeps its saved price until it is edited and re-saved — like every other rate in the app, a re-save prices at the rules in force at that moment.</div>
+        <div class="faint small mb-8">What percent of a Facility Staff member's normal rate a booking category bills, and whether that category requires a facility staff assignee at all. Instrument time is unaffected — tiers and discounts already govern that. An existing booking keeps its saved price until it is edited and re-saved — like every other rate in the app, a re-save prices at the rules in force at that moment. Renaming a category updates every booking that uses it; a category can only be removed once no booking uses it. consult, training and assisted session are built into the reports and billing rules and cannot be renamed or removed.</div>
         ${categoryPolicies.map((p) => `
           <div class="row mb-8 cat-policy-row" style="gap:14px;align-items:center;flex-wrap:wrap" data-category="${esc(p.category)}">
             <span class="small font-medium" style="min-width:130px">${esc(p.category)}</span>
+            ${global.DB.protectedBookingCategories().includes(p.category) ? '' : `<button class="btn btn-ghost btn-xs" data-act="category-rename" data-category="${esc(p.category)}" title="Rename Category">${ic('edit')}</button>
+            ${global.DB.countBookingCategoryRefs(p.category) > 0 ? '' : `<button class="btn btn-ghost btn-xs" data-act="category-remove" data-category="${esc(p.category)}" title="Remove Category">${ic('trash')}</button>`}`}
             <div class="field" style="margin:0">
               <label class="small faint">Staff %</label>
               <input type="number" min="0" max="100" step="1" class="input cat-staff-pct" value="${esc(p.staff_pct)}" style="width:90px" ${p.category === 'training' && p.follow_assisted ? 'disabled' : ''} ${p.category === 'assisted session' ? 'oninput="window.App && window.App.syncCategoryBillingHints && window.App.syncCategoryBillingHints()"' : ''} />
@@ -1655,6 +1875,7 @@
     projectDetail,
     people,
     setPeopleFilter,
+    personDetail,
     instruments,
     setInstrumentFilter,
     calendar,

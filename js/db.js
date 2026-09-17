@@ -33,6 +33,8 @@
     organization TEXT DEFAULT '',
     department TEXT DEFAULT '',
     email TEXT DEFAULT '',
+    mobile TEXT DEFAULT '',
+    campus TEXT DEFAULT '',
     note TEXT DEFAULT '',
     is_staff INTEGER DEFAULT 0,
     rate REAL DEFAULT 0,
@@ -119,6 +121,7 @@
     attendees TEXT DEFAULT '',
     link TEXT DEFAULT '',
     category TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
     note TEXT DEFAULT '',
     actions TEXT DEFAULT '',
     discount_pct REAL DEFAULT 0,
@@ -233,8 +236,26 @@
     reference TEXT DEFAULT '',
     date TEXT DEFAULT '',
     note TEXT DEFAULT '',
+    doi TEXT DEFAULT '',
+    url TEXT DEFAULT '',
+    authors TEXT DEFAULT '',
+    acknowledges_facility INTEGER DEFAULT 0,
+    file_id INTEGER REFERENCES files(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS person_instrument_training (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+    level TEXT NOT NULL DEFAULT 'User',
+    trained_on TEXT DEFAULT '',
+    trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+    expires_on TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS ix_pit_person ON person_instrument_training(person_id);
+  CREATE INDEX IF NOT EXISTS ix_pit_instrument ON person_instrument_training(instrument_id);
   CREATE INDEX IF NOT EXISTS ix_milestones_project ON milestones(project_id);
   CREATE INDEX IF NOT EXISTS ix_meetings_project ON meetings(project_id);
   CREATE INDEX IF NOT EXISTS ix_files_project ON files(project_id);
@@ -606,6 +627,42 @@
         CREATE INDEX IF NOT EXISTS ix_project_outputs_project ON project_outputs(project_id);
       `);
     } catch (_) {}
+
+    // --- #39 begin ---
+    // Must stay after the meetings_new rebuild above, which copies an explicit column list.
+    try { db.exec("ALTER TABLE meetings ADD COLUMN tags TEXT DEFAULT ''"); } catch (_) {}
+    // --- #39 end ---
+    // --- #47 begin ---
+    try { db.exec("ALTER TABLE people ADD COLUMN mobile TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE people ADD COLUMN campus TEXT DEFAULT ''"); } catch (_) {}
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS person_instrument_training (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+          instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+          level TEXT NOT NULL DEFAULT 'User',
+          trained_on TEXT DEFAULT '',
+          trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+          expires_on TEXT DEFAULT '',
+          note TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS ix_pit_person ON person_instrument_training(person_id);
+        CREATE INDEX IF NOT EXISTS ix_pit_instrument ON person_instrument_training(instrument_id);
+      `);
+    } catch (_) {}
+    // --- #47 end ---
+    // --- #41 begin ---
+    // Additive project_outputs columns (roadmap #41): this runs after the CREATE TABLE IF NOT
+    // EXISTS above, so a DB migrating from before project_outputs existed gets the table first,
+    // then these columns; a DB that already has the table (and possibly the columns) just no-ops.
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN doi TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN url TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN authors TEXT DEFAULT ''"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN acknowledges_facility INTEGER DEFAULT 0"); } catch (_) {}
+    try { db.exec("ALTER TABLE project_outputs ADD COLUMN file_id INTEGER REFERENCES files(id) ON DELETE SET NULL"); } catch (_) {}
+    // --- #41 end ---
   }
 
   // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
@@ -1934,16 +1991,32 @@
      Built-in CONST[category] values are always shown first, then any
      facility-added terms on top — merged and deduped so callers never need
      to know which list a value came from. */
+  // A built-in CONST value can be "removed" without touching consts.js: its name goes into the
+  // app_config key `hidden_vocab_<category>` (a JSON array), and vocabList() below filters it out
+  // of BOTH the built-in defaults and any custom vocab row of the same name. Used by
+  // renameBookingCategory/removeBookingCategory so a built-in category (e.g. 'sync') can be
+  // renamed or removed even though it isn't a row in the `vocab` table to begin with.
+  function hiddenVocab(category) {
+    const raw = getConfig('hidden_vocab_' + category, null);
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((v) => typeof v === 'string') : [];
+    } catch (_) {
+      return [];
+    }
+  }
   function vocabList(category) {
     const defaults = (global.CONST && global.CONST[category]) || [];
     const custom = rows('SELECT value FROM vocab WHERE category=? ORDER BY value', [category]).map((r) => r.value);
     const hasOther = defaults.includes('Other') || custom.includes('Other');
+    const hidden = new Set(hiddenVocab(category));
     const seen = new Set();
     const out = [];
     for (const v of [...defaults, ...custom]) {
       // "Other" isn't a real term — it's the escape hatch that opens "+ Add New" — so it's
       // never listed among the regular options; it's appended once at the very end below.
-      if (!v || v === 'Other' || seen.has(v)) continue;
+      if (!v || v === 'Other' || seen.has(v) || hidden.has(v)) continue;
       seen.add(v);
       out.push(v);
     }
@@ -2135,6 +2208,10 @@
   // Also deliberately excludes instrument_staff for the same reason as countInstrumentRefs below:
   // supervising an instrument is a current assignment, not history. retirePerson's zero-ref
   // delete branch cleans up instrument_staff rows explicitly before deleting the person.
+  // `training` counts rows where this person is the TRAINEE (person_id) only — being listed as
+  // someone else's trainer (trainer_id) is deliberately not counted, same reasoning as
+  // instrument_staff above: trainer_id is nullable (ON DELETE SET NULL) precisely so a retired
+  // trainer's past training records survive with the trainer reference cleared, not blocked.
   function countPersonRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_people WHERE person_id=?) AS projects,
@@ -2142,12 +2219,15 @@
       (SELECT COUNT(*) FROM meeting_people WHERE person_id=?) AS bookings,
       (SELECT COUNT(*) FROM meeting_staff WHERE person_id=?) AS staffed,
       (SELECT COUNT(*) FROM service_entries WHERE person_id=?) AS entries,
-      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi`, [id, id, id, id, id, id]) || {};
+      (SELECT COUNT(*) FROM projects WHERE pi_id=?) AS pi,
+      (SELECT COUNT(*) FROM person_instrument_training WHERE person_id=?) AS training`,
+      [id, id, id, id, id, id, id]) || {};
     const parts = {
       projects: r.projects || 0, milestones: r.milestones || 0,
-      bookings: r.bookings || 0, staffed: r.staffed || 0, entries: r.entries || 0, pi: r.pi || 0
+      bookings: r.bookings || 0, staffed: r.staffed || 0, entries: r.entries || 0, pi: r.pi || 0,
+      training: r.training || 0
     };
-    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.entries + parts.pi;
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.staffed + parts.entries + parts.pi + parts.training;
     return parts;
   }
   // Deliberately excludes instrument_staff: a supervisor assignment is current-state ("who looks
@@ -2155,19 +2235,98 @@
   // project that actually used the instrument). retireInstrument's zero-ref delete branch still
   // cleans up instrument_staff rows explicitly before deleting, so a supervised-but-otherwise-
   // unused instrument can still be deleted without leaving an orphaned join row.
+  // `training` counts rows where this instrument is the one trained ON (instrument_id) — same
+  // rule as countPersonRefs above, and trainer_id is not part of this table's identity either way.
   function countInstrumentRefs(id) {
     const r = row(`SELECT
       (SELECT COUNT(*) FROM project_instruments WHERE instrument_id=?) AS projects,
       (SELECT COUNT(*) FROM milestone_instruments WHERE instrument_id=?) AS milestones,
       (SELECT COUNT(*) FROM meeting_instruments WHERE instrument_id=?) AS bookings,
-      (SELECT COUNT(*) FROM service_entries WHERE instrument_id=?) AS entries`,
-      [id, id, id, id]) || {};
+      (SELECT COUNT(*) FROM service_entries WHERE instrument_id=?) AS entries,
+      (SELECT COUNT(*) FROM person_instrument_training WHERE instrument_id=?) AS training`,
+      [id, id, id, id, id]) || {};
     const parts = {
-      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0, entries: r.entries || 0
+      projects: r.projects || 0, milestones: r.milestones || 0, bookings: r.bookings || 0, entries: r.entries || 0,
+      training: r.training || 0
     };
-    parts.total = parts.projects + parts.milestones + parts.bookings + parts.entries;
+    parts.total = parts.projects + parts.milestones + parts.bookings + parts.entries + parts.training;
     return parts;
   }
+
+  /* ---------------- Instrument training (#47) ----------------
+     person_instrument_training records who is cleared to run an instrument unsupervised
+     ('User') or to also train/supervise others on it ('Super User'), when they were signed
+     off, who signed them off, and an optional expiry. A row is "active" — currently valid,
+     for gating a booking or for counting toward an instrument's trained-user total — exactly
+     when today (or whatever reference date the caller asks about) falls on or after
+     trained_on (or trained_on is blank, meaning "no start restriction") AND on or before
+     expires_on (or expires_on is blank, meaning "never expires"). Pure string comparison on
+     'YYYY-MM-DD' text, same as every other date column in this schema (CLAUDE.md: "Dates are
+     local calendar days") — never a Date object, so this is safe to call with a date typed by
+     the user on either side of midnight in any timezone. */
+  function trainingActiveOn(rec, asOf) {
+    const startOk = !rec.trained_on || rec.trained_on <= asOf;
+    const endOk = !rec.expires_on || rec.expires_on >= asOf;
+    return !!(startOk && endOk);
+  }
+  // Built on trainingActiveOn: a record failing the check is either 'expired' (past its
+  // expires_on) or, when trained_on hasn't arrived yet, 'pending' — the sign-off exists but
+  // isn't in force yet, which is a materially different thing to show an auditor than "expired".
+  // Returns 'valid' | 'expired' | 'pending'. Single source for both Views.personDetail's badge
+  // and the Activity Certificate export's Status column, so the two can never disagree.
+  function trainingStatusOn(rec, asOf) {
+    if (trainingActiveOn(rec, asOf)) return 'valid';
+    if (rec.trained_on && rec.trained_on > asOf) return 'pending';
+    return 'expired';
+  }
+  // Same rule as trainingActiveOn above, evaluated in SQL so a full instrument list can be
+  // annotated in one query rather than N+1 JS-side calls. Returns one row per instrument that
+  // has at least one currently-active trainee; an instrument with none simply isn't in the
+  // result, so callers should treat a missing instrument_id as trained_users=0 (see the
+  // trainedUserCountsAsOf test/usage pattern elsewhere: `.find(...) || {trained_users: 0}`).
+  // asOf is caller-supplied (pass UI.today() when the caller's own date range has a blank end)
+  // rather than computed here, so this stays a pure function of its arguments like every other
+  // DB.* aggregation (CLAUDE.md: reports/aggregations must not fork date logic per caller).
+  function trainedUserCountsAsOf(asOf) {
+    return rows(
+      `SELECT instrument_id, COUNT(DISTINCT person_id) AS trained_users
+       FROM person_instrument_training
+       WHERE (trained_on = '' OR trained_on IS NULL OR trained_on <= ?)
+         AND (expires_on = '' OR expires_on IS NULL OR expires_on >= ?)
+       GROUP BY instrument_id`,
+      [asOf, asOf]
+    );
+  }
+  // Every training record for one person, newest sign-off first, with the instrument and
+  // trainer resolved for display (retired flags included so the caller can append "(Retired)"
+  // via UI.retiredName the same way every other list in this app does — this function does not
+  // append it itself, matching grantLabel/tierLabel's split of "resolve the row" vs "render it").
+  function listPersonTraining(personId) {
+    return rows(
+      `SELECT pit.*, i.name AS instrument_name, i.is_retired AS instrument_retired,
+              tr.name AS trainer_name, tr.is_retired AS trainer_retired
+       FROM person_instrument_training pit
+       LEFT JOIN instruments i ON i.id = pit.instrument_id
+       LEFT JOIN people tr ON tr.id = pit.trainer_id
+       WHERE pit.person_id = ?
+       ORDER BY pit.trained_on DESC, pit.id DESC`,
+      [personId]
+    );
+  }
+  // Every training record for one instrument, ordered by the trainee's name — mirrors
+  // listPersonTraining above but from the instrument side (e.g. for an instrument's own detail
+  // screen listing who is currently cleared to use it).
+  function listInstrumentTraining(instrumentId) {
+    return rows(
+      `SELECT pit.*, p.name AS person_name, p.is_retired AS person_retired
+       FROM person_instrument_training pit
+       LEFT JOIN people p ON p.id = pit.person_id
+       WHERE pit.instrument_id = ?
+       ORDER BY p.name`,
+      [instrumentId]
+    );
+  }
+
   // `billed` follows the same Project Costs rule as views.js/reports.js (CLAUDE.md: "a row counts
   // unless is_cancelled && !billing_retained") — a cancelled-and-waived booking or service entry
   // bills 0 on that screen, so the Archive dialog quoting a different (raw) figure here would be
@@ -2410,6 +2569,93 @@
     });
   }
 
+  /* ---------------- Booking category rename/removal ----------------
+     Mirrors renameOrganization above, but for `meetings.category` — the vocabulary term itself,
+     not a per-booking snapshot, so every meeting carrying it is relabeled, not left alone.
+     'consult', 'training' and 'assisted session' are protected: reports.js's consult-specific
+     filters/funnel stages, category_policies' follow_assisted link (training reads
+     'assisted session'.staff_pct by that literal name), and Settings' dedicated training/
+     assisted-session policy rows all assume these three names exist verbatim. */
+  const PROTECTED_BOOKING_CATEGORIES = ['consult', 'training', 'assisted session'];
+  function protectedBookingCategories() {
+    return PROTECTED_BOOKING_CATEGORIES.slice();
+  }
+
+  function countBookingCategoryRefs(name) {
+    return (row('SELECT COUNT(*) as c FROM meetings WHERE category=?', [name]) || { c: 0 }).c || 0;
+  }
+
+  function renameBookingCategory(oldName, newName) {
+    oldName = String(oldName || '').trim();
+    newName = String(newName || '').trim();
+    if (!oldName || !newName || oldName === newName) return null;
+    if (PROTECTED_BOOKING_CATEGORIES.includes(oldName) || PROTECTED_BOOKING_CATEGORIES.includes(newName)) return null;
+    // 'Other' is the vocabulary layer's "+ Add New" sentinel (see vocabList), never a real
+    // category: renaming into it would relabel bookings to a value the forms treat as a trigger.
+    if (oldName === 'Other' || newName === 'Other') return null;
+
+    const bookings = countBookingCategoryRefs(oldName);
+    // category_policies.category is its PRIMARY KEY: if newName already has its own policy row,
+    // this is a merge (target wins, old row dropped) rather than a raced UPDATE onto that key —
+    // same reasoning as group_discounts/group_tiers in renameOrganization above.
+    const oldHasPolicy = !!row('SELECT 1 as x FROM category_policies WHERE category=?', [oldName]);
+    const targetHasPolicy = !!row('SELECT 1 as x FROM category_policies WHERE category=?', [newName]);
+    const merged = !!(oldHasPolicy && targetHasPolicy);
+    const builtins = (global.CONST && global.CONST.BOOKING_CATEGORY) || [];
+    const hidden = hiddenVocab('BOOKING_CATEGORY');
+
+    return transaction(() => {
+      if (bookings) run('UPDATE meetings SET category=? WHERE category=?', [newName, oldName]);
+
+      if (oldHasPolicy) {
+        if (targetHasPolicy) {
+          run('DELETE FROM category_policies WHERE category=?', [oldName]);
+        } else {
+          run('UPDATE category_policies SET category=? WHERE category=?', [newName, oldName]);
+        }
+      }
+
+      // newName only needs a vocab row if it isn't already a visible (unhidden) CONST built-in —
+      // a built-in doesn't need a vocab entry to show up in vocabList().
+      const newIsVisibleBuiltin = builtins.includes(newName) && !hidden.includes(newName);
+      if (!newIsVisibleBuiltin) {
+        run('INSERT OR IGNORE INTO vocab (category, value) VALUES (?,?)', ['BOOKING_CATEGORY', newName]);
+      }
+      run("DELETE FROM vocab WHERE category='BOOKING_CATEGORY' AND value=?", [oldName]);
+
+      const nextHidden = hidden.slice();
+      if (builtins.includes(oldName) && !nextHidden.includes(oldName)) nextHidden.push(oldName);
+      const idx = nextHidden.indexOf(newName);
+      if (idx !== -1) nextHidden.splice(idx, 1);
+      setConfig('hidden_vocab_BOOKING_CATEGORY', JSON.stringify(nextHidden));
+
+      markDirty();
+      return { bookings, merged };
+    });
+  }
+
+  function removeBookingCategory(name) {
+    name = String(name || '').trim();
+    if (!name) return false;
+    if (PROTECTED_BOOKING_CATEGORIES.includes(name)) return false;
+    if (countBookingCategoryRefs(name) > 0) return false;
+
+    const builtins = (global.CONST && global.CONST.BOOKING_CATEGORY) || [];
+    return transaction(() => {
+      run('DELETE FROM category_policies WHERE category=?', [name]);
+      run("DELETE FROM vocab WHERE category='BOOKING_CATEGORY' AND value=?", [name]);
+      if (builtins.includes(name)) {
+        const hidden = hiddenVocab('BOOKING_CATEGORY');
+        if (!hidden.includes(name)) {
+          hidden.push(name);
+          setConfig('hidden_vocab_BOOKING_CATEGORY', JSON.stringify(hidden));
+        }
+      }
+      markDirty();
+      return true;
+    });
+  }
+
   /* ---------------- Sample Data Seeding & Database Reset ---------------- */
   async function clearAllData() {
     assertWritable();
@@ -2432,6 +2678,7 @@
       DELETE FROM kv;
       DELETE FROM project_outputs;
       DELETE FROM projects;
+      DELETE FROM person_instrument_training;
       DELETE FROM people;
       DELETE FROM instruments;
     `);
@@ -2439,7 +2686,7 @@
       // Reset AUTOINCREMENT counters so re-seeding starts IDs from 1 again;
       // otherwise seedSampleData's hardcoded cross-references (e.g. milestone.project_id)
       // point at IDs that no longer match once counters have advanced past a prior seed/clear.
-      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries','project_outputs')");
+      db.exec("DELETE FROM sqlite_sequence WHERE name IN ('projects','people','instruments','milestones','meetings','files','kv','grants','service_entries','project_outputs','person_instrument_training')");
     } catch (_) { /* sqlite_sequence doesn't exist yet on a brand-new, never-inserted-into database */ }
     // M9: every attachment blob this database ever held is now orphaned (its `files` row is
     // gone above) — without this they lingered in IndexedDB forever and kept shipping inside
@@ -3047,6 +3294,55 @@
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (3, 'acknowledgement', 'Core facility acknowledged in State Health Initiative renewal report', 'State Health Initiative #4401 — Year 2 progress report', ?)`, [day(-10)]);
     run(`INSERT INTO project_outputs (project_id, type, title, reference, date) VALUES (1, 'dataset', 'Intravital CAR-T 4D time-lapse volumes (raw + segmented)', 'NAS-Bioimaging-Vol4 dataset DOI pending', ?)`, [day(-1)]);
 
+    // --- #39 begin ---
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED, Fiji', 'Screening Protocol Design & STED Parameter Setup']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['STED, Napari', 'Extended Resonant-Scan Session for Synaptic Density Screening']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji, Napari', 'Open Office Hours: Image Analysis Pipeline Consultation']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Fiji', 'Extended CAR-T Time-Lapse Re-acquisition (Automated Multipoint)']);
+    run('UPDATE meetings SET tags=? WHERE title=?', ['Lightsheet', 'New User Training: Zeiss Lightsheet Z.1 Acquisition Basics']);
+    // --- #39 end ---
+    // --- #47 begin ---
+    // 12. Instrument training records (#47) — a deliberate mix so both the trained-user counter
+    // and the expiry-aware queries have something real to show: a still-valid record (Chen on
+    // the FV3000), a record expiring in the future (Chen on the Nikon), a Super User record with
+    // no expiry at all (Anand on the Glacios, trainer_id null — no-trainer case), an already-
+    // expired record (Rostova on the FV3000, so the FV3000's trained-user count excludes her and
+    // counts only Chen), and a second expired-but-refresher-flagged record (Kim on the Leica).
+    const trainingRows = [
+      [4, 2, 'User', day(-120), 6, '', 'Trained on the FV3000 for intravital time-lapses'],
+      [4, 4, 'User', day(-90), 6, day(275), ''],
+      [5, 1, 'Super User', day(-200), 6, '', 'Independent after-hours use approved'],
+      [1, 2, 'User', day(-400), 6, day(-5), 'Refresher due'],
+      [7, 5, 'Super User', day(-300), null, '', ''],
+      [3, 3, 'User', day(-60), 6, day(305), '']
+    ];
+    trainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
+
+    // Demo affiliation values (mobile/campus) — UPDATE only, peopleData's INSERT above is untouched.
+    run("UPDATE people SET campus='Longwood' WHERE id IN (1,4)");
+    run("UPDATE people SET campus='Cambridge' WHERE id IN (2,5)");
+    run("UPDATE people SET campus='Main Campus' WHERE id IN (6,7,8)");
+    run("UPDATE people SET mobile='+1 617 555 0142' WHERE id=4");
+    run("UPDATE people SET mobile='+1 617 555 0187' WHERE id=6");
+    // --- #47 end ---
+    // --- #41 begin ---
+    // Backfill the roadmap #41 fields (doi/url/authors/acknowledges_facility/file_id) onto the
+    // two outputs above via UPDATE, not INSERT, so the funnel's output counts/dates are unchanged.
+    run(`UPDATE project_outputs SET
+        doi = '10.1000/jei.2026.12.3.200',
+        authors = 'Chen, L.; Okafor, T.; Rivera, M.',
+        acknowledges_facility = 1,
+        file_id = (SELECT id FROM files WHERE project_id=3 AND name='Pancreatic_Islets_3D_Summary.xlsx')
+      WHERE project_id=3 AND type='publication'`);
+    // 10.1000/jei.2026.12.3.200 is a fictional DOI (10.1000 is IANA's reserved test/example
+    // registrant prefix) — it does not resolve to a real record.
+    run(`UPDATE project_outputs SET
+        url = 'https://example.org/bioimaging/vol4',
+        authors = 'Park, S.; Nguyen, H.',
+        acknowledges_facility = 0
+      WHERE project_id=1 AND type='dataset'`);
+    // --- #41 end ---
+
     markDirty();
     return true;
   }
@@ -3064,24 +3360,15 @@
     return !!(r && r.c);
   }
 
-  // The "effective date" of a research output: its own `date` when set, else the
-  // calendar day it was logged. `project_outputs.date` is OPTIONAL and the UI
-  // falls back to `created_at` when it is blank, so every ordering and range
-  // filter must use this expression -- otherwise a blank-dated output sorts to
-  // the bottom of a list that displays it with a recent timestamp.
-  //
-  // It lives here, not in reports.js, because views.js loads first and needs it
-  // too. One definition is what stops the funnel, the project screen and the
-  // three export paths from quietly disagreeing about the same rows -- the same
-  // reasoning that keeps UI.billableStaffHours out of app.js and reports.js.
-  //
-  // Same UTC/local caveat the funnel already documents: created_at is a UTC
-  // timestamp while `date` is a local calendar day, so at UTC+ offsets the
-  // fallback can read one day early. Ordering only, and strictly better than
-  // sorting every undated row last.
-  function outputEffDate(alias) {
-    const a = alias ? alias + '.' : '';
-    return `CASE WHEN TRIM(COALESCE(${a}date,'')) != '' THEN ${a}date ELSE date(${a}created_at) END`;
+  // The "effective date" of a research output row ({date, created_at}): its own `date` when set,
+  // else the LOCAL calendar day it was logged. `project_outputs.date` is OPTIONAL, so every
+  // ordering, display and export of research outputs must use this one rule — otherwise a
+  // blank-dated output sorts to the bottom of a list that displays it with a recent date.
+  // Computed in JS, never as SQL `date(created_at)`: that is the UTC calendar day and reads one
+  // day early at a UTC+ offset (CLAUDE.md, "Dates are local calendar days, never UTC instants").
+  // Delegates to UI.outputEffectiveDate, the single shared implementation reports.js also uses.
+  function outputEffectiveDate(row) {
+    return global.UI.outputEffectiveDate(row);
   }
 
   global.DB = {
@@ -3104,7 +3391,7 @@
     getAutoBackupDirHandle,
     clearAutoBackupDirHandle,
     rows,
-    outputEffDate,
+    outputEffectiveDate,
     row,
     q,
     q1,
@@ -3141,6 +3428,11 @@
     countInstrumentRefs,
     countProjectRefs,
     countGrantRefs,
+    trainingActiveOn,
+    trainingStatusOn,
+    trainedUserCountsAsOf,
+    listPersonTraining,
+    listInstrumentTraining,
     grantLabel,
     setProjectArchived,
     countBookingRefs,
@@ -3152,6 +3444,11 @@
     listAllOrgNames,
     countOrgRefs,
     renameOrganization,
+    hiddenVocab,
+    countBookingCategoryRefs,
+    protectedBookingCategories,
+    renameBookingCategory,
+    removeBookingCategory,
     seedSampleData,
     clearAllData
   };

@@ -193,22 +193,26 @@
       <p>A project's Research Outputs list is where you record what the project actually produced — separate from its files (below), which are the working documents and links you keep along the way.</p>
       <ul>
         <li><strong>Publication</strong> — a paper, poster, or preprint that came out of the work.</li>
-        <li><strong>Acknowledgement</strong> — a mention or thank-you for the facility's help in someone else's paper, grant report, or renewal.</li>
+        <li><strong>Thesis</strong> — a student's dissertation or degree thesis built on the work.</li>
         <li><strong>Dataset</strong> — a deposited dataset, raw or processed, that the project's imaging produced.</li>
-        <li><strong>Other</strong> — anything that doesn't fit the three above.</li>
+        <li><strong>Software</strong> — code, a pipeline, or a tool that came out of the project.</li>
+        <li><strong>Talk</strong> — a conference or seminar presentation of the work.</li>
+        <li><strong>Poster</strong> — a poster presented at a conference or meeting.</li>
+        <li><strong>Acknowledgement</strong> — a mention or thank-you for the facility's help in someone else's paper, grant report, or renewal.</li>
+        <li><strong>Other</strong> — anything that doesn't fit the types above.</li>
       </ul>
       <ol class="steps">
         <li>Open a project's detail page and find its <strong>Research Outputs</strong> card.</li>
-        <li>Click <strong>Add Output</strong>, choose a <strong>Type</strong>, and type a <strong>Title</strong> — both are required.</li>
-        <li>Optionally add a <strong>Reference</strong> (a journal citation, a DOI, a grant report title — whatever points back to the actual thing), a <strong>Date</strong>, and a <strong>Note</strong>.</li>
-        <li>Save. To change an output later, use its edit action; to remove one, delete it — you'll be asked to confirm first.</li>
+        <li>Click <strong>Add Output</strong> and choose a <strong>Type</strong> — the dialog then shows the fields that fit it: DOI, authors and journal for a publication; institution and degree for a thesis; a repository link for a dataset or piece of software; venue for a talk or poster. A <strong>Title</strong> is always required, and a checkbox records whether the facility was acknowledged in the output.</li>
+        <li>Save. Clicking anywhere on an output's row opens its read-only details; clicking its type tag instead opens the edit dialog directly. To remove an output, delete it — you'll be asked to confirm first.</li>
+        <li>To start an output from a paper you already have, drop its PDF onto the Research Outputs card — or click <strong>Attach PDF</strong> and choose the file — and a new output opens with the title read from the file itself (falling back to the file's name if it has none), the PDF already attached.</li>
       </ol>
 
       <figure class="shot">
-        <img src="../screenshots/66-research-outputs.png" alt="Research Outputs card on a project's detail page, listing a publication and an acknowledgement" loading="lazy"
+        <img src="../screenshots/66-research-outputs.png" alt="Research Outputs card on a project's detail page, listing a publication with its DOI and authors, and an acknowledged output" loading="lazy"
              onerror="this.closest('.shot').classList.add('pending')">
         <div class="ph">Snapshot pending — ../screenshots/66-research-outputs.png</div>
-        <figcaption>Each output shows its type, title, reference, and date in one row.</figcaption>
+        <figcaption>Each output shows its type, title, and date in one row; DOI and URL, where filled in, are clickable links, and a DOI resolves through doi.org.</figcaption>
       </figure>
 
       <div class="callout tip"><p><strong>💡 Tip.</strong> The Date field is optional. If you leave it blank, the output doesn't drop to the bottom of the list — it sorts by the day you logged it instead, right alongside dated outputs from around the same time. Fill in the Date when you know it (e.g. a paper's actual publication date); leave it blank for something you're logging as it happens.</p></div>

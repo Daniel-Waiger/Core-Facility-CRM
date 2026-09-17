@@ -1,5 +1,5 @@
 /* consts.js — shared vocabularies (keep in sync with UI) + the demo-sandbox flag */
-window.APP_VERSION = '1.11.0';
+window.APP_VERSION = '1.12.0';
 
 /* ---------------- Demo sandbox flag ----------------
    The demo dataset must never be able to touch a real facility's records, so it does not share
@@ -24,6 +24,7 @@ window.CONST = {
   SAMPLE: ['Cells', 'Tissue', 'Biomaterial', 'Materials', 'Other'],
   FLAGS: ['At-risk', 'Blocked', 'Needs-review'],
   PERSON_TYPES: ['Undergrad', 'MSc', 'PhD', 'Postdoc', 'Technician', 'PI', 'Other'],
+  TRAINING_LEVELS: ['User', 'Super User'],
   INSTRUMENT_STATUS: ['Available', 'In-use', 'Maintenance', 'Down'],
   MS_STATUS: ['pending', 'in-progress', 'done'],
   // How an instrument's cost is priced: 'time' = price per hour (drives off booking start/end);
@@ -38,5 +39,25 @@ window.CONST = {
   SERVICE_UNIT: ['hour', 'sample', 'unit', 'day', 'other'],
   // Research output type on project_outputs (roadmap 3.3) — the funnel's exit stage. Facilities
   // can add their own via the "+ Add New" vocab flow, same as every other list here.
-  OUTPUT_TYPE: ['publication', 'acknowledgement', 'dataset', 'other'],
+  OUTPUT_TYPE: ['publication', 'acknowledgement', 'dataset', 'thesis', 'software', 'talk', 'poster', 'other'],
 };
+
+/* Per-output-type field map (roadmap 3.3 follow-up): which optional fields a project output's
+   edit form shows for a given OUTPUT_TYPE, and the Title Case label to use in place of the
+   generic "Reference" field label for that type (e.g. a dataset's reference is really a Repository
+   / Accession id). Title, Date and Note are always shown regardless of type and are not listed
+   here. Hiding a field is display-only — the record's stored value for a hidden field is never
+   cleared or touched, so switching a type and back does not lose data. Facility-added vocab
+   values not in this map fall back to `default` (same as `other`), so every field is shown rather
+   than one silently disappearing. */
+window.OUTPUT_TYPE_FIELDS = {
+  publication: { fields: ['doi', 'reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Journal / Citation' },
+  thesis: { fields: ['reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Institution / Degree' },
+  dataset: { fields: ['doi', 'url', 'reference', 'authors', 'acknowledges_facility'], referenceLabel: 'Repository / Accession' },
+  software: { fields: ['url', 'doi', 'reference', 'authors', 'acknowledges_facility'], referenceLabel: 'Repository / Version' },
+  talk: { fields: ['reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Venue' },
+  poster: { fields: ['reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Venue' },
+  acknowledgement: { fields: ['reference', 'doi', 'url', 'authors', 'acknowledges_facility'], referenceLabel: 'Where Acknowledged' },
+  other: { fields: ['doi', 'reference', 'authors', 'url', 'acknowledges_facility'], referenceLabel: 'Reference' },
+};
+window.OUTPUT_TYPE_FIELDS.default = window.OUTPUT_TYPE_FIELDS.other;

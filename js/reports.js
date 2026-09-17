@@ -122,7 +122,7 @@
   function loadMeetingsInRange(from, to, facts) {
     return memo(facts, 'meetings', () => DB.rows(`
       SELECT mt.id, mt.project_id, mt.title, mt.date, mt.start_time, mt.end_time, mt.group_org,
-             mt.total_cost, mt.is_cancelled, mt.billing_retained, mt.category,
+             mt.total_cost, mt.is_cancelled, mt.billing_retained, mt.category, mt.tags,
              p.code AS project_code, p.title AS project_title
       FROM meetings mt LEFT JOIN projects p ON p.id = mt.project_id
       WHERE ${RANGE_SQL}
@@ -187,6 +187,13 @@
       SELECT ist.instrument_id, pe.id AS person_id, pe.name AS person_name, pe.is_retired AS person_retired
       FROM instrument_staff ist
       JOIN people pe ON pe.id = ist.person_id`));
+  }
+  // Roadmap 3.2/#47. Per-instrument headcount of currently-active trainees, evaluated as of a
+  // single reference date (see DB.trainedUserCountsAsOf) rather than over the (from,to) range —
+  // this is a snapshot, not a historical fact, so it is memoized on `asOf` rather than on the
+  // range like every other loader in this file.
+  function loadTrainedUserCounts(facts, asOf) {
+    return memo(facts, 'trainedUsers:' + asOf, () => new Map(DB.trainedUserCountsAsOf(asOf).map((r) => [r.instrument_id, r.trained_users])));
   }
   /* Roadmap 3.2. DELIBERATELY UNBOUNDED — the one loader in this file that does not take
      (from,to). To know whether a person's booking on this instrument in the selected range was
@@ -565,14 +572,19 @@
      deliberately NOT rolled up into a per-supervisor total (that would silently double-count any
      shared instrument into a fabricated "score" per person, which this app does not do).
 
-     OMITTED, on purpose, with a labeled footnote rather than a fake column: trained-user pool
-     trend and downtime share both need Tier 4 data (training records, downtime logs) this app
-     doesn't have yet.
+     "Trained Users" (#47) IS included: a headcount as of the range end, not a trend over the
+     range — see loadTrainedUserCounts/DB.trainedUserCountsAsOf. OMITTED, on purpose, with a
+     labeled footnote rather than a fake column: downtime share, which needs downtime-log data
+     this app doesn't have yet.
      ================================================================================ */
   function computeStewardshipRows(from, to, facts) {
     if (from === undefined) { from = state.from; to = state.to; }
     facts = useFacts(facts, from, to);
+    // An unbounded range end means "today" — Trained Users is a snapshot as of a single date,
+    // so an open-ended range needs a concrete reference date to evaluate it against.
+    const asOf = to || UI.today();
     return memo(facts, 'stewardshipRows', () => {
+      const trainedByInstrument = loadTrainedUserCounts(facts, asOf);
       // Reuse — passing `facts` along means these hit the memoized result from an EARLIER call in
       // the same render/export (render() and exportReportsXlsx both compute instrument/consult
       // rows on their own before calling this) rather than re-running either's SQL or aggregation
@@ -616,6 +628,7 @@
           id: r.id, name: r.name, retired: r.retired,
           bookings: r.bookings, hours: r.hours, revenue: r.revenue,
           distinctUsers: (distinctUsersByInstrument.get(r.id) || new Set()).size,
+          trainedUsers: trainedByInstrument.get(r.id) || 0,
           newUsers: newUsersByInstrument.get(r.id) || 0,
           projectsServed: (projectsByInstrument.get(r.id) || new Set()).size,
           facilityWideSessions: facilityWideByInstrument.get(r.id) || 0,
@@ -806,6 +819,45 @@
     return { periods, categories, rows };
   }
 
+  /* ---------------- Card — Booking Tags ----------------
+     `meetings.tags` is a free-text, comma-joined column (same shape as `meetings.category`'s
+     sibling), split with UI.parseTags in JS — never a SQL aggregate query, because a single booking can
+     carry several tags, and this aggregation deliberately counts that booking once under EACH tag
+     it carries. That means the Bookings column below does not sum to the number of distinct
+     bookings in the range: a two-tag booking contributes 1 to two different rows. Hours use
+     UI.hoursBetween exactly like every other hour figure in this file. Occupancy rule: cancelled
+     bookings are excluded entirely (rule 1) — a cancellation never held its slot, so it never
+     "did" whatever its tags describe. */
+  function computeBookingTagRows(from, to, facts) {
+    if (from === undefined) { from = state.from; to = state.to; }
+    facts = useFacts(facts, from, to);
+    return memo(facts, 'bookingTagRows', () => computeBookingTagRowsImpl(from, to, facts));
+  }
+  function computeBookingTagRowsImpl(from, to, facts) {
+    const meetings = loadMeetingsInRange(from, to, facts).filter((m) => !m.is_cancelled); // rule 1
+
+    const byTag = new Map(); // tag -> { bookings, hours }
+    let taggedBookings = 0;
+    let untaggedBookings = 0;
+    meetings.forEach((m) => {
+      const tags = UI.parseTags(m.tags);
+      if (!tags.length) { untaggedBookings++; return; }
+      taggedBookings++;
+      const hours = UI.hoursBetween(m.start_time, m.end_time);
+      tags.forEach((tag) => {
+        if (!byTag.has(tag)) byTag.set(tag, { bookings: 0, hours: 0 });
+        const entry = byTag.get(tag);
+        entry.bookings += 1;
+        entry.hours += hours;
+      });
+    });
+
+    const rows = Array.from(byTag.entries()).map(([tag, v]) => ({ tag, bookings: v.bookings, hours: v.hours }));
+    rows.sort((a, b) => (b.hours - a.hours) || (b.bookings - a.bookings) || a.tag.localeCompare(b.tag));
+
+    return { rows, taggedBookings, untaggedBookings };
+  }
+
   /* ================================================================================
      Card — Funnel analysis with project outputs (ROADMAP 3.3)
      consult -> project created -> active (first booking) -> milestones progressing ->
@@ -948,11 +1000,11 @@
   // local time to force local parsing): reparse the stored string as an explicit UTC instant by
   // appending 'Z', then read that instant's LOCAL calendar fields via UI.ymd (never toISOString,
   // which would just undo the fix by re-describing the instant in UTC again).
+  // Delegates to UI.utcTimestampToLocalDay — the single shared implementation of this rule
+  // (also used by DB.outputEffectiveDate for the same fallback outside reports.js, e.g. the
+  // Project Detail research-outputs ordering and the XLSX/DOCX/PDF exports).
   function utcTimestampToLocalDay(ts) {
-    if (!ts) return '';
-    const d = new Date(String(ts).replace(' ', 'T') + 'Z');
-    if (isNaN(d.getTime())) return String(ts).slice(0, 10); // not a parseable timestamp — fall back rather than throw
-    return UI.ymd(d);
+    return UI.utcTimestampToLocalDay(ts);
   }
   // 'YYYY-MM-DD' (or a longer datetime string, sliced) in-range check — '' on either bound means
   // unbounded, mirroring RANGE_SQL's own '' = unbounded convention above, just in plain JS for
@@ -1265,6 +1317,7 @@
         date: m.date || '',
         title: m.title || '',
         category: m.category || '',
+        tags: m.tags || '',
         project: m.project_id == null ? 'Facility-wide' : (m.project_code ? m.project_code + ' — ' + m.project_title : m.project_title),
         lab: m.group_org || '',
         instruments: insts.join(', '),
@@ -1309,7 +1362,7 @@
     return Object.assign({ key, label, type, get, required: false }, opts || {});
   }
 
-  const CUSTOM_REPORT_ENTITY_ORDER = ['instrument', 'staff', 'projects', 'consults', 'service', 'stewardship', 'activitymix', 'funnel', 'bookings'];
+  const CUSTOM_REPORT_ENTITY_ORDER = ['instrument', 'staff', 'projects', 'consults', 'service', 'stewardship', 'activitymix', 'funnel', 'bookings', 'bookingtags'];
 
   const ENTITY_DEFS = {
     instrument: {
@@ -1406,7 +1459,7 @@
           const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
           g.rows.forEach((r) => rows.push({
             supervisor: supLabel, name: r.name, retired: r.retired, bookings: r.bookings, hours: r.hours,
-            revenue: r.revenue, distinctUsers: r.distinctUsers, newUsers: r.newUsers,
+            revenue: r.revenue, distinctUsers: r.distinctUsers, trainedUsers: r.trainedUsers, newUsers: r.newUsers,
             projectsServed: r.projectsServed, facilityWideSessions: r.facilityWideSessions, consultCount: r.consultCount
           }));
         });
@@ -1419,6 +1472,7 @@
         ccol('hours', 'Hours', 'hours', (r) => r.hours),
         ccol('revenue', 'Line Charges', 'money', (r) => r.revenue),
         ccol('distinctUsers', 'Distinct Users', 'number', (r) => r.distinctUsers),
+        ccol('trainedUsers', 'Trained Users', 'number', (r) => r.trainedUsers),
         ccol('newUsers', 'New Users', 'number', (r) => r.newUsers),
         ccol('projectsServed', 'Projects Served', 'number', (r) => r.projectsServed),
         ccol('facilityWideSessions', 'Facility-Wide Sessions', 'number', (r) => r.facilityWideSessions),
@@ -1478,6 +1532,7 @@
         ccol('date', 'Date', 'text', (r) => r.date || '—'),
         ccol('title', 'Title', 'text', (r) => r.title || '—'),
         ccol('category', 'Category', 'text', (r) => r.category || '—'),
+        ccol('tags', 'Tags', 'text', (r) => r.tags || '—'),
         ccol('project', 'Project', 'text', (r) => r.project),
         ccol('lab', 'Lab / Group', 'text', (r) => r.lab || '—'),
         ccol('instruments', 'Instruments', 'text', (r) => r.instruments || '—'),
@@ -1486,6 +1541,16 @@
         ccol('staffHours', 'Staff Hours', 'hours', (r) => r.staffHours),
         ccol('status', 'Status', 'text', (r) => r.status),
         ccol('cost', 'Cost', 'money', (r) => r.cost)
+      ]
+    },
+    bookingtags: {
+      label: 'Booking Tags',
+      notes: ['A booking carrying several tags is counted once under each of them, so the Bookings column can exceed the number of distinct bookings in the range. Cancelled bookings are excluded entirely.'],
+      buildRows: (from, to, facts) => computeBookingTagRows(from, to, facts).rows,
+      columns: [
+        ccol('tag', 'Tag', 'text', (r) => r.tag, { required: true }),
+        ccol('bookings', 'Bookings', 'number', (r) => r.bookings),
+        ccol('hours', 'Booked Hours', 'hours', (r) => r.hours)
       ]
     }
   };
@@ -1573,6 +1638,7 @@
     const svc = computeServiceEntryRows(from, to, facts);
     const breadth = computeBreadthRows(from, to, facts);
     const mix = computeActivityMixRows(from, to, facts);
+    const tagRows = computeBookingTagRows(from, to, facts);
     const funnel = computeFunnelRows(from, to, facts);
     const labConsultsOn = getLabConsultsEnabled();
 
@@ -1707,7 +1773,7 @@
           <div class="faint small mb-8" style="font-weight:600;text-transform:uppercase;letter-spacing:.05em">${g.supervisor ? 'Supervisor: ' + nameCell(g.supervisor.name, g.supervisor.retired) : 'Unassigned (no supervisor on file)'}</div>
           <div class="tbl-wrap">
             <table class="tbl">
-              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Line Charges</th><th>Distinct Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
+              <thead><tr><th>Instrument</th><th>Bookings</th><th>Hours</th><th>Line Charges</th><th>Distinct Users</th><th>Trained Users</th><th>New Users</th><th>Projects Served</th><th>Facility-Wide Sessions</th><th>Consults</th></tr></thead>
               <tbody>
                 ${g.rows.map((r) => `
                   <tr class="${r.retired ? 'row-retired' : ''}">
@@ -1716,6 +1782,7 @@
                     <td class="mono small">${fmtHours(r.hours)}</td>
                     <td class="mono small">${fmtMoney(r.revenue)}</td>
                     <td class="mono small">${r.distinctUsers}</td>
+                    <td class="mono small">${r.trainedUsers}</td>
                     <td class="mono small">${r.newUsers}</td>
                     <td class="mono small">${r.projectsServed}</td>
                     <td class="mono small">${r.facilityWideSessions}</td>
@@ -1725,7 +1792,7 @@
             </table>
           </div>
         </div>`).join('')}
-      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Line Charges follows the retained-charge rule used everywhere else. Omitted on purpose (need Tier 4 data this app doesn't have yet): trained-user pool trend and downtime share.</div>
+      <div class="faint small mt-8">Grouped by supervising staff (Instruments → supervisor mapping); an instrument with more than one supervisor appears under each of them — this is a grouping for review, not a partition of ownership, and these per-instrument figures are deliberately not summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just this range) falls inside the selected dates. Bookings/hours/users exclude cancelled bookings; Line Charges follows the retained-charge rule used everywhere else. "Trained Users" counts people holding a training record on that instrument that is valid on the last day of the selected range (no expiry, or an expiry on or after that day; "today" when the range has no end) — a headcount as of that date, not a trend, and independent of whether they booked in the range. Omitted on purpose (needs downtime records this app doesn't have yet): downtime share.</div>
     </div>
 
     <div class="card mb-16">
@@ -1885,6 +1952,25 @@
     </div>
 
     <div class="card mb-16">
+      <div class="row mb-8"><div class="grow"><span class="card-title">${ic('tag')} Booking Tags</span></div></div>
+      ${!tagRows.rows.length ? global.Views.emptyState('tag', 'No tagged bookings in this range', 'Add tags to a booking — the instrument mode or software used, for example — to see them counted here.') : `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Tag</th><th>Bookings</th><th>Booked Hours</th></tr></thead>
+          <tbody>
+            ${tagRows.rows.map((r) => `
+              <tr>
+                <td style="font-weight:600">${esc(r.tag)}</td>
+                <td class="mono small">${r.bookings}</td>
+                <td class="mono small">${fmtHours(r.hours)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+      <div class="faint small mt-8">Cancelled bookings are excluded; a booking with several tags is counted once under each of them, so bookings do not sum to the number of distinct bookings shown; ${tagRows.untaggedBookings} untagged booking${tagRows.untaggedBookings === 1 ? '' : 's'} in range not shown.</div>
+    </div>
+
+    <div class="card mb-16">
       <div class="row mb-8"><div class="grow"><span class="card-title">${ic('target')} Funnel: Consult to Output</span></div></div>
       ${!funnel.stages.some((s) => s.count > 0) ? global.Views.emptyState('target', 'No funnel activity in this range', 'Widen the date range or add consults, projects, bookings, milestones and outputs.') : `
       <div class="mb-16">${chartFunnel(funnel.stages)}</div>
@@ -1938,6 +2024,7 @@
     computeServiceEntryRows,
     computeBreadthRows,
     computeActivityMixRows,
+    computeBookingTagRows,
     computeFunnelRows,
     computeBookingRows,
     getLabConsultsEnabled,

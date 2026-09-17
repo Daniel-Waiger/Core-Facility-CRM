@@ -34,12 +34,26 @@ A lesson that just restates an architecture rule should be deleted — point at
 
 ## Verification
 
-- **"The code looks correct" is not verification in this repo.** `node --check
-  js/<file>.js` proves the file parses and nothing more. A verifier must run the
-  test suite AND, for anything touching the UI, actually load the app in a
-  browser and exercise the changed path — or state plainly that it did not. A
-  pass issued from a read of the diff alone is a false pass. _(2026-09-08,
-  updated 2026-09-10)_
+- **"The code looks correct" is not verification in this repo (seen 3×).**
+  `node --check js/<file>.js` proves the file parses and nothing more. A verifier
+  must run the test suite AND, for anything touching the UI, actually load the
+  app in a browser and exercise the changed path (served over http, not
+  `file://` — IndexedDB and the service worker behave differently there) — or
+  state plainly that it did not. A pass issued from a read of the diff alone is a false pass. _(2026-09-08,
+  2026-09-10, 2026-09-16: #41 T5 was the run's only failed verdict and its only
+  browser-verified one — the verifier loaded the page in headless Chrome and
+  found the feature silently dead; every static and unit check had passed.)_
+
+- **When a change hides something, prove the hide mechanism has a stylesheet
+  rule behind it.** #41 T5 toggled the bare `hidden` attribute on
+  `[data-out-field]` wrappers, but `css/app.css` `.field { display: flex }`
+  outranks the UA `[hidden] { display: none }` and no author `[hidden]` rule
+  existed — so every output type showed every field, including ones its
+  `OUTPUT_TYPE_FIELDS` entry excludes. No unit test can see this: the attribute
+  is set, the DOM is correct, only the cascade is wrong. Grep `css/` for a rule
+  matching the hide mechanism (or toggle inline `display:none`/a class instead),
+  and open the screen. The retry fixed it with `.field[hidden] { display: none }`.
+  _(2026-09-16)_
 
 - **There is a test suite now — run it, and add to it.** `node --test
   'test/unit/*.test.js'` needs nothing installed; the browser group
@@ -62,10 +76,42 @@ A lesson that just restates an architecture rule should be deleted — point at
   allow-list it with a stated reason; never soften the check, and never report a
   suite as passing with a real violation quietly allow-listed. _(2026-09-10)_
 
-- **Serve the app rather than opening `file://` when the change touches
-  storage.** IndexedDB and the service worker behave differently under
-  `file://` on some browsers, so a bug can be invisible or fabricated
-  depending on how the verifier opened the page.
+- **A test that throws before its first assertion did not "fail" — it never
+  ran, and the gap it was guarding is still open.** _(2026-09-16, #47)_ The
+  clones were checked out with `core.autocrlf=true`, so `wiring.test.js`'s
+  LF-anchored `scrapeDispatcherCases` threw and the dispatch-completeness check
+  never executed during T1–T3. Everyone read it as "2 pre-existing failures",
+  and the hole was real: T7's verifier later found **4 unwired `data-act`
+  values**. Practice: when a suite failure is dismissed as environmental, state
+  *which* assertions consequently never ran, and treat those criteria as
+  unverified rather than as background noise. (Fix at source:
+  `core.autocrlf=false` clones, LF everywhere.)
+
+- **An executor's diagnosis of a failing test is a claim, not evidence —
+  verify it or it misleads the next task.** _(2026-09-16, #47)_ T2's executor
+  reported `wiring.test.js` as "waiting on T4's dispatcher cases"; the verifier
+  proved it was the CRLF scraper throwing. Had the verifier accepted the
+  diagnosis, T4 would have inherited a false explanation for a failure it was
+  blamed for. Reproduce the failure's *cause* (on a clean copy extracted with
+  `git show HEAD:<path>`), don't relay the executor's story.
+
+- **Triage the baseline once, in the brief — not once per verifier.**
+  _(2026-09-16, #47)_ The same 2–4 pre-existing failures (CRLF scrapers, the
+  `process.env.TZ` literal assertion) were independently re-reproduced by five
+  verifiers in one run, each burning a clean-HEAD comparison to reach the same
+  conclusion. Record the exact baseline pass/fail list with the run's brief and
+  write criteria as "no *new* failures vs. that list"; a literal "0 failures"
+  criterion in a repo with known-red tests forces this waste and invites a
+  verifier to either fail good work or quietly soften the bar.
+
+- **A verifier may rule a criterion unsatisfiable-as-written and judge the
+  intent — that is a correct verdict, not a soft pass.** _(2026-09-16, #47 T5)_
+  The planner's harness seeded a booking dated 2026-03-05 and then asserted
+  stewardship rows for 2026-01-01..2026-01-15, so the literal script could never
+  print "T5 OK" even though the implementation was right. The verifier passed
+  the task and reported the fixture bug. Planners: date fixtures inside the
+  ranges their own assertions use; verifiers: say plainly "criterion is faulty,
+  here is what I verified instead" rather than failing correct work.
 
 ## The trap that makes work look like it did nothing
 
@@ -118,20 +164,23 @@ A lesson that just restates an architecture rule should be deleted — point at
   picked, when no picker joins `grant_users` at all. Plausible prose is exactly
   what a false claim looks like.
 
-- **A correction needs its own adversarial pass.** In the first round, **two of
-  six corrections were themselves wrong** — a claim true of one report asserted
-  of two, and a "complete" gap list that omitted an undisclosed scope
-  narrowing. A fix does not inherit the review's correctness. Re-verify.
+- **A correction needs its own adversarial pass** _(seen 2×: 2026-09-09,
+  2026-09-12)_. In the first round, **two of six corrections were themselves
+  wrong** — a claim true of one report asserted of two, and a "complete" gap
+  list that omitted an undisclosed scope narrowing. The 2026-09-12 review pass
+  repeated it exactly: two of its own claims were wrong on inspection (which
+  vocab category was unescaped; clipped vs stacked UI). A fix does not inherit
+  the review's correctness. Re-verify.
 
 - **Code comments are not evidence, and this repo has proved it.**
   `js/reports.js` justified a narrowing with "per the roadmap spec"; the roadmap
   said no such thing. `js/exports.js` promised an "(Archived)" suffix in two
   Notes sheets that no code has ever written. Both shipped and survived review.
-  Only executing code settles a claim.
-
-- **The app's own output strings are documentation too.** The "(Archived)"
-  defect was not in the manual — it was in a spreadsheet the app hands to a
-  user. When auditing docs, audit the strings the app itself emits.
+  Only executing code settles a claim. _(seen 3×; 2026-09-16: a new seed block's
+  own explanatory comment named the wrong demo person and instrument for four of
+  the six rows it described — the rows were right, the prose was not. When a
+  task writes data *and* a comment describing it, check the comment against the
+  rows; verifiers should call this out as a nit rather than let it ship.)_
 
 ## Run hygiene
 
@@ -142,11 +191,14 @@ A lesson that just restates an architecture rule should be deleted — point at
   **commit each unit of work as it lands** rather than batching at the end —
   what is on disk survives, what is in a dead agent's context does not.
 
-- **Recovery after such a kill is possible but must be audited, not assumed.**
-  Agents that die after writing leave complete, parseable files. Check each
-  survivor's output against its original brief, and treat anything an agent
-  never reported on as unverified — in this run, the two chapters whose authors
-  died contained six defects between them.
+- **Recovery after a kill or a clobber must be audited, not assumed.** Agents
+  that die after writing leave complete, parseable files; check each survivor's
+  output against its original brief and treat anything never reported on as
+  unverified (two chapters whose authors died held six defects between them).
+  Same shape after the 2026-09-16 stash clobber: the orchestrator saved patches,
+  rebuilt clean clones, re-applied, and resumed with a FORCE nonce so only the
+  lost task and its successors re-ran — re-running the already-verified tasks
+  would have re-opened settled ground. _(seen 2×: 2026-09-10, 2026-09-16)_
 
 - **The manual stores each chapter's number twice** — in `docs/manual/manual.js`
   and again as a hardcoded `<p class="ch-kicker">Chapter N</p>` in every page.
@@ -173,21 +225,10 @@ A lesson that just restates an architecture rule should be deleted — point at
   proven once in `js/reports.js` or `js/app.js` is not proven again for its XLSX/DOCX/PDF path;
   each export format is its own code path (CLAUDE.md) and needs its own assertion.
 
-- **`restoreBackup` validated only the envelope** (`kind` and `!data.db`), not that the bytes
-  inside were a usable database — `db: []` passed. A round-trip test that only checks "restore
-  didn't throw" cannot catch this; it takes a test that actually queries a core table afterward.
-
 - **"The demo already shows it" is a cheap, real first check for a reports/aggregation claim.**
   Both R1/R2-class defects in this codebase (a revenue figure pre-discount, a matrix dropping
   instrument-less bookings) were independently reproducible in the shipped demo seed with no setup
   — before writing a fixture, try the claim against the demo dataset first.
-
-- **A correction pass over the previous review's own claims found two more wrong ones on inspection**
-  — one about which vocab category was actually unescaped (PERSON_TYPES was fine; `people.type` and
-  the STATUS vocab were not), one about a UI overlap being clipped rather than visually stacked.
-  This is the same "corrections need their own adversarial pass" lesson already recorded above,
-  seen again in a different section of the same run — restating it here would be a duplicate; this
-  entry exists only to note it recurred, not to re-explain it.
 
 ## Rendering claims (2026-09-12)
 
@@ -198,9 +239,84 @@ A lesson that just restates an architecture rule should be deleted — point at
   glyph order on the PDF content stream (PyMuPDF `get_texttrace()` x-origins), never on a picture.
   Only a base-RTL line, which jsPDF leaves in logical order, needs reversing (`pdfBidiReverse`).
 
-- **Executor worktrees may fork from `main`, not from the branch head.** Three packages in one run
+- **Executor checkouts may fork from `main`, not from the branch head.** Three packages in one run
   started from a stale base and then "verified" claims about code that only existed on the branch
-  (one concluded a rename had never happened). Tell every executor the exact head SHA and make it
-  `git reset --hard` there before reading anything.
+  (one concluded a rename had never happened). Give every executor the exact head SHA and have it
+  *check* (`git rev-parse HEAD`, `git log -1`) that its checkout is there — then report `blocked`
+  if not. **Revised 2026-09-16:** this lesson previously said "make it `git reset --hard` there",
+  and a #41 planner copied exactly that into its task assumptions. The orchestrator stripped it
+  before execution; had it survived, task N+1 would have wiped tasks 1..N, which run back to back
+  with no commits between them. Never put a working-tree-mutating git command in a plan.
+
+## Plan quality: what produced a 10-for-10 run (2026-09-16, issue #39)
+
+- **Put the literal expected output of a runnable one-liner in the task's
+  verification criteria.** Ten tasks, ten first-try passes, zero retries. The
+  criteria that carried the most weight were of the form "run this exact
+  `node -e ...` and it prints `["SIM","TIRF","Fiji"] "Fiji, Napari" []`".
+  Executor and verifier then check the same observable fact instead of two
+  readings of a diff, and disagreement becomes impossible to paper over.
+  Grep-shaped criteria work the same way ("exactly two `#39 begin`/`#39 end`
+  pairs; the first at a line after `ix_project_outputs_project`").
+
+- **A planner must not ban vocabulary its own scope statement uses.** T10's
+  brief forbade the word "column" in changelog prose while the brief itself (and
+  the precedent 1.11.0 entry) described "two new columns"; the verifier had to
+  log a non-gating problem for obeying the scope. Style bans belong in the
+  lessons/`CLAUDE.md` layer, and the planner should self-check its prose rules
+  against its own wording before shipping the brief.
+
+- **Cross-format claims still need per-format wording.** The same T10 changelog
+  said "Tags column" for the DOCX/PDF reports, which actually render a "Tags:"
+  line per booking; only the spreadsheet paths are columns. Each export format
+  is its own code path (`CLAUDE.md`), so a release note describing "the export"
+  in one phrase is usually wrong for at least one of the three.
+
+## Recovering an interrupted parallel run (2026-09-16)
+
+- **Recover by patch + fresh clone, and discard the interrupted task's partial
+  output.** A sibling run's `git stash` in a worktree of the same clone swapped
+  this run's uncommitted work into the other issue's tree after T4. What worked:
+  save the surviving work as a patch, rebuild independent clones with
+  `core.autocrlf=false`, re-apply, **delete the half-written file from the task
+  that was mid-flight** (`reports.js` from T5), and re-run from that task with a
+  fresh FORCE nonce. T5–T10 then passed with zero retries. Resuming *on top of*
+  a half-written file is the failure mode this avoids: the next executor treats
+  partial code as the base and its greps report a state nobody authored.
+  (Shared stash stack across worktrees of one clone: seen 2×.)
 
 <!-- cma:append-here -->
+
+## Hard rules for the 2026-09 parallel runs (orchestrator, 2026-09-16)
+
+Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos\cfc-39`, `cfc-47`, `cfc-41`). They were first set up as **git worktrees of one clone, which share a single stash stack** — a verifier's `git stash` in one worktree swapped #39's and #47's uncommitted work and cost an hour; #41 escaped only by luck, its verifiers used `git stash` too. Fixed by rebuilding as independent clones. **Parallel issues get independent clones, never worktrees.** For every executor and verifier:
+
+- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work.
+- **To compare against the base commit**, use read-only forms only: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, `git log`. `git stash` is *not* one of them. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
+- **Stay inside your own checkout.** The repo path in your brief is the only directory you may edit. If `git status` shows changes that clearly belong to another issue (#39 tags, #47 training, #41 outputs), stop and report `blocked` with what you saw; do not "clean up".
+- **Line endings are LF** in these clones (`core.autocrlf=false`). Do not introduce CRLF. `test/unit/wiring.test.js` and `boot-ready-signal.test.js` scrape `js/app.js` with LF-anchored patterns: the first #41 clone was made on Windows with `core.autocrlf=true`, so those two tests failed on *every* task until the clones were recreated — burning verifier time on each. Before a run, confirm `git config core.autocrlf` is `false` in the checkout; when a scraper test fails, check line endings before the diff.
+- **Timezone:** inline `TZ='Asia/Jerusalem' node ...` may not reach `process.env.TZ` in this shell; the host clock is already Asia/Jerusalem, so date behaviour is exercised at UTC+ regardless. A test asserting the literal env value is a known environment artefact; say so plainly rather than chasing it.
+- **Reporting `blocked` on a polluted tree is the best possible outcome, not a
+  failure.** _(2026-09-16, #47 T7)_ The shared stash stack swapped #39 and #47
+  work; the verifier noticed `js/db.js` held a `#39` fence instead of `#47` and
+  refused to pass, and the retry executor made zero edits and reported
+  `blocked` with `git status` / reflog evidence. That pair of refusals is why
+  nothing was silently overwritten and the run was recoverable. An executor that
+  had "helpfully" cleaned the tree would have destroyed the sibling issue's
+  work. Detection rule: check that *your* task's marker (fence, symbol, column)
+  is what the file actually contains before trusting the tree.
+
+- **No version bumps, ever, on these branches.** `index.html ?v=`, `sw.js CACHE_VERSION/PRECACHE_URLS`, `js/consts.js APP_VERSION` stay untouched; CHANGELOG bullets go under `## [Unreleased]`.
+
+## Also learned in the parallel #39 and #41 runs (2026-09-16)
+
+Distilled by the #39 and #41 learners on their own branches; carried over here when the three branches were merged.
+
+- **Record the failing-test baseline once at run start and put it in every brief.** Ten verifiers re-triaged the same three HEAD failures, two reached different counts, and several reached for `git stash` to prove it. Write criteria as "no new failures beyond this list", never as "the suite exits 0" when the baseline is red.
+- **`wiring.test.js` and `boot-ready-signal.test.js` are source-scrapers** and the repo's most brittle tests: they break on CRLF and on any reshaping of `boot()` or `handleAct()`. A scraper that throws before its first assertion never ran; do not dismiss it as environmental.
+- **Literal expected output of a runnable one-liner in the verification criteria** produced 10 of 10 first-try passes in the #39 run with zero retries.
+- **A planner must not ban vocabulary its own scope statement uses** (#39 T10's "column" ban against its own brief). Cross-format export claims need per-format wording: DOCX and PDF render a "Tags:" line, not a column.
+- **A hide mechanism needs a matching stylesheet rule.** #41 T5's bare `hidden` attribute was defeated by `.field { display: flex }`, invisible to `node --check` and the unit suite; caught only by rendering the dialog. A task's verification must only assert on that task's own files and on counts verified at HEAD.
+- **Reproduce a suspected pre-existing failure on an independent clone or via `git show HEAD:<path>`,** never by mutating the working tree, and show the reproduction in the verdict.
+- **Exit Plan Mode before dispatching execute workflows.** Subagents inherit it and refuse to edit; attempt 1 of every execute run on 2026-09-16 was wasted this way.
+- **Recover an interrupted parallel run by patch + fresh LF clone**, discarding the mid-flight task's half-written file before resuming with a nonce so only the lost task and its successors re-run.

@@ -92,11 +92,11 @@ describe('exports (R3): facility-wide XLSX carries the same "(Retired)" suffix a
     const bcRows = sheetRows(wbAll, 'Bookings & Costs');
     const bcRow = bcRows.find((r) => r[2] === 'Session');
     assert.ok(bcRow, 'the seeded booking must appear on the Bookings & Costs sheet');
-    // header: [Project Code, Project, Booking, Grant, Tier, Status, Date, Start, End, Instruments,
-    //          Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %, Before Tax,
-    //          Effective Tax %, Total Cost]
-    assert.match(bcRow[9], /Scope A \(Retired\)/, 'Bookings & Costs Instruments column must carry "(Retired)"');
-    assert.match(bcRow[10], /Sam \(Retired\)/, 'Bookings & Costs Facility Staff column must carry "(Retired)"');
+    // header: [Project Code, Project, Booking, Tags, Grant, Tier, Status, Date, Start, End,
+    //          Instruments, Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %,
+    //          Before Tax, Effective Tax %, Total Cost]
+    assert.match(bcRow[10], /Scope A \(Retired\)/, 'Bookings & Costs Instruments column must carry "(Retired)"');
+    assert.match(bcRow[11], /Sam \(Retired\)/, 'Bookings & Costs Facility Staff column must carry "(Retired)"');
   });
 });
 
@@ -117,11 +117,11 @@ describe('exports (R4): DOCX/PDF money follows the same waived-cancellation rule
     Exports.exportXlsx(liveProject);
     const wbProj = app.captured[app.captured.length - 1];
     const mtRows = sheetRows(wbProj, 'Meetings');
-    // header: [Meeting Title, Grant, Tier, Category, Status, Date, Start, End, Attendees, Notes,
-    //          Action Items, Subtotal, Before Tax, Total Cost]
+    // header: [Meeting Title, Grant, Tier, Category, Tags, Status, Date, Start, End, Attendees,
+    //          Notes, Action Items, Subtotal, Before Tax, Total Cost]
     const waivedXlsxRow = mtRows.find((r) => r[0] === 'Waived');
     assert.ok(waivedXlsxRow);
-    assert.equal(waivedXlsxRow[13], 0, 'XLSX Total Cost must already be zeroed for a waived cancellation');
+    assert.equal(waivedXlsxRow[14], 0, 'XLSX Total Cost must already be zeroed for a waived cancellation');
 
     // DOCX — must now match: the Cost paragraph's Total must also read as 0 (formatted via
     // UI.fmtMoney), not the raw stored total_cost of 150.
@@ -148,13 +148,13 @@ describe('exports (R4): DOCX/PDF money follows the same waived-cancellation rule
     assert.deepEqual(bcRows[0].slice(-3), ['Before Tax', 'Effective Tax %', 'Charged Total'], 'the money columns must read Before Tax / Effective Tax % / Charged Total, in that order');
     const bcRow = bcRows.find((r) => r[2] === 'Waived');
     assert.ok(bcRow, 'the waived booking must appear on the facility-wide Bookings & Costs sheet');
-    // header: [Project Code, Project, Booking, Grant, Tier, Status, Date, Start, End, Instruments,
-    //          Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %, Before Tax,
-    //          Effective Tax %, Charged Total]
-    assert.equal(bcRow[11], 150, 'Subtotal must stay the unwaived snapshot (150), unchanged by waiving the charge');
-    assert.equal(bcRow[15], 150, 'Before Tax must likewise stay the unwaived snapshot (150)');
-    assert.equal(bcRow[16], '', 'Effective Tax % is blank — nothing was actually billed to derive a rate from');
-    assert.equal(bcRow[17], 0, 'Charged Total must be zeroed for a waived cancellation');
+    // header: [Project Code, Project, Booking, Tags, Grant, Tier, Status, Date, Start, End,
+    //          Instruments, Facility Staff, Subtotal, Group Disc %, Manual Disc %, Overhead %,
+    //          Before Tax, Effective Tax %, Charged Total]
+    assert.equal(bcRow[12], 150, 'Subtotal must stay the unwaived snapshot (150), unchanged by waiving the charge');
+    assert.equal(bcRow[16], 150, 'Before Tax must likewise stay the unwaived snapshot (150)');
+    assert.equal(bcRow[17], '', 'Effective Tax % is blank — nothing was actually billed to derive a rate from');
+    assert.equal(bcRow[18], 0, 'Charged Total must be zeroed for a waived cancellation');
   });
 });
 
@@ -358,6 +358,65 @@ describe('PDF base direction: accented Latin letters are strong LTR, math signs 
   });
 });
 
+
+describe('exports (T9): research-output fields (authors/DOI/URL/acknowledgement/attached file) on both the per-project and facility-wide XLSX', () => {
+  test('per-project exportXlsx "Research Outputs" sheet carries the new header and the new field values, including the joined file name', async () => {
+    const app = await freshApp();
+    XLSX = app.XLSX;
+    const { DB, Exports } = app;
+    const { liveProject } = seedFixture(DB);
+
+    DB.run("INSERT INTO files (project_id, name, kind) VALUES (?, 'protocol.pdf', 'upload')", [liveProject]);
+    const fileId = lastId(DB);
+    DB.run(`INSERT INTO project_outputs (project_id, type, title, authors, doi, url, acknowledges_facility, file_id, date)
+            VALUES (?, 'publication', 'A Great Paper', 'A; B', '10.1000/x1', 'https://example.org/d', 1, ?, '2026-04-01')`, [liveProject, fileId]);
+
+    Exports.exportXlsx(liveProject);
+    const wb = app.captured[app.captured.length - 1];
+    const rows = sheetRows(wb, 'Research Outputs');
+
+    assert.deepEqual(rows[0], ['Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note'], 'per-project Research Outputs header must carry the new columns in order');
+    const row = rows.find((r) => r[1] === 'A Great Paper');
+    assert.ok(row, 'the seeded output must appear on the sheet');
+    assert.equal(row[2], 'A; B', 'Authors column must carry the stored authors string');
+    assert.equal(row[4], '10.1000/x1', 'DOI column must carry the stored DOI');
+    assert.equal(row[6], 'Yes', 'Acknowledges Facility must read Yes when acknowledges_facility=1');
+    assert.equal(row[7], 'protocol.pdf', 'Attached File must be the joined files.name, not a raw file_id');
+  });
+
+  test('facility-wide exportAllXlsx "Research Outputs" sheet carries the 12-column header, the same field values, and "No" for an unacknowledged output', async () => {
+    const app = await freshApp();
+    XLSX = app.XLSX;
+    const { DB, Exports } = app;
+    const { liveProject } = seedFixture(DB);
+
+    DB.run("INSERT INTO files (project_id, name, kind) VALUES (?, 'dataset.csv', 'upload')", [liveProject]);
+    const fileId = lastId(DB);
+    DB.run(`INSERT INTO project_outputs (project_id, type, title, authors, doi, url, acknowledges_facility, file_id, date)
+            VALUES (?, 'dataset', 'Raw Volumes', 'C; D', '10.1000/x2', 'https://example.org/e', 1, ?, '2026-04-02')`, [liveProject, fileId]);
+    DB.run(`INSERT INTO project_outputs (project_id, type, title, acknowledges_facility, date)
+            VALUES (?, 'acknowledgement', 'Unattributed Mention', 0, '2026-04-03')`, [liveProject]);
+
+    global.docx = stubDocx();
+    Exports.exportAllXlsx();
+    const wb = app.captured[app.captured.length - 1];
+    const rows = sheetRows(wb, 'Research Outputs');
+
+    assert.deepEqual(rows[0], ['Project Code', 'Project', 'Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note'], 'facility-wide Research Outputs header must carry the new columns in order');
+
+    const row = rows.find((r) => r[3] === 'Raw Volumes');
+    assert.ok(row, 'the seeded dataset output must appear on the facility-wide sheet');
+    assert.equal(row[4], 'C; D', 'Authors column must carry the stored authors string');
+    assert.equal(row[6], '10.1000/x2', 'DOI column must carry the stored DOI');
+    assert.equal(row[8], 'Yes', 'Acknowledges Facility must read Yes when acknowledges_facility=1');
+    assert.equal(row[9], 'dataset.csv', 'Attached File must be the joined files.name');
+
+    const noRow = rows.find((r) => r[3] === 'Unattributed Mention');
+    assert.ok(noRow, 'the unacknowledged output must appear too');
+    assert.equal(noRow[8], 'No', 'Acknowledges Facility must read No when acknowledges_facility=0');
+    assert.equal(noRow[9], '—', 'Attached File must fall back to "—" when no file is linked');
+  });
+});
 
 // A tiny stand-in for the `docx` UMD global (Document/Packer/Paragraph/TextRun/HeadingLevel/...) —
 // just enough for exportDocx to run to completion without throwing. Paragraph is reassigned per

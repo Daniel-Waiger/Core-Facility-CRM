@@ -3,7 +3,7 @@
   'use strict';
   const Views = global.Views, UI = global.UI, DB = global.DB, Exports = global.Exports, Reports = global.Reports;
   const C = global.CONST, esc = UI.esc, ic = UI.icon;
-  const ctx = { route: 'dashboard', project: null };
+  const ctx = { route: 'dashboard', project: null, person: null };
 
   let _personSavedCallback = null;
   const autoBackupFolderStatus = { supported: false, name: null, granted: false };
@@ -66,6 +66,7 @@
     dashboard: 'Dashboard',
     projects: 'Projects Registry',
     project: 'Project Details',
+    person: 'Person Profile',
     people: 'People, Labs &amp; Researchers',
     instruments: 'Core Instruments',
     calendar: 'Schedule &amp; Milestones',
@@ -88,6 +89,29 @@
   }
   function orgNames() { return unionNames(distinctPeopleCol('organization'), DB.vocabList('ORG')); }
   function deptNames() { return unionNames(distinctPeopleCol('department'), DB.vocabList('DEPT')); }
+  // Suggestions for the booking Tags field: every BOOKING_TAG vocab term merged with every tag
+  // already used on an existing booking (the comma-joined `meetings.tags` display column, split
+  // with UI.parseTags) — same unionNames-style merge as orgNames/deptNames above, so a tag typed
+  // once shows up as a suggestion on every booking dialog afterward, not only via the vocab table.
+  function bookingTagSuggestions() {
+    const used = DB.rows("SELECT tags FROM meetings WHERE TRIM(COALESCE(tags,''))<>''")
+      .flatMap((r) => UI.parseTags(r.tags));
+    return unionNames(DB.vocabList('BOOKING_TAG'), used);
+  }
+  // Free-text tags input with a <datalist> of suggestions (bookingTagSuggestions above) — unlike
+  // vocabField/listPickerField this never forces a single selection, since a booking can carry
+  // several comma-separated tags at once. Same label text as the project dialogs' Tags field.
+  function tagsField(id, value) {
+    const suggestions = bookingTagSuggestions();
+    return `
+    <div class="field">
+      <label>Tags (comma-separated)</label>
+      <input class="input" id="${id}" list="${id}-list" value="${esc(value)}" placeholder="e.g. SIM, TIRF, Fiji, Napari" />
+      <datalist id="${id}-list">
+        ${suggestions.map((t) => `<option value="${esc(t)}"></option>`).join('')}
+      </datalist>
+    </div>`;
+  }
 
   /* ---------------- Helper: Editable Vocabulary Dropdowns ----------------
      A <select> backed by DB.vocabList(category) (built-in CONST terms plus any
@@ -224,6 +248,12 @@
         select.insertBefore(opt, otherOpt || null);
       }
       select.dataset.prev = value;
+      // Setting .selected/.value programmatically never fires a native 'change' event, but a
+      // listener bound to this select (e.g. the Research Outputs Type field's
+      // applyOutputTypeFields wiring) needs to react exactly as if the visitor had picked the
+      // new option themselves — dispatch one so "+ Add New" and a manual selection stay
+      // indistinguishable to anything listening on this select.
+      select.dispatchEvent(new Event('change', { bubbles: true }));
     } else {
       // No parent <select> to inject into (e.g. the project page's "+ Add status" button,
       // which isn't a dropdown) — refresh the page underneath so the new term shows up
@@ -304,6 +334,7 @@
 
   function hashFor(name, id) {
     if (name === 'project' && id) return '#/project/' + Number(id);
+    if (name === 'person' && id) return '#/person/' + Number(id);
     return HASH_ROUTES.includes(name) ? '#/' + name : '#/dashboard';
   }
 
@@ -315,6 +346,10 @@
     if (parts[0] === 'project') {
       const id = Number(parts[1]);
       return id ? { name: 'project', id } : null;
+    }
+    if (parts[0] === 'person') {
+      const id = Number(parts[1]);
+      return id ? { name: 'person', id } : null;
     }
     return HASH_ROUTES.includes(parts[0]) ? { name: parts[0], id: null } : null;
   }
@@ -332,6 +367,7 @@
   function applyRoute(name, id) {
     ctx.route = name;
     ctx.project = id ? Number(id) : null;
+    ctx.person = name === 'person' ? Number(id) : null;
     document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('active', n.dataset.nav === name));
     document.getElementById('page-title').innerHTML = TITLES[name] || 'Dashboard';
     renderView();
@@ -367,6 +403,10 @@
       location.replace('#/projects'); // stale/deleted project id — fall back, don't crash
       return;
     }
+    if (parsed.name === 'person' && !DB.row('SELECT id FROM people WHERE id=?', [parsed.id])) {
+      location.replace('#/people'); // stale/deleted person id — fall back, don't crash
+      return;
+    }
     applyRoute(parsed.name, parsed.id);
   }
 
@@ -375,7 +415,8 @@
   function initRouting() {
     window.addEventListener('hashchange', onHashChange);
     const parsed = parseHash(location.hash);
-    if (parsed && (parsed.name !== 'project' || DB.row('SELECT id FROM projects WHERE id=?', [parsed.id]))) {
+    if (parsed && (parsed.name !== 'project' || DB.row('SELECT id FROM projects WHERE id=?', [parsed.id]))
+               && (parsed.name !== 'person' || DB.row('SELECT id FROM people WHERE id=?', [parsed.id]))) {
       applyRoute(parsed.name, parsed.id);
     } else {
       route('dashboard');
@@ -397,6 +438,7 @@
 
     v.innerHTML =
       name === 'project' ? Views.projectDetail(id) :
+      name === 'person' ? Views.personDetail(ctx.person) :
       name === 'projects' ? Views.projects() :
       name === 'dashboard' ? Views.dashboard() :
       name === 'people' ? Views.people() :
@@ -1205,14 +1247,47 @@
     // modal is open, or if the user cancels it).
     document.addEventListener('change', (e) => {
       const sel = e.target.closest('select.vocab-select');
-      if (!sel) return;
-      if (sel.value === 'Other') {
-        const prev = sel.dataset.prev || '';
-        sel.value = prev;
-        openAddVocab(sel.dataset.cat, sel.id, sel.dataset.label);
-      } else {
-        sel.dataset.prev = sel.value;
+      if (sel) {
+        if (sel.value === 'Other') {
+          const prev = sel.dataset.prev || '';
+          sel.value = prev;
+          openAddVocab(sel.dataset.cat, sel.id, sel.dataset.label);
+        } else {
+          sel.dataset.prev = sel.value;
+        }
+        return;
       }
+      // The Research Outputs card's hidden file-picker input (opened via pickOutputFile):
+      // route the chosen file through the same import path the drop zone uses, then clear the
+      // input so choosing the same file again still fires a fresh 'change' event.
+      const fileInput = e.target.closest('[data-output-file-input]');
+      if (fileInput && fileInput.files.length) {
+        importOutputFile(Number(fileInput.dataset.outputFileInput), fileInput.files[0]);
+        fileInput.value = '';
+      }
+    });
+
+    // Research Outputs drag-and-drop: a PDF dropped onto `[data-drop-outputs]` (the Research
+    // Outputs card) is logged the same way a picked file is (see importOutputFile). The
+    // dragover/dragleave pair only toggles the `is-dragover` highlight class; the browser default
+    // must be prevented on dragover or the drop event never fires.
+    document.addEventListener('dragover', (e) => {
+      const card = e.target.closest('[data-drop-outputs]');
+      if (!card) return;
+      e.preventDefault();
+      card.classList.add('is-dragover');
+    });
+    document.addEventListener('dragleave', (e) => {
+      const card = e.target.closest('[data-drop-outputs]');
+      if (!card) return;
+      card.classList.remove('is-dragover');
+    });
+    document.addEventListener('drop', (e) => {
+      const card = e.target.closest('[data-drop-outputs]');
+      if (!card) return;
+      e.preventDefault();
+      card.classList.remove('is-dragover');
+      importOutputFile(Number(card.dataset.dropOutputs), e.dataTransfer.files[0]);
     });
   }
 
@@ -1387,6 +1462,14 @@
       case 'p-edit-save': return pEditSave(el.dataset.id);
       case 'retire-person': return retirePerson(el.dataset.id);
       case 'restore-person': return restorePerson(el.dataset.id);
+      case 'training-add': return openTrainingModal(null, el.dataset.personId);
+      case 'training-edit': return openTrainingModal(el.dataset.id);
+      case 'training-save': return trainingSave(el.dataset.id, el.dataset.personId);
+      case 'training-del': return removeTraining(el.dataset.id);
+      case 'export-activity-certificate': {
+        const f = document.getElementById('cert-from'), t = document.getElementById('cert-to');
+        return Exports.exportActivityCertificate(el.dataset.id, f ? f.value : '', t ? t.value : '');
+      }
 
       // Project Collaborators & Instruments link
       case 'add-project-person': return addProjectPerson();
@@ -1417,6 +1500,8 @@
       case 'email-open-blank': return void (window.location.href = 'mailto:');
       case 'bom-group-revoke': return handleGroupRevoke(el.closest('.modal'), el.closest('.modal')._bomIds);
       case 'bom-group-apply': return handleGroupReapply(el.closest('.modal'), el.closest('.modal')._bomIds);
+      case 'category-rename': return renameCategoryFromSettings(el.dataset.category);
+      case 'category-remove': return removeCategoryFromSettings(el.dataset.category);
 
       // Custom KV Fields CRUD
       case 'kv-add': return addKV();
@@ -1428,9 +1513,17 @@
       // Research Outputs CRUD (roadmap 3.3)
       case 'output-add': return addOutput(el.dataset.projectId || ctx.project);
       case 'output-save': return outputSave();
-      case 'output-edit': return editOutput(el.dataset.id);
+      case 'output-view': return viewOutput(el.dataset.id);
+      case 'output-edit': {
+        // Opened from the read-only view dialog: dismiss that dialog first so it cannot sit
+        // behind the edit form showing stale values after a save.
+        const dim = el.closest('.modal-dim');
+        if (dim) UI.closeDim(dim);
+        return editOutput(el.dataset.id);
+      }
       case 'output-edit-save': return outputEditSave(el.dataset.id);
       case 'output-del': return outputDel(el.dataset.id);
+      case 'output-pick-file': return pickOutputFile(el.dataset.projectId || ctx.project);
 
       // Files CRUD
       case 'add-file': return addFile();
@@ -2058,6 +2151,10 @@
           ${listPickerField({ id: 'p-dept', label: 'Department', values: deptNames(), modalTitle: 'Department', category: 'DEPT' })}
           <div class="field"><label>Email Address</label><input type="email" class="input" id="p-email" placeholder="jane.doe@university.edu" /></div>
         </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Mobile</label><input type="tel" class="input" id="p-mobile" placeholder="Optional" /></div>
+          <div class="field"><label>Campus</label><input class="input" id="p-campus" placeholder="e.g. Main campus" /></div>
+        </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="p-note" placeholder="e.g. Single-molecule localization microscopy" /></div>
         <div class="field">
           <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="p-is-staff" /> Facility Staff (billable by the hour on bookings)</label>
@@ -2081,12 +2178,14 @@
     const org = m.querySelector('#p-org').value.trim();
     const dept = m.querySelector('#p-dept').value.trim();
     const email = m.querySelector('#p-email').value.trim();
+    const mobile = m.querySelector('#p-mobile').value.trim();
+    const campus = m.querySelector('#p-campus').value.trim();
     const note = m.querySelector('#p-note').value.trim();
     const isStaff = m.querySelector('#p-is-staff').checked ? 1 : 0;
     const rate = Number(m.querySelector('#p-rate').value) || 0;
     if (rejectNegative(rate, 'Rate')) return;
 
-    DB.run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', [name, type, org, dept, email, note, isStaff, rate]);
+    DB.run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate, mobile, campus) VALUES (?,?,?,?,?,?,?,?,?,?)', [name, type, org, dept, email, note, isStaff, rate, mobile, campus]);
     const newPerson = DB.row('SELECT last_insert_rowid() as id');
     const newPersonId = newPerson ? newPerson.id : null;
 
@@ -2118,6 +2217,10 @@
           ${listPickerField({ id: 'pe-dept', label: 'Department', values: deptNames(), selected: p.department || '', modalTitle: 'Department', category: 'DEPT' })}
           <div class="field"><label>Email Address</label><input type="email" class="input" id="pe-email" value="${esc(p.email || '')}" /></div>
         </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Mobile</label><input type="tel" class="input" id="pe-mobile" value="${esc(p.mobile || '')}" placeholder="Optional" /></div>
+          <div class="field"><label>Campus</label><input class="input" id="pe-campus" value="${esc(p.campus || '')}" placeholder="e.g. Main campus" /></div>
+        </div>
         <div class="field"><label>Research Focus Notes</label><input class="input" id="pe-note" value="${esc(p.note || '')}" /></div>
         <div class="field">
           <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="pe-is-staff" ${p.is_staff ? 'checked' : ''} /> Facility Staff (billable by the hour on bookings)</label>
@@ -2139,6 +2242,8 @@
     const org = m.querySelector('#pe-org').value.trim();
     const dept = m.querySelector('#pe-dept').value.trim();
     const email = m.querySelector('#pe-email').value.trim();
+    const mobile = m.querySelector('#pe-mobile').value.trim();
+    const campus = m.querySelector('#pe-campus').value.trim();
     const note = m.querySelector('#pe-note').value.trim();
     const isStaff = m.querySelector('#pe-is-staff').checked ? 1 : 0;
     const rateVal = m.querySelector('#pe-rate').value;
@@ -2153,7 +2258,7 @@
     // is on are one save — otherwise a throw partway through the refresh loop would leave some
     // meetings.attendees strings updated to the new name and others still showing the old one.
     DB.transaction(() => {
-      DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, id]);
+      DB.run('UPDATE people SET name=?, type=?, organization=?, department=?, email=?, note=?, is_staff=?, rate=?, mobile=?, campus=? WHERE id=?', [name, type, org, dept, email, note, isStaff, rate, mobile, campus, id]);
       // people.name may have just changed — meetings.attendees is a denormalized copy of it, so
       // every meeting this person is on must be recomputed from meeting_people or it goes stale.
       // Gated on an actual rename (not just called unconditionally): a person with a long booking
@@ -2183,7 +2288,7 @@
     if (!refs.total) {
       const ok = await UI.confirmModal(
         'Delete Person',
-        `"${esc(p.name)}" isn't referenced by any project, milestone or booking, so there's no history to keep. Delete permanently?`,
+        `"${esc(p.name)}" isn't referenced by any project, milestone, booking or training record, so there's no history to keep. Delete permanently?`,
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
@@ -2202,6 +2307,11 @@
         // branch is only reached when there genuinely are none) can't hold one, but the explicit
         // clear is the same belt-and-suspenders convention every delete path here follows.
         DB.run('UPDATE service_entries SET person_id=NULL WHERE person_id=?', [id]);
+        DB.run('DELETE FROM person_instrument_training WHERE person_id=?', [id]);
+        // trainer_id is a SET NULL soft link not counted by countPersonRefs (same belt-and-
+        // suspenders convention as the soft links above) — a training record where this person
+        // was the trainer, not the trainee, must not be deleted, only have the reference cleared.
+        DB.run('UPDATE person_instrument_training SET trainer_id=NULL WHERE trainer_id=?', [id]);
         DB.run('DELETE FROM people WHERE id=?', [id]);
       });
       UI.toast('Person deleted');
@@ -2217,6 +2327,7 @@
     if (refs.bookings) where.push('an attendee on ' + plural(refs.bookings, 'booking'));
     if (refs.staffed) where.push('billable staff on ' + plural(refs.staffed, 'booking'));
     if (refs.entries) where.push('performing staff on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
+    if (refs.training) where.push('trained on ' + plural(refs.training, 'instrument'));
 
     const ok = await UI.confirmModal(
       'Retire Person',
@@ -2234,6 +2345,113 @@
     if (!p) return;
     DB.setRetired('people', id, false);
     UI.toast(`${p.name} restored`);
+    refresh();
+  }
+
+  /* ---------------- Instrument Training CRUD (#47 Person Profile) ----------------
+     Same "selectable = not retired OR already selected here" rule (CLAUDE.md) applies to both
+     the Instrument and Trainer pickers below — a retired instrument/trainer already on the
+     record being edited stays in the list (so its badge still renders) but drops out for a new
+     pick. Trainer excludes the trainee themselves (id<>pid) — a person can't train themselves. */
+  function openTrainingModal(trainingId, personId) {
+    const cur = trainingId ? DB.row('SELECT * FROM person_instrument_training WHERE id=?', [trainingId]) : null;
+    const pid = cur ? cur.person_id : Number(personId);
+    const instruments = DB.rows('SELECT id, name, is_retired FROM instruments WHERE is_retired=0 OR id=? ORDER BY name', [cur ? cur.instrument_id : -1]);
+    const trainers = DB.rows('SELECT id, name, is_retired, is_staff FROM people WHERE (is_retired=0 OR id=?) AND id<>? ORDER BY is_staff DESC, name', [cur ? cur.trainer_id : -1, pid]);
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('cpu')} ${cur ? 'Edit Training Record' : 'Add Training Record'}</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><label>Instrument *</label>
+          <select class="input" id="tr-instrument">
+            <option value="">-- Select Instrument --</option>
+            ${instruments.map((i) => `<option value="${i.id}" ${cur && cur.instrument_id === i.id ? 'selected' : ''}>${esc(UI.retiredName(i.name, i.is_retired))}</option>`).join('')}
+          </select>
+        </div>
+        <div class="grid cols-2">
+          <div class="field"><label>Level</label>
+            <select class="input" id="tr-level">
+              ${C.TRAINING_LEVELS.map((lv) => `<option value="${lv}" ${(cur ? cur.level : 'User') === lv ? 'selected' : ''}>${lv}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Trained On *</label><input type="date" class="input" id="tr-trained-on" value="${cur ? esc(cur.trained_on) : UI.today()}" /></div>
+        </div>
+        <div class="field"><label>Trainer</label>
+          <select class="input" id="tr-trainer">
+            <option value="">-- None --</option>
+            ${trainers.map((t) => `<option value="${t.id}" ${cur && cur.trainer_id === t.id ? 'selected' : ''}>${esc(UI.retiredName(t.name, t.is_retired))}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Expires On</label>
+          <input type="date" class="input" id="tr-expires-on" value="${cur && cur.expires_on ? esc(cur.expires_on) : ''}" />
+          <div class="faint small mt-8">Leave blank if the training does not expire.</div>
+        </div>
+        <div class="field"><label>Note</label><input class="input" id="tr-note" value="${cur ? esc(cur.note || '') : ''}" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" data-act="training-save" data-id="${cur ? cur.id : ''}" data-person-id="${pid}">Save Training</button>
+      </div>`);
+  }
+
+  function trainingSave(id, personId) {
+    const m = UI.topModal();
+    const instrumentSel = m.querySelector('#tr-instrument');
+    const instrumentId = Number(instrumentSel.value) || 0;
+    if (!instrumentId) {
+      UI.toast('Choose an instrument', 'error');
+      instrumentSel.classList.add('is-invalid');
+      return;
+    }
+    const level = m.querySelector('#tr-level').value;
+    const trainedOnEl = m.querySelector('#tr-trained-on');
+    const trainedOn = trainedOnEl.value;
+    if (!trainedOn) {
+      UI.toast('Training date required', 'error');
+      trainedOnEl.classList.add('is-invalid');
+      return;
+    }
+    const expiresOn = m.querySelector('#tr-expires-on').value;
+    if (expiresOn && expiresOn < trainedOn) {
+      UI.toast('Expiry cannot be before the training date', 'error');
+      return;
+    }
+    const trainerId = Number(m.querySelector('#tr-trainer').value) || null;
+    const note = m.querySelector('#tr-note').value.trim();
+    const pid = Number(personId);
+
+    if (id) {
+      DB.run(
+        'UPDATE person_instrument_training SET instrument_id=?, level=?, trained_on=?, trainer_id=?, expires_on=?, note=? WHERE id=?',
+        [instrumentId, level, trainedOn, trainerId, expiresOn, note, id]
+      );
+    } else {
+      DB.run(
+        'INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)',
+        [pid, instrumentId, level, trainedOn, trainerId, expiresOn, note]
+      );
+    }
+    UI.closeDim(m.closest('.modal-dim'));
+    UI.toast('Training record saved');
+    refresh();
+  }
+
+  async function removeTraining(id) {
+    const rec = DB.row(
+      `SELECT t.id, t.level, i.name AS instrument_name FROM person_instrument_training t
+       JOIN instruments i ON i.id = t.instrument_id WHERE t.id=?`,
+      [id]
+    );
+    if (!rec) return;
+    const ok = await UI.confirmModal(
+      'Remove Training Record',
+      `Remove the ${esc(rec.level)} training record on "${esc(rec.instrument_name)}"? This cannot be undone.`,
+      { danger: true, confirmText: 'Remove' }
+    );
+    if (!ok) return;
+    DB.run('DELETE FROM person_instrument_training WHERE id=?', [id]);
+    UI.toast('Training record removed');
     refresh();
   }
 
@@ -2419,7 +2637,7 @@
     if (!refs.total) {
       const ok = await UI.confirmModal(
         'Delete Instrument',
-        `"${esc(i.name)}" isn't assigned to any project, milestone or booking, so there's no history to keep. Delete permanently?`,
+        `"${esc(i.name)}" isn't assigned to any project, milestone, booking or training record, so there's no history to keep. Delete permanently?`,
         { danger: true, confirmText: 'Delete' }
       );
       if (!ok) return;
@@ -2437,6 +2655,7 @@
         // countInstrumentRefs now counts entries too, so this branch only runs when there are none,
         // but the explicit clear is the same belt-and-suspenders convention as every other field here.
         DB.run('UPDATE service_entries SET instrument_id=NULL WHERE instrument_id=?', [id]);
+        DB.run('DELETE FROM person_instrument_training WHERE instrument_id=?', [id]);
         DB.run('DELETE FROM instruments WHERE id=?', [id]);
       });
       UI.toast('Instrument deleted');
@@ -2450,6 +2669,7 @@
     if (refs.milestones) where.push('used by ' + plural(refs.milestones, 'milestone'));
     if (refs.bookings) where.push('booked on ' + plural(refs.bookings, 'booking'));
     if (refs.entries) where.push('attributed on ' + refs.entries + ' service ' + (refs.entries === 1 ? 'entry' : 'entries'));
+    if (refs.training) where.push('on ' + plural(refs.training, 'training record'));
 
     const ok = await UI.confirmModal(
       'Retire Instrument',
@@ -3514,6 +3734,7 @@
           ${groupSelectField('bk-group', '')}
           ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bk-category', label: 'Category', placeholder: '-- Select Category --' })}
         </div>
+        ${tagsField('bk-tags', '')}
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
@@ -3593,6 +3814,7 @@
     const category = (m.querySelector('#bk-category') || {}).value || '';
     const note = readNote(m, 'bk-note');
     const actions = m.querySelector('#bk-act').value.trim();
+    const tags = UI.joinTags(UI.parseTags((m.querySelector('#bk-tags') || {}).value || ''));
 
     const ownerIds = readTokenIds(m, 'owner');
     const instIds = readTokenIds(m, 'inst');
@@ -3664,9 +3886,9 @@
     // Same BOM snapshot (rates read once, at save time) for every occurrence — deliberate:
     // identical recurring sessions are priced at today's rates, not recomputed per occurrence.
     function insertBookingRow(dateStr) {
-      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct, category_staff_pct)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct]);
+      DB.run(`INSERT INTO meetings (project_id, grant_id, title, date, start_time, end_time, attendees, link, note, actions, discount_pct, group_org, group_discount_pct, subtotal, total_before_tax, total_cost, category, tier_id, tier_overhead_pct, category_staff_pct, tags)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [projectId, grantId, title, dateStr, start, end, attendees, '', note, actions, bom.manualPct, groupOrg, bom.groupPct, bom.subtotal, bom.beforeTax, bom.total, category, bom.tierId, bom.tierOverheadPct, bom.categoryStaffPct, tags]);
       const inserted = DB.row('SELECT last_insert_rowid() as id');
       const mid = inserted ? inserted.id : null;
       if (mid) {
@@ -3684,6 +3906,7 @@
     // only way this loop can now fail is a genuine error (bad row, thrown save), and a repeating
     // booking must not create some occurrences and silently drop the rest of them.
     DB.transaction(() => { dates.forEach((d) => insertBookingRow(d)); });
+    UI.parseTags(tags).forEach((t) => DB.addVocab('BOOKING_TAG', t));
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast(dates.length > 1 ? `${dates.length} bookings created` : 'Booking saved');
@@ -3720,6 +3943,7 @@
           ${groupSelectField('bke-group', mt.group_org || '')}
           ${vocabField({ category: 'BOOKING_CATEGORY', id: 'bke-category', label: 'Category', selected: mt.category || '', placeholder: '-- Select Category --' })}
         </div>
+        ${tagsField('bke-tags', mt.tags || '')}
 
         <div class="faint small mb-8">Assign People = the researchers using this session, from the booking's group. Assign Facility Staff = core staff running or supporting it — only people with "Facility Staff" ticked on their own record appear there.</div>
         ${tokenPickerField('owner', 'Assign People', '+ Add person…')}
@@ -3792,6 +4016,7 @@
     const category = (m.querySelector('#bke-category') || {}).value || '';
     const note = readNote(m, 'bke-note');
     const actions = m.querySelector('#bke-act').value.trim();
+    const tags = UI.joinTags(UI.parseTags((m.querySelector('#bke-tags') || {}).value || ''));
 
     const ownerIds = readTokenIds(m, 'owner');
     const instIds = readTokenIds(m, 'inst');
@@ -3881,7 +4106,7 @@
     DB.transaction(() => {
       DB.run(`UPDATE meetings SET title=?, date=?, start_time=?, end_time=?, project_id=?, grant_id=?, attendees=?, note=?, actions=?,
                 discount_pct=?, group_org=?, group_discount_pct=?, subtotal=?, total_before_tax=?, total_cost=?, category=?,
-                tier_id=?, tier_overhead_pct=?, category_staff_pct=?, updated_at=datetime('now') WHERE id=?`,
+                tier_id=?, tier_overhead_pct=?, category_staff_pct=?, tags=?, updated_at=datetime('now') WHERE id=?`,
         [title, date, start, end, projectId, grantId, attendees, note, actions, bom.manualPct, groupOrg, bom.groupPct,
          pricedChanged ? bom.subtotal : stored.subtotal,
          pricedChanged ? bom.beforeTax : stored.total_before_tax,
@@ -3890,6 +4115,7 @@
          pricedChanged ? bom.tierId : stored.tier_id,
          pricedChanged ? bom.tierOverheadPct : stored.tier_overhead_pct,
          pricedChanged ? bom.categoryStaffPct : stored.category_staff_pct,
+         tags,
          id]);
 
       // Attendees (who was there, not what it cost) always rebuild from the form regardless.
@@ -3910,6 +4136,7 @@
         });
       }
     });
+    UI.parseTags(tags).forEach((t) => DB.addVocab('BOOKING_TAG', t));
 
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Booking updated');
@@ -4209,24 +4436,85 @@
     refresh();
   }
 
-  /* ---------------- Research Outputs (roadmap 3.3) ----------------
+  /* ---------------- Research Outputs (roadmap 3.3, extended by roadmap #41) ----------------
      Cloned from the Custom Key-Value Fields pattern just above — same add/edit/delete shape,
      just with a Type vocab field (vocabField, category OUTPUT_TYPE) in place of the free-text
-     key. Feeds Reports.computeFunnelRows' exit stage. */
-  function addOutput(projectId) {
+     key. Feeds Reports.computeFunnelRows' exit stage.
+
+     outputFieldsHtml renders every field the Add and Edit modals share (id prefix 'out'/'oute'),
+     including the ones OUTPUT_TYPE_FIELDS (js/consts.js) may hide for the current type — each
+     such field's wrapper carries `data-out-field="<name>"` naming exactly the string that map
+     uses, so applyOutputTypeFields can show/hide by simple membership test. Hiding is display
+     only: a hidden field keeps whatever value it holds and is still read (and saved) by
+     outputSave/outputEditSave, so flipping Type and back never drops data entered under a
+     different type. */
+  function outputFieldsHtml(prefix, item = {}) {
+    const file = item.file_id ? DB.row('SELECT * FROM files WHERE id=?', [item.file_id]) : null;
+    const fileName = (file && file.name) || item.file_name || '';
+    const fileKind = file ? file.kind : 'upload';
+    const fileLine = item.file_id ? `
+        <div class="field">
+          <label>Attachment</label>
+          <div class="row" style="gap:8px;align-items:center">
+            <span class="small faint">Attached File: ${esc(fileName)}</span>
+            ${fileKind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${item.file_id}" data-name="${esc(fileName)}">Download</button>` : ''}
+          </div>
+        </div>` : '';
+    return `
+        ${vocabField({ category: 'OUTPUT_TYPE', id: `${prefix}-type`, selected: item.type || 'publication', label: 'Type', required: true })}
+        <div class="field"><label>Title *</label><input class="input" id="${prefix}-title" value="${esc(item.title || '')}" placeholder="e.g. Volumetric mapping of pancreatic islet distribution..." /></div>
+        <div class="field" data-out-field="reference"><label id="${prefix}-reference-label">Reference</label><input class="input" id="${prefix}-reference" value="${esc(item.reference || '')}" placeholder="e.g. journal citation, DOI, grant report title" /></div>
+        <div class="field" data-out-field="doi"><label>DOI</label><input class="input" id="${prefix}-doi" value="${esc(item.doi || '')}" placeholder="e.g. 10.1000/xyz123" /></div>
+        <div class="field" data-out-field="url"><label>URL</label><input class="input" id="${prefix}-url" value="${esc(item.url || '')}" placeholder="https://..." /></div>
+        <div class="field" data-out-field="authors">
+          <label>Authors</label>
+          <textarea class="input" id="${prefix}-authors" rows="2">${esc(item.authors || '')}</textarea>
+          <div class="hint">One author per line, or separate with semicolons.</div>
+        </div>
+        <div class="field" data-out-field="acknowledges_facility">
+          <label class="row" style="gap:6px;align-items:center"><input type="checkbox" id="${prefix}-ack" ${item.acknowledges_facility ? 'checked' : ''} /> Acknowledges the Facility</label>
+        </div>
+        <div class="field"><label>Date</label><input type="date" class="input" id="${prefix}-date" value="${esc(item.date || '')}" /></div>
+        <div class="field"><label>Note</label><textarea class="input" id="${prefix}-note" rows="2">${esc(item.note || '')}</textarea></div>
+        <input type="hidden" id="${prefix}-file-id" value="${item.file_id || ''}" />
+        ${fileLine}`;
+  }
+
+  /* Shows/hides each `[data-out-field]` wrapper in `modalEl` per the current Type selection's
+     OUTPUT_TYPE_FIELDS entry (falling back to .default for a facility-added type not in the
+     map, so a new vocab term shows every field rather than silently hiding one), and relabels
+     the Reference field's <label> to that type's referenceLabel. Title/Date/Note have no
+     `data-out-field` wrapper and are therefore always visible, per the map's own contract. */
+  function applyOutputTypeFields(modalEl, prefix) {
+    if (!modalEl) return;
+    const typeSel = modalEl.querySelector(`#${prefix}-type`);
+    if (!typeSel) return;
+    const def = window.OUTPUT_TYPE_FIELDS[typeSel.value] || window.OUTPUT_TYPE_FIELDS.default;
+    modalEl.querySelectorAll('[data-out-field]').forEach((wrap) => {
+      wrap.hidden = !def.fields.includes(wrap.dataset.outField);
+    });
+    const refLabel = modalEl.querySelector(`#${prefix}-reference-label`);
+    if (refLabel) refLabel.textContent = def.referenceLabel;
+  }
+
+  // prefill: { title, fileId, fileName, type } — used when an output is logged straight from an
+  // attached file (e.g. a PDF whose /Title was sniffed) so the form opens already carrying that
+  // file's link and a sensible starting title/type instead of an empty form.
+  function addOutput(projectId, prefill = {}) {
+    const item = { type: prefill.type || 'publication', title: prefill.title || '', file_id: prefill.fileId || null, file_name: prefill.fileName || '' };
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('tag')} Add Research Output</span></div>
       <div class="body"><div class="stack">
-        ${vocabField({ category: 'OUTPUT_TYPE', id: 'out-type', selected: 'publication', label: 'Type', required: true })}
-        <div class="field"><label>Title *</label><input class="input" id="out-title" placeholder="e.g. Volumetric mapping of pancreatic islet distribution..." /></div>
-        <div class="field"><label>Reference</label><input class="input" id="out-ref" placeholder="e.g. journal citation, DOI, grant report title" /></div>
-        <div class="field"><label>Date</label><input type="date" class="input" id="out-date" /></div>
-        <div class="field"><label>Note</label><textarea class="input" id="out-note" rows="2"></textarea></div>
+        ${outputFieldsHtml('out', item)}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="output-save" data-project-id="${projectId}">Add Output</button>
-      </div>`);
+      </div>`, (m) => {
+      applyOutputTypeFields(m, 'out');
+      const typeSel = m.querySelector('#out-type');
+      if (typeSel) typeSel.addEventListener('change', () => applyOutputTypeFields(m, 'out'));
+    });
   }
 
   function outputSave() {
@@ -4234,13 +4522,22 @@
     const projectId = Number(m.querySelector('[data-act="output-save"]').dataset.projectId) || ctx.project;
     const type = m.querySelector('#out-type').value.trim();
     const title = m.querySelector('#out-title').value.trim();
-    const reference = m.querySelector('#out-ref').value.trim();
+    const reference = m.querySelector('#out-reference').value.trim();
+    const doiRaw = m.querySelector('#out-doi').value.trim();
+    const url = m.querySelector('#out-url').value.trim();
+    const authors = m.querySelector('#out-authors').value.trim();
+    const ack = m.querySelector('#out-ack').checked ? 1 : 0;
     const date = m.querySelector('#out-date').value;
     const note = m.querySelector('#out-note').value.trim();
+    const fileIdRaw = m.querySelector('#out-file-id').value.trim();
     if (!type || !title) { UI.toast('Type and title are required', 'error'); return; }
+    const doi = doiRaw ? UI.normalizeDoi(doiRaw) : '';
+    if (doiRaw && !doi) { UI.toast('Enter a valid DOI, e.g. 10.1000/xyz123', 'error'); return; }
+    if (url && !UI.isSafeUrl(url)) { UI.toast('Enter a full web address starting with http:// or https://', 'error'); return; }
+    const fileId = fileIdRaw ? Number(fileIdRaw) : null;
 
-    DB.run('INSERT INTO project_outputs (project_id, type, title, reference, date, note) VALUES (?,?,?,?,?,?)',
-      [projectId, type, title, reference, date, note]);
+    DB.run('INSERT INTO project_outputs (project_id, type, title, reference, date, note, doi, url, authors, acknowledges_facility, file_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [projectId, type, title, reference, date, note, doi, url, authors, ack, fileId]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Output added');
     refresh();
@@ -4253,29 +4550,40 @@
     UI.openModal(`
       <div class="head"><span class="modal-title">${ic('edit')} Edit Research Output</span></div>
       <div class="body"><div class="stack">
-        ${vocabField({ category: 'OUTPUT_TYPE', id: 'oute-type', selected: item.type, label: 'Type', required: true })}
-        <div class="field"><label>Title *</label><input class="input" id="oute-title" value="${esc(item.title)}" /></div>
-        <div class="field"><label>Reference</label><input class="input" id="oute-ref" value="${esc(item.reference)}" /></div>
-        <div class="field"><label>Date</label><input type="date" class="input" id="oute-date" value="${esc(item.date)}" /></div>
-        <div class="field"><label>Note</label><textarea class="input" id="oute-note" rows="2">${esc(item.note)}</textarea></div>
+        ${outputFieldsHtml('oute', item)}
       </div></div>
       <div class="foot">
         <button class="btn btn-secondary" data-act="close">Cancel</button>
         <button class="btn btn-primary" data-act="output-edit-save" data-id="${item.id}">Save Changes</button>
-      </div>`);
+      </div>`, (m) => {
+      applyOutputTypeFields(m, 'oute');
+      const typeSel = m.querySelector('#oute-type');
+      if (typeSel) typeSel.addEventListener('change', () => applyOutputTypeFields(m, 'oute'));
+    });
   }
 
   function outputEditSave(id) {
     const m = UI.topModal();
     const type = m.querySelector('#oute-type').value.trim();
     const title = m.querySelector('#oute-title').value.trim();
-    const reference = m.querySelector('#oute-ref').value.trim();
+    const reference = m.querySelector('#oute-reference').value.trim();
+    const doiRaw = m.querySelector('#oute-doi').value.trim();
+    const url = m.querySelector('#oute-url').value.trim();
+    const authors = m.querySelector('#oute-authors').value.trim();
+    const ack = m.querySelector('#oute-ack').checked ? 1 : 0;
     const date = m.querySelector('#oute-date').value;
     const note = m.querySelector('#oute-note').value.trim();
+    // The form has no control to detach a file, so the hidden input (pre-populated with the
+    // existing file_id by outputFieldsHtml) always round-trips it unchanged here.
+    const fileIdRaw = m.querySelector('#oute-file-id').value.trim();
     if (!type || !title) { UI.toast('Type and title are required', 'error'); return; }
+    const doi = doiRaw ? UI.normalizeDoi(doiRaw) : '';
+    if (doiRaw && !doi) { UI.toast('Enter a valid DOI, e.g. 10.1000/xyz123', 'error'); return; }
+    if (url && !UI.isSafeUrl(url)) { UI.toast('Enter a full web address starting with http:// or https://', 'error'); return; }
+    const fileId = fileIdRaw ? Number(fileIdRaw) : null;
 
-    DB.run('UPDATE project_outputs SET type=?, title=?, reference=?, date=?, note=? WHERE id=?',
-      [type, title, reference, date, note, id]);
+    DB.run('UPDATE project_outputs SET type=?, title=?, reference=?, date=?, note=?, doi=?, url=?, authors=?, acknowledges_facility=?, file_id=? WHERE id=?',
+      [type, title, reference, date, note, doi, url, authors, ack, fileId, id]);
     UI.closeDim(m.closest('.modal-dim'));
     UI.toast('Output updated');
     refresh();
@@ -4290,6 +4598,91 @@
     DB.run('DELETE FROM project_outputs WHERE id=?', [id]);
     UI.toast('Output deleted');
     refresh();
+  }
+
+  /* Read-only detail view: opened from the Research Outputs list (data-act="output-view"),
+     e.g. when a facility manager wants the full record — DOI link, author list, acknowledgement
+     flag, attached file — without dropping into the edit form. "Edit" hands off to editOutput. */
+  function viewOutput(id) {
+    const item = DB.row('SELECT * FROM project_outputs WHERE id=?', [id]);
+    if (!item) return;
+    const def = window.OUTPUT_TYPE_FIELDS[item.type] || window.OUTPUT_TYPE_FIELDS.default;
+    const doiHref = item.doi ? UI.doiUrl(item.doi) : '';
+    const authors = UI.splitAuthors(item.authors || '');
+    const file = item.file_id ? DB.row('SELECT * FROM files WHERE id=?', [item.file_id]) : null;
+    // Blank `date` falls back to the LOCAL calendar day it was logged, via DB.outputEffectiveDate
+    // — the same rule the Project Detail ordering and exports use (never the UTC day `created_at`
+    // would give if fed straight to UI.fmtDate, which reads it as a plain date string).
+    const dateLine = item.date ? UI.fmtDate(item.date) : (UI.fmtDate(DB.outputEffectiveDate(item)) + ' (logged)');
+
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('eye')} Research Output</span></div>
+      <div class="body"><div class="stack">
+        <div class="field"><span class="badge neutral" style="text-transform:capitalize">${esc(item.type)}</span></div>
+        <div class="field"><label>Title</label><div>${esc(item.title)}</div></div>
+        ${item.reference ? `<div class="field"><label>${esc(def.referenceLabel)}</label><div>${esc(item.reference)}</div></div>` : ''}
+        ${item.doi ? `<div class="field"><label>DOI</label><div><a class="file-link" href="${esc(doiHref)}" target="_blank" rel="noopener noreferrer">${esc(item.doi)}</a></div></div>` : ''}
+        ${item.url && UI.isSafeUrl(item.url) ? `<div class="field"><label>URL</label><div><a class="file-link" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.url)}</a></div></div>` : ''}
+        <div class="field"><label>Authors</label>${authors.length ? `<ul>${authors.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : '<div>—</div>'}</div>
+        <div class="field"><label>Date</label><div>${dateLine}</div></div>
+        ${item.note ? `<div class="field"><label>Note</label><div>${esc(item.note)}</div></div>` : ''}
+        <div class="field"><div>Facility acknowledged: ${item.acknowledges_facility ? 'Yes' : 'No'}</div></div>
+        ${file ? `<div class="field"><label>Attached File</label><div class="row" style="gap:8px;align-items:center"><span>${esc(file.name)}</span>${file.kind === 'upload' ? `<button type="button" class="btn btn-secondary btn-sm" data-act="download-file" data-id="${file.id}" data-name="${esc(file.name)}">Download</button>` : ''}${file.kind === 'link' && UI.isSafeUrl(file.path) ? `<a class="file-link" href="${esc(file.path)}" target="_blank" rel="noopener noreferrer">Open ${ic('external')}</a>` : ''}</div></div>` : ''}
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Close</button>
+        <button class="btn btn-primary" data-act="output-edit" data-id="${item.id}">Edit</button>
+      </div>`);
+  }
+
+  /* Drop-a-PDF / pick-a-PDF path onto the Research Outputs card: stores the file through the
+     exact same files/uploads path fSave uses for a plain attachment (INSERT INTO files, then
+     DB.saveUpload keyed on the same `${pid}_${Date.now()}_${name}` storageKey), so a PDF logged
+     this way is just an ordinary upload as far as download-file/deleteFile are concerned. The
+     only extra step is sniffing a starting title out of the PDF's own metadata (falling back to
+     the filename) and handing the file straight to addOutput's prefill so the Add Output form
+     opens already carrying the link — if the visitor cancels that dialog, the PDF simply stays
+     attached with no output record, per the note on this task. */
+  async function importOutputFile(projectId, file) {
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    if (!isPdf) { UI.toast('Drop a PDF file to log it as a research output.', 'error'); return; }
+    try {
+      const pid = Number(projectId) || ctx.project;
+      const name = file.name;
+      const bytes = await file.arrayBuffer();
+      const fallbackTitle = name.replace(/\.pdf$/i, '');
+      const title = UI.pdfTitleFromBytes(bytes) || fallbackTitle;
+      const storageKey = `${pid}_${Date.now()}_${name}`;
+
+      DB.run('INSERT INTO files (project_id, name, kind, path) VALUES (?,?,?,?)', [pid, name, 'upload', storageKey]);
+      const inserted = DB.row('SELECT last_insert_rowid() as id');
+      const fileId = inserted && inserted.id;
+      try {
+        await DB.saveUpload(storageKey, file);
+      } catch (saveErr) {
+        // The files row now points at a blob that was never written — remove it (and
+        // best-effort clear the storage key, in case saveUpload partially wrote it) rather than
+        // leaving a record that can never be downloaded, then report the original failure.
+        DB.run('DELETE FROM files WHERE id=?', [fileId]);
+        try { await DB.deleteUpload(storageKey); } catch (e) { console.error('deleteUpload failed', e); }
+        throw saveErr;
+      }
+
+      addOutput(pid, { title, fileId, fileName: name, type: 'publication' });
+      UI.toast('File attached — fill in the output details');
+      refresh();
+    } catch (err) {
+      handleActError(err);
+    }
+  }
+
+  // Delegated from the drop zone's own "or click to choose a file" control — the drop zone lives
+  // on whatever screen is currently rendered (Project Detail's Research Outputs card), so the
+  // hidden file input is found by data attribute rather than held onto across renders.
+  function pickOutputFile(projectId) {
+    const input = document.querySelector('[data-output-file-input]');
+    if (input) input.click();
   }
 
   /* ---------------- Files CRUD ---------------- */
@@ -4603,6 +4996,54 @@
         hintEl.textContent = `→ billing at assisted session's ${assistedPct}% (the disabled value above is ignored)`;
       }
     }
+  }
+
+  // Renames a booking category everywhere it appears (meetings.category, its category_policies
+  // row, and the BOOKING_CATEGORY vocab) via DB.renameBookingCategory — see that function's
+  // comments in db.js for the merge-vs-plain-rename distinction. consult/training/assisted
+  // session are protected (Views.settings() omits the button for them entirely), so this is
+  // never called for one, but DB.renameBookingCategory also refuses them defensively.
+  function renameCategoryFromSettings(cat) {
+    const bookings = DB.countBookingCategoryRefs(cat);
+    UI.openModal(`
+      <div class="head"><span class="modal-title">${ic('edit')} Rename Category</span></div>
+      <div class="body"><div class="stack">
+        <p class="mt-0 mb-8">This renames the category on every booking that uses it (${bookings} booking${bookings === 1 ? '' : 's'}).</p>
+        <div class="field"><label>New Name *</label><input class="input" id="cat-rename-to" value="${esc(cat)}" /></div>
+      </div></div>
+      <div class="foot">
+        <button class="btn btn-secondary" data-act="close">Cancel</button>
+        <button class="btn btn-primary" id="cat-rename-go">${ic('check')} Rename Category</button>
+      </div>`, (modalEl) => {
+      modalEl.querySelector('#cat-rename-go').onclick = () => {
+        const newName = modalEl.querySelector('#cat-rename-to').value.trim();
+        if (!newName) { UI.toast('Enter a new name', 'error'); return; }
+        if (newName === cat) { UI.toast('That’s already the current name', 'error'); return; }
+        const result = DB.renameBookingCategory(cat, newName);
+        if (!result) { UI.toast('Rename failed', 'error'); return; }
+        UI.toast(result.merged
+          ? `Category merged into "${newName}" on ${result.bookings} booking${result.bookings === 1 ? '' : 's'}`
+          : `Category renamed on ${result.bookings} booking${result.bookings === 1 ? '' : 's'}`);
+        UI.closeDim(modalEl.closest('.modal-dim'));
+        refresh();
+      };
+    });
+  }
+
+  // Removes a booking category from the category list — only offered once no booking uses it
+  // (DB.countBookingCategoryRefs === 0); otherwise the admin is pointed at rename instead, since
+  // a category still in use can't just vanish out from under its bookings.
+  async function removeCategoryFromSettings(cat) {
+    const refs = DB.countBookingCategoryRefs(cat);
+    if (refs > 0) {
+      UI.toast(`This category is still used by ${refs} booking${refs === 1 ? '' : 's'} — rename it instead.`, 'error');
+      return;
+    }
+    const ok = await UI.confirmModal('Remove Category', `Remove "${cat}" from the category list?`, { danger: true, confirmText: 'Remove' });
+    if (!ok) return;
+    DB.removeBookingCategory(cat);
+    UI.toast(`Category "${cat}" removed`);
+    refresh();
   }
 
   // Rename/merge a lab name everywhere it appears (people.organization, meetings.group_org, and

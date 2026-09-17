@@ -636,6 +636,28 @@
     return ymd(d);
   }
 
+  // A `datetime('now')`-written timestamp ('YYYY-MM-DD HH:MM:SS', UTC, no offset) -> its LOCAL
+  // calendar day. `new Date(...)` needs an ISO string to parse as UTC, hence the 'T'/'Z' splice;
+  // parsing the raw string would instead be read as local time by most engines, silently double-
+  // converting. The single shared rule behind DB.outputEffectiveDate below and Reports' own
+  // created_at fallbacks — see CLAUDE.md's "Dates are local calendar days, never UTC instants".
+  function utcTimestampToLocalDay(ts) {
+    if (!ts) return '';
+    const dt = new Date(String(ts).replace(' ', 'T') + 'Z');
+    if (isNaN(dt.getTime())) return String(ts).slice(0, 10); // not a parseable timestamp — fall back rather than throw
+    return ymd(dt);
+  }
+
+  // The "effective date" of a research output row ({date, created_at}): its own `date` when set
+  // (already a local calendar day, stored verbatim), else the LOCAL calendar day it was logged.
+  // `project_outputs.date` is optional and every screen/export that orders or displays research
+  // outputs by date must agree on this fallback, or one will file an undated output a day early
+  // at a UTC+ offset relative to the others. See CLAUDE.md's "Dates are local calendar days".
+  function outputEffectiveDate(row) {
+    const d = row && row.date;
+    return (d && String(d).trim() !== '') ? String(d).trim() : utcTimestampToLocalDay(row && row.created_at);
+  }
+
   /* ---------------- Booking time maths ----------------
      Shared by the booking cost calculator (app.js) and the Reports screen (reports.js) so both
      count hours the same way. Times are stored as plain 'HH:MM' strings on the same calendar day,
@@ -656,6 +678,22 @@
   // rounds UP to the next whole hour. So 10 minutes bills as 1 hour and 65 minutes as 2 hours.
   function billableStaffHours(rawHours) {
     return rawHours > 0 ? Math.max(1, Math.ceil(rawHours)) : 0;
+  }
+
+  /* ---------------- Tag string split/join ----------------
+     One copy so callers never drift: a comma-joined tag string turns into a clean array of
+     trimmed, non-empty, exact-match-deduped (first occurrence wins, case preserved) entries, and
+     back into a single comma-space-joined string for display/storage. */
+  function parseTags(str) {
+    const seen = new Set();
+    const out = [];
+    String(str || '').split(',').map((s) => s.trim()).filter(Boolean).forEach((t) => {
+      if (!seen.has(t)) { seen.add(t); out.push(t); }
+    });
+    return out;
+  }
+  function joinTags(arr) {
+    return parseTags((arr || []).join(',')).join(', ');
   }
 
   /* ---------------- Booking cost math (bill of materials) ----------------
@@ -797,6 +835,134 @@
   }
   function isSafeUrl(u) { return /^https?:\/\//i.test(String(u || '').trim()); }
 
+  /* ---------------- Output-record helpers: PDF /Title sniff, DOI, author list -----------------
+     Pure text/byte helpers for the Outputs feature — no DOM, so they run identically in the app
+     and under Node's test harness (see test/unit/output-helpers.test.js). */
+
+  /* A PDF's /Title (when present) is a far better default record title than its filename, and
+     reading it needs no PDF-parsing library: the string appears literally in the file's own
+     bytes, inside an object dictionary like "/Title (Some Paper)" or, for non-ASCII titles, a hex
+     string like "/Title <FEFF0053...>". So this decodes the whole file as latin1 (one byte one
+     char — exactly what a PDF's object structure is written in, even though the PAGE CONTENT
+     inside it may use other encodings we never touch) and regexes for the last /Title entry,
+     rather than pulling in a bundled parser for one string. String.fromCharCode.apply chokes on
+     very large arrays, so the decode runs in <=8192-byte slices.
+     "Last" because incremental-save PDFs (edited after creation) append a new trailer with an
+     updated /Info dictionary rather than rewriting the old one in place — later in the byte
+     stream is later in edit history, i.e. current. */
+  function pdfTitleFromBytes(bytes) {
+    let u8;
+    if (bytes instanceof Uint8Array) u8 = bytes;
+    else if (bytes instanceof ArrayBuffer) u8 = new Uint8Array(bytes);
+    else return '';
+
+    const CHUNK = 8192;
+    let text = '';
+    for (let i = 0; i < u8.length; i += CHUNK) {
+      text += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+    }
+
+    // A PDF literal string runs to its matching ')': unescaped parentheses inside it are legal
+    // as long as they balance ("(Results (A/B) study)"), and a backslash escapes the next byte,
+    // newline included. A regex stopping at the first ')' truncated such titles, so the literal
+    // form is scanned with a depth counter instead; the raw text keeps its escapes for the
+    // unescape loop below.
+    function scanLiteral(from) {
+      let depth = 1;
+      for (let i = from; i < text.length; i++) {
+        const c = text[i];
+        if (c === '\\') { i++; continue; }
+        if (c === '(') depth++;
+        else if (c === ')' && --depth === 0) return text.slice(from, i);
+      }
+      return null; // unterminated — not a usable title
+    }
+    const openRe = /\/Title\s*\(/g;
+    const hexRe = /\/Title\s*<([0-9A-Fa-f\s]*)>/g;
+    let last = null; // { index, kind, raw }
+    let m;
+    while ((m = openRe.exec(text))) {
+      const raw = scanLiteral(m.index + m[0].length);
+      if (raw !== null && (!last || m.index > last.index)) last = { index: m.index, kind: 'literal', raw };
+    }
+    while ((m = hexRe.exec(text))) {
+      if (!last || m.index > last.index) last = { index: m.index, kind: 'hex', raw: m[1] };
+    }
+    if (!last) return '';
+
+    // A UTF-16BE title (BOM 0xFE 0xFF, one char per byte at this point) decodes pairs of latin1
+    // "bytes" back into real UTF-16 code units; anything else is already the literal text.
+    function decodeUtf16BEIfBom(s) {
+      if (s.length < 2 || s.charCodeAt(0) !== 0xFE || s.charCodeAt(1) !== 0xFF) return s;
+      let out = '';
+      for (let i = 2; i + 1 < s.length; i += 2) {
+        out += String.fromCharCode((s.charCodeAt(i) << 8) | s.charCodeAt(i + 1));
+      }
+      return out;
+    }
+
+    let decoded;
+    if (last.kind === 'hex') {
+      const clean = last.raw.replace(/\s+/g, '');
+      let bytes8 = '';
+      for (let i = 0; i < clean.length; i += 2) {
+        bytes8 += String.fromCharCode(parseInt(clean.substr(i, 2).padEnd(2, '0'), 16));
+      }
+      decoded = decodeUtf16BEIfBom(bytes8);
+    } else {
+      // Literal-string escapes per the PDF spec: \( \) \\ \n \r \t, and a 3-digit octal \ddd.
+      // Anything else after a backslash (a line-continuation \<newline>, or a stray backslash) is
+      // dropped along with the backslash — that's the spec's own rule, not a shortcut here.
+      let out = '';
+      for (let i = 0; i < last.raw.length; i++) {
+        const c = last.raw[i];
+        if (c !== '\\') { out += c; continue; }
+        const n = last.raw[i + 1];
+        if (n === '(' || n === ')' || n === '\\') { out += n; i++; }
+        else if (n === 'n') { out += '\n'; i++; }
+        else if (n === 'r') { out += '\r'; i++; }
+        else if (n === 't') { out += '\t'; i++; }
+        else if (/[0-7]/.test(n || '') && /[0-7]/.test(last.raw[i + 2] || '') && /[0-7]/.test(last.raw[i + 3] || '')) {
+          out += String.fromCharCode(parseInt(last.raw.substr(i + 1, 3), 8) & 0xFF);
+          i += 3;
+        } else {
+          i++; // drop the backslash and whatever followed it
+        }
+      }
+      decoded = decodeUtf16BEIfBom(out);
+    }
+
+    decoded = decoded.trim();
+    if (!decoded || /^untitled$/i.test(decoded)) return '';
+    return decoded;
+  }
+
+  /* A DOI is entered in a dozen equivalent shapes (bare, "doi:"-prefixed, a resolver URL); this
+     normalizes to the bare "10.xxxx/yyyy" form the app stores and compares, and rejects anything
+     that isn't shaped like a DOI at all rather than storing garbage that LOOKS like it was
+     accepted. doiUrl() is the one place that re-adds the resolver prefix for a clickable link, so
+     the stored value and the link both derive from this single parse. */
+  function normalizeDoi(s) {
+    let v = String(s == null ? '' : s).trim();
+    const prefixes = [/^doi:\s*/i, /^https:\/\/dx\.doi\.org\//i, /^https:\/\/doi\.org\//i, /^http:\/\/doi\.org\//i];
+    // Strip ONE leading prefix (a resolver URL or a 'doi:' label), not a chain of them.
+    for (const re of prefixes) {
+      if (re.test(v)) { v = v.replace(re, '').trim(); break; }
+    }
+    return /^10\.\d{4,9}\/\S+$/.test(v) ? v : '';
+  }
+  function doiUrl(s) {
+    const d = normalizeDoi(s);
+    return d ? 'https://doi.org/' + encodeURI(d) : '';
+  }
+
+  /* Author lists split on ';' or a newline, never a comma — "Smith, J." is one author, and a
+     comma-separated "Smith, J., Doe, A." would be indistinguishable from a single "Last, First"
+     name if split there. */
+  function splitAuthors(s) {
+    return String(s == null ? '' : s).split(/;|\n/).map((a) => a.trim()).filter(Boolean);
+  }
+
   /* ---------------- Display formatters for values that are ALSO data ----------------
      Three of these, and they all exist for the same reason: several columns store a raw value
      that the app must keep byte-for-byte (it is compared with === , written back to the
@@ -920,11 +1086,19 @@
     ymd,
     today,
     todayPlusDays,
+    utcTimestampToLocalDay,
+    outputEffectiveDate,
     timeToMinutes,
     hoursBetween,
     billableStaffHours,
+    parseTags,
+    joinTags,
     retiredName,
     isSafeUrl,
+    pdfTitleFromBytes,
+    normalizeDoi,
+    doiUrl,
+    splitAuthors,
     fmtMoney,
     DATE_LOCALE,
     round2,

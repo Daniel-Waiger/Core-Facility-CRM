@@ -427,6 +427,10 @@ body {
 
 /* ---------- Forms ---------- */
 .field { display: flex; flex-direction: column; gap: 5px; }
+/* The `display: flex` above overrides the UA default `[hidden] { display: none }` — without
+   this rule, a `.field` element carrying the `hidden` attribute (e.g. outputFieldsHtml's
+   `[data-out-field]` wrappers, toggled by applyOutputTypeFields in js/app.js) still renders. */
+.field[hidden] { display: none; }
 .field label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .field .hint { font-size: 11px; color: var(--text-faint); }
 /* vocabField's (and any other field's) "label + Add New button" header shares this row so
@@ -687,6 +691,37 @@ textarea.input { resize: vertical; min-height: 74px; }
 .file-link svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--primary); }
 .file-link-static { color: var(--text); cursor: default; }
 .file-link-static svg { color: var(--text-muted); }
+
+/* ---------- Output Rows, Badge-as-Button, Links Strip, Drop Hint ---------- */
+.output-row {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 0;
+  border-bottom: 1px dashed var(--border); flex-wrap: wrap;
+}
+.output-main {
+  background: none; border: 0; padding: 6px 8px; margin: 0 -8px;
+  text-align: left; color: inherit; font: inherit; flex: 1 1 240px;
+  min-width: 0; border-radius: 8px; cursor: pointer;
+}
+.output-main:hover, .output-main:focus-visible {
+  background: var(--surface-2); outline: 1px solid var(--primary);
+}
+/* Sibling of .output-main (not nested inside it — a button can't contain a role="button"
+   span), placed first in the flex row so it still reads on the same line as the title. */
+.output-row > .output-type { flex: 0 0 auto; margin-top: 6px; cursor: pointer; }
+.output-row > .output-type:hover { border-color: var(--border-strong); }
+.output-links { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.drop-hint {
+  margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--border);
+  border-radius: 8px; color: var(--text-muted); font-size: 12.5px;
+  display: flex; gap: 8px; align-items: center;
+}
+.drop-hint svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.card.output-drop.is-dragover {
+  outline: 2px dashed var(--primary); outline-offset: 2px; background: var(--primary-soft);
+}
+.card.output-drop.is-dragover .drop-hint { border-color: var(--primary); color: var(--primary); }
+.visually-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+
 .milestone-quick-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .milestone-quick-row:last-child { border-bottom: none; }
 /* The status pill, the date and any button keep their own width; the name/project block takes the

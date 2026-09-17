@@ -75,7 +75,11 @@
     // Research outputs (roadmap 3.3) — no denormalized columns, same as kv above.
     // eff_date is exported as the row's Date: the same effective date the ordering (and any
     // date-range reasoning) uses, so an undated output can't sort as recent while displaying '—'.
-    const outputs = DB.rows(`SELECT *, ${DB.outputEffDate()} AS eff_date FROM project_outputs WHERE project_id=? ORDER BY ${DB.outputEffDate()} DESC, id DESC`, [id]);
+    // Computed in JS via DB.outputEffectiveDate (LOCAL calendar day fallback), never SQL
+    // date(created_at), which is the UTC day — see that helper's comment.
+    const outputs = DB.rows(`SELECT po.*, f.name AS file_name FROM project_outputs po LEFT JOIN files f ON f.id = po.file_id WHERE po.project_id=?`, [id])
+      .map((o) => Object.assign(o, { eff_date: DB.outputEffectiveDate(o) }))
+      .sort((a, b) => (a.eff_date !== b.eff_date ? (a.eff_date < b.eff_date ? 1 : -1) : b.id - a.id));
     const prog = DB.projectProgress(id);
 
     return { p, ppl, inst, ms, kv, mtgs, entries, files, outputs, prog };
@@ -534,16 +538,16 @@
     // DB.buildTierLabelMap) — a per-project export is usually small, but there's no reason to pay
     // even that per row when the same one-time query answers every row.
     const tierMap = DB.buildTierLabelMap();
-    const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
+    const mtRows = [['Meeting Title', 'Grant', 'Tier', 'Category', 'Tags', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Notes', 'Action Items', 'Subtotal', 'Before Tax', 'Total Cost']];
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
       const counts = !(m.is_cancelled && !m.billing_retained);
-      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
+      mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', m.tags || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
 
     // Sheet 5b: Service Entries (roadmap 2.3) — standalone billable work outside any booking.
@@ -575,12 +579,12 @@
     // Sheet 7: Research Outputs (roadmap 3.3) — the funnel's exit stage. The Date column is the
     // EFFECTIVE date (explicit date, else the record-creation day) — the same value the ordering
     // uses — with a * marking the fallback so a backfilled row is distinguishable.
-    const outRows = [['Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
+    const outRows = [['Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note']];
     d.outputs.forEach((o) => {
-      outRows.push([o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
+      outRows.push([o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
     const ws7 = XLSX.utils.aoa_to_sheet(outRows);
-    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 40 }, { wch: 30 }, { wch: 40 }];
+    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 40 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, ws7, 'Research Outputs');
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -668,6 +672,7 @@
         children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
         if (m.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(m)}`, italics: true }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
+        if (m.tags) children.push(new Paragraph({ text: 'Tags: ' + m.tags, italics: true }));
         if (m.note) htmlToDocxParagraphs(m.note, docx).forEach((p) => children.push(p));
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
         if (m.total_cost) {
@@ -705,6 +710,11 @@
               : (o.eff_date ? `(${UI.fmtDate(o.eff_date)}, logged) ` : '') }),
             new TextRun({ text: o.reference ? `${o.reference} ` : '', italics: true }),
             new TextRun({ text: o.note ? `— ${o.note}` : '' }),
+            new TextRun({ text: o.authors ? `  Authors: ${o.authors}` : '', italics: true, break: 1 }),
+            new TextRun({ text: o.doi ? `  DOI: ${o.doi}` : '', italics: true }),
+            new TextRun({ text: o.url ? `  URL: ${o.url}` : '', italics: true }),
+            new TextRun({ text: `  Acknowledges facility: ${o.acknowledges_facility ? 'Yes' : 'No'}`, italics: true }),
+            new TextRun({ text: o.file_name ? `  File: ${o.file_name}` : '', italics: true }),
           ]
         }));
       });
@@ -911,6 +921,14 @@
           pdf.setFontSize(9);
           y += 4;
         }
+        if (m.tags) {
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 116, 139);
+          pdfText(pdf, `Tags: ${m.tags}`, margin + 4, y);
+          pdf.setTextColor(20, 20, 20);
+          pdf.setFontSize(9);
+          y += 4;
+        }
         if (m.note) {
           htmlToPdf(pdf, m.note, margin + 4, 210 - margin * 2 - 4, {
             get y() { return y; }, set y(v) { y = v; }, checkPage
@@ -998,6 +1016,24 @@
           pdf.setFontSize(9);
           y += 5;
         }
+        const obits = [];
+        if (o.authors) obits.push(`Authors: ${o.authors}`);
+        if (o.doi) obits.push(`DOI: ${o.doi}`);
+        if (o.url) obits.push(`URL: ${o.url}`);
+        obits.push(`Acknowledges facility: ${o.acknowledges_facility ? 'Yes' : 'No'}`);
+        if (o.file_name) obits.push(`File: ${o.file_name}`);
+        // A long author list, DOI/URL or filename must wrap inside the A4 text width (the same
+        // pdfSplitTextToSize the Project Notes block uses), one page check per resulting line.
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        for (const line of pdfSplitTextToSize(pdf, obits.join('   |   '), 210 - (margin * 2) - 4)) {
+          checkPage(5);
+          pdfText(pdf, line, margin + 4, y);
+          y += 4;
+        }
+        pdf.setTextColor(20, 20, 20);
+        pdf.setFontSize(9);
+        y += 1;
       });
     }
 
@@ -1104,7 +1140,7 @@
     XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
-    const mtRows = [['Project Code', 'Project', 'Meeting', 'Grant', 'Category', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
+    const mtRows = [['Project Code', 'Project', 'Meeting', 'Grant', 'Category', 'Tags', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
     DB.rows(`
       SELECT mt.*, p.code as project_code, p.title as project_title,
              g.name as grant_name, g.number as grant_number, g.is_retired as grant_is_retired
@@ -1112,12 +1148,12 @@
       LEFT JOIN projects p ON p.id = mt.project_id
       LEFT JOIN grants g ON g.id = mt.grant_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
-      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), m.category || '—',
+      mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), m.category || '—', m.tags || '—',
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
-    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
+    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings'); // !cols is intentionally shorter than the header row — SheetJS just applies its default width past the end
 
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
@@ -1146,7 +1182,7 @@
     // 164.12 → 0, tax blank); naming it "Charged Total" instead — no different value, no
     // Subtotal/Before Tax change — makes plain that this column, unlike the two before it, answers
     // "what got billed", so a 0 next to an untouched Subtotal is expected, not an arithmetic gap.
-    const bcRows = [['Project Code', 'Project', 'Booking', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Charged Total']];
+    const bcRows = [['Project Code', 'Project', 'Booking', 'Tags', 'Grant', 'Tier', 'Status', 'Date', 'Start', 'End', 'Instruments', 'Facility Staff', 'Subtotal', 'Group Disc %', 'Manual Disc %', 'Overhead %', 'Before Tax', 'Effective Tax %', 'Charged Total']];
     // One tier-name lookup for the whole sheet (see DB.buildTierLabelMap) instead of a SELECT per
     // booking row — this sheet is every booking the facility has ever logged, so at scale that was
     // the single largest source of repeated queries in this export.
@@ -1167,7 +1203,7 @@
       const overheadPct = m.tier_overhead_pct == null ? '' : round2(m.tier_overhead_pct);
       const effectiveTaxPct = (counts && beforeTax > 0) ? round2((((m.total_cost || 0) / beforeTax) - 1) * 100) : '';
       bcRows.push([
-        m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, bcTierMap),
+        m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.tags || '—', grantLabelFor(m), DB.tierLabel(m.tier_id, bcTierMap),
         m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
@@ -1175,7 +1211,7 @@
       ]);
     });
     const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
+    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
 
     // Sheet 7: Service Entries (roadmap 2.3) — standalone billable work outside any booking,
@@ -1211,16 +1247,21 @@
     // Project" leading columns as the Meetings/Service Entries sheets above.
     // Date column = the effective date the ordering uses (explicit date, else creation day),
     // * marking the fallback — same convention as the per-project outputs sheet.
-    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Reference', 'Date (* = logged date, none set)', 'Note']];
+    const outRows = [['Project Code', 'Project', 'Type', 'Title', 'Authors', 'Reference', 'DOI', 'URL', 'Acknowledges Facility', 'Attached File', 'Date (* = logged date, none set)', 'Note']];
+    // Effective date + ordering computed in JS via DB.outputEffectiveDate (LOCAL calendar day
+    // fallback), never SQL date(created_at), which is the UTC day — see that helper.
     DB.rows(`
-      SELECT po.*, p.code as project_code, p.title as project_title, ${DB.outputEffDate('po')} AS eff_date
+      SELECT po.*, p.code as project_code, p.title as project_title, f.name AS file_name
       FROM project_outputs po
       JOIN projects p ON p.id = po.project_id
-      ORDER BY ${DB.outputEffDate('po')} DESC, po.id DESC`).forEach((o) => {
-      outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.reference || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
-    });
+      LEFT JOIN files f ON f.id = po.file_id`)
+      .map((o) => Object.assign(o, { eff_date: DB.outputEffectiveDate(o) }))
+      .sort((a, b) => (a.eff_date !== b.eff_date ? (a.eff_date < b.eff_date ? 1 : -1) : b.id - a.id))
+      .forEach((o) => {
+        outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
+      });
     const wsOut = XLSX.utils.aoa_to_sheet(outRows);
-    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 30 }, { wch: 30 }, { wch: 40 }];
+    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }];
     XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
 
     // Final sheet: Notes — mirrors the Reports & Utilization export's own Notes sheet (a plain,
@@ -1285,6 +1326,7 @@
     const svc = Reports.computeServiceEntryRows(from, to, facts);
     const breadth = Reports.computeBreadthRows(from, to, facts);
     const mix = Reports.computeActivityMixRows(from, to, facts);
+    const tagRows = Reports.computeBookingTagRows(from, to, facts);
     const funnel = Reports.computeFunnelRows(from, to, facts);
     const labConsultsOn = Reports.getLabConsultsEnabled(); // mirror the on-screen opt-in toggle exactly
 
@@ -1312,13 +1354,16 @@
       ['Instrument hours need no split (two instruments running in parallel were each genuinely occupied for the full time). A staff member’s time on a multi-instrument booking is ambiguous, so Sessions is an unsplit count of bookings (answers "which instruments do I spend my time on"), while Attributed Hours divides that booking’s staff hours evenly across every instrument on it, so the column sums back to the person’s true raw-hours total. A booking with no instrument line at all (a pure consult/sync) still has real staff hours, so those are grouped under a "No Instrument" row rather than dropped from this sheet.'],
       [''],
       ['Instrument stewardship scorecard'],
-      ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. Omitted on purpose (need data this app does not track yet): trained-user pool trend and downtime share.'],
+      ['Grouped by supervising staff (Instruments -> supervisor mapping); an instrument with more than one supervisor is repeated under each of them — a grouping for review, not a partition of ownership, and never summed into a per-person score. "New Users" counts people whose first-ever non-cancelled booking on that instrument (checked across its whole history, not just the exported range) falls inside the exported dates. "Trained Users" counts people holding a training record on that instrument that is valid on the last day of the exported range (no expiry, or an expiry on or after that day; today when the range has no end) — a headcount as of that date, not a trend. Omitted on purpose (needs downtime records this app does not track yet): downtime share.'],
       [''],
       ['Breadth'],
       ['Distinct labs/people and new-lab counts exclude cancelled bookings entirely; a booking with no lab/group on file is omitted from lab counts. "New Labs" counts labs whose first-ever non-cancelled booking (checked across the facility’s whole history, not just the exported range) falls inside the exported dates.'],
       [''],
       ['Activity Mix'],
       ['Hours booked per meetings.category per month, excluding cancelled bookings; a booking with no category on file is grouped under "(uncategorized)". Categories are read from the data, not a fixed list. Standalone service entries are not included — they are logged in units/quantity, not hours.'],
+      [''],
+      ['Booking Tags'],
+      ['Bookings and booked hours per tag, excluding cancelled bookings. A booking carrying several tags is counted once under each of them, so the Bookings column can exceed the number of distinct bookings in the range.'],
       [''],
       ['Per-Lab Consults'],
       [labConsultsOn
@@ -1385,15 +1430,15 @@
     // supervisor count). Fed from the exact same Reports.computeStewardshipRows the screen
     // renders from. A shared instrument repeats under every supervisor it's linked to — see the
     // Notes sheet for why that's intentional.
-    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Line Charges', 'Distinct Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
+    const stewardRows = [['Supervisor', 'Instrument', 'Bookings', 'Hours', 'Line Charges', 'Distinct Users', 'Trained Users', 'New Users', 'Projects Served', 'Facility-Wide Sessions', 'Consults']];
     stewardship.groups.forEach((g) => {
       const supLabel = g.supervisor ? UI.retiredName(g.supervisor.name, g.supervisor.retired) : 'Unassigned';
       g.rows.forEach((r) => {
-        stewardRows.push([supLabel, UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), r.distinctUsers, r.newUsers, r.projectsServed, r.facilityWideSessions, r.consultCount]);
+        stewardRows.push([supLabel, UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), r.distinctUsers, r.trainedUsers, r.newUsers, r.projectsServed, r.facilityWideSessions, r.consultCount]);
       });
     });
     const wsSteward = XLSX.utils.aoa_to_sheet(stewardRows);
-    wsSteward['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }];
+    wsSteward['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsSteward, 'Stewardship');
 
     // Sheet 7: Consults — bookings tagged Category = "consult", counted per instrument and per
@@ -1443,6 +1488,14 @@
     wsMix['!cols'] = [{ wch: 10 }, ...mix.categories.map(() => ({ wch: 16 }))];
     XLSX.utils.book_append_sheet(wb, wsMix, 'Activity Mix');
 
+    // Sheet 10b: Booking Tags — fed from the exact same Reports.computeBookingTagRows the
+    // Booking Tags card renders from; see the Notes-sheet entry above for the counting rule.
+    const tagSheetRows = [['Tag', 'Bookings', 'Booked Hours']];
+    tagRows.rows.forEach((r) => tagSheetRows.push([r.tag, r.bookings, round2(r.hours)]));
+    const wsTags = XLSX.utils.aoa_to_sheet(tagSheetRows);
+    wsTags['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsTags, 'Booking Tags');
+
     // Sheet 11 (opt-in only): Per-Lab Consults — mirrors the Breadth card's opt-in checkbox exactly;
     // the sheet is omitted entirely when the toggle is off, same as the on-screen table.
     if (labConsultsOn) {
@@ -1472,6 +1525,124 @@
   // Two-decimal rounding for exported hour/money figures — avoids floating-point noise (e.g.
   // 1.9999999999998) showing up in a spreadsheet cell.
   function round2(n) { return Math.round((n || 0) * 100) / 100; }
+
+  /* Activity certificate (#47): a single person's training + booking + project history as one
+     workbook — the thing a lab head or auditor asks for as proof of what someone is cleared for
+     and what they actually did. `asOf` (the last day of the exported range, or today when the
+     range has no end) is the one reference date passed to DB.trainingStatusOn for every training
+     row, matching the same "as of a date, not a live trend" rule the Stewardship sheet's
+     Trained Users column above now documents — never toISOString().slice, per CLAUDE.md. */
+  function exportActivityCertificate(personId, from, to) {
+    const p = DB.row('SELECT * FROM people WHERE id=?', [Number(personId)]);
+    if (!p) { UI.toast('Person not found', 'error'); return; }
+    const XLSX = global.XLSX;
+    if (!XLSX) { UI.toast('XLSX library not loaded', 'error'); return; }
+
+    const asOf = to || UI.today();
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Details
+    const details = [
+      ['ACTIVITY CERTIFICATE', ''],
+      ['Full Name', p.name],
+      ['Position / Role', p.type],
+      ['Lab / Group / Company', p.organization || '—'],
+      ['Department', p.department || '—'],
+      ['Campus', p.campus || '—'],
+      ['Email', p.email || '—'],
+      ['Mobile', p.mobile || '—'],
+      ['Facility Staff', p.is_staff ? 'Yes' : 'No'],
+      ['Record Status', p.is_retired ? 'Retired' : 'Active'],
+      ['Range From', from || 'Earliest'],
+      ['Range To', to || 'Latest'],
+      ['Exported', new Date().toLocaleString()],
+    ];
+    const wsDetails = XLSX.utils.aoa_to_sheet(details);
+    wsDetails['!cols'] = [{ wch: 22 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsDetails, 'Details');
+
+    // Sheet 2: Training — every sign-off this person holds, evaluated as of `asOf` (never "now"
+    // live, so a certificate exported for a past range reads the same way years later).
+    const training = DB.listPersonTraining(p.id);
+    const trainingRows = [['Instrument', 'Level', 'Trained On', 'Trainer', 'Expires On', 'Status', 'Note']];
+    training.forEach((t) => {
+      trainingRows.push([
+        UI.retiredName(t.instrument_name || '—', t.instrument_retired),
+        t.level,
+        t.trained_on || '—',
+        t.trainer_name ? UI.retiredName(t.trainer_name, t.trainer_retired) : '—',
+        t.expires_on || 'No expiry',
+        (() => {
+          const status = DB.trainingStatusOn(t, asOf);
+          return status === 'valid' ? 'Valid' : status === 'pending' ? 'Not Yet Valid' : 'Expired';
+        })(),
+        t.note || ''
+      ]);
+    });
+    const wsTraining = XLSX.utils.aoa_to_sheet(trainingRows);
+    wsTraining['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 10 }, { wch: 30 }];
+    XLSX.utils.book_append_sheet(wb, wsTraining, 'Training');
+
+    // Sheet 3: Bookings — every meeting this person attended (meeting_people) or ran as facility
+    // staff (meeting_staff); a person in both roles on one booking still gets one row. Real joins,
+    // never the denormalized meetings.attendees display string — CLAUDE.md), within the range.
+    const fromVal = from || '', toVal = to || '';
+    const bookings = DB.rows(
+      `SELECT m.date, m.start_time, m.end_time, m.title, m.category, m.tags, m.is_cancelled, m.billing_retained,
+              pr.title AS project_title,
+              (SELECT GROUP_CONCAT(i.name || CASE WHEN i.is_retired THEN ' (Retired)' ELSE '' END, ', ')
+                 FROM meeting_instruments mi JOIN instruments i ON i.id = mi.instrument_id
+                 WHERE mi.meeting_id = m.id) AS instruments
+       FROM meetings m
+       LEFT JOIN projects pr ON pr.id = m.project_id
+       WHERE (EXISTS (SELECT 1 FROM meeting_people mp WHERE mp.meeting_id = m.id AND mp.person_id = ?)
+           OR EXISTS (SELECT 1 FROM meeting_staff ms WHERE ms.meeting_id = m.id AND ms.person_id = ?))
+         AND (? = '' OR m.date >= ?) AND (? = '' OR m.date <= ?)
+       ORDER BY m.date, m.start_time`,
+      [p.id, p.id, fromVal, fromVal, toVal, toVal]
+    );
+    const bookingRows = [['Date', 'Start', 'End', 'Title', 'Project', 'Instruments', 'Category', 'Tags', 'Status']];
+    bookings.forEach((b) => {
+      bookingRows.push([
+        b.date, b.start_time, b.end_time, b.title,
+        b.project_title || 'Facility-wide',
+        b.instruments || '—',
+        b.category || '—',
+        b.tags || '—',
+        b.is_cancelled ? (b.billing_retained ? 'Cancelled (charge retained)' : 'Cancelled') : 'Held'
+      ]);
+    });
+    const wsBookings = XLSX.utils.aoa_to_sheet(bookingRows);
+    wsBookings['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, wsBookings, 'Bookings');
+
+    // Sheet 4: Projects — same PI-or-team query as Views.personDetail, so this sheet can never
+    // disagree with what the person's own detail screen shows.
+    const projects = DB.rows(
+      `SELECT p.id, p.code, p.title, p.status, p.is_archived,
+              CASE WHEN p.pi_id=? THEN 'PI' ELSE COALESCE(pp.role,'') END AS role
+       FROM projects p
+       LEFT JOIN project_people pp ON pp.project_id=p.id AND pp.person_id=?
+       WHERE p.pi_id=? OR pp.person_id IS NOT NULL
+       ORDER BY p.is_archived, p.title`,
+      [p.id, p.id, p.id]
+    );
+    const projectRows = [['Code', 'Title', 'Role', 'Status', 'Archived']];
+    projects.forEach((r) => {
+      projectRows.push([r.code, r.title, r.role || '—', r.status, r.is_archived ? 'Yes' : 'No']);
+    });
+    const wsProjects = XLSX.utils.aoa_to_sheet(projectRows);
+    wsProjects['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsProjects, 'Projects');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    blobDownload(
+      new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      `Activity-Certificate-${p.name.replace(/[^A-Za-z0-9]+/g, '_')}-${from || 'earliest'}_to_${to || 'latest'}.xlsx`
+    );
+    UI.toast('Exported activity certificate to XLSX');
+  }
 
   /* Custom report generator (roadmap 3.6). spec = { entity, columns: ['key',...], from, to } —
      built by app.js from the Custom Report modal's current selection; from/to are always the
@@ -1540,6 +1711,7 @@
 
   global.Exports = {
     exportXlsx, exportDocx, exportPdf, exportAllXlsx, buildAllXlsxBlob, exportReportsXlsx, exportCustomXlsx,
+    exportActivityCertificate,
     // Exposed for test/unit/exports.test.js only (the RTL bidi helper and the lazy font loader) —
     // no other file in the app reads these directly.
     _pdfBidiReverse: pdfBidiReverse, _preparePdfFont: preparePdfFont,

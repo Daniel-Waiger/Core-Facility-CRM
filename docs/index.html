@@ -205,7 +205,7 @@
          stale twice, which is exactly the kind of thing not worth remembering by hand. -->
     <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede"><strong>1.11.0</strong> is the result of an adversarial review: every screen driven in a real browser, the money and report rules re-derived from the code, and every fix re-checked by an independent pass. The data-safety findings come first &mdash; a corrupt backup could break the app for good, two open tabs silently overwrote each other, and an edit made just before closing a tab was lost. Then the report layer telling the truth (&ldquo;Billed Revenue&rdquo; was never what was billed), dialogs that keep focus and save the form you are looking at, and a layout that works on a phone.</p>
+    <p class="lede"><strong>1.12.0</strong> answers three requests from the issue tracker at once. Bookings can carry <strong>tags</strong> (SIM, TIRF, Fiji, Napari&hellip;) and a new report counts bookings and hours per tag, so &ldquo;which techniques actually get used?&rdquo; has a number behind it. Every person gets a <strong>profile page</strong> with their projects, recent bookings and <strong>instrument training records</strong>, feeding a Trained Users column on the stewardship scorecard and an Activity Certificate export. And the <strong>Research Outputs</strong> card grew up: type-specific fields, DOI and URL links, authors, a facility-acknowledged flag, a PDF you can drop straight onto the card, and a detail view per output.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="manual/">User Manual</a>
@@ -219,8 +219,11 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.11.0, and in 1.10.x and 1.9.x before it.</p>
+    <p class="section-sub">What changed in 1.12.0, and in 1.11.0, 1.10.x and 1.9.x before it.</p>
     <div class="cards">
+      <div class="card"><div class="ic">🏷️</div><h3>Tags on bookings, and a report that counts them &mdash; 1.12.0</h3><p>A booking&rsquo;s category says what kind of session it was; tags say what was actually used &mdash; SIM or TIRF, Fiji or Napari. Enter them in either booking dialog, see them as chips in the project&rsquo;s bookings list, the Project Costs table and the calendar, and read the new <strong>Booking Tags</strong> report card (bookings and hours per tag, cancelled bookings excluded). Tags travel into every export. Booking categories can also be renamed or removed from Settings now. (#39)</p></div>
+      <div class="card"><div class="ic">🪪</div><h3>A profile per person, with instrument training &mdash; 1.12.0</h3><p>Click a name in People and get their details, projects, recent bookings and a <strong>training card</strong>: which instruments they were trained on, at what level (User or Super User), when, by whom and until when. The Instruments list and the stewardship scorecard gain a <strong>Trained Users</strong> figure, and an <strong>Activity Certificate</strong> spreadsheet per person is one click away. (#47)</p></div>
+      <div class="card"><div class="ic">📎</div><h3>Research outputs that carry their evidence &mdash; 1.12.0</h3><p>An output now records DOI, URL, authors, whether the facility was acknowledged, and an attached file. The dialog shows the fields that fit the chosen type (publication, thesis, dataset, software, talk, poster). <strong>Drop a PDF onto the card</strong> and the title is read from the file. Each row opens a read-only detail view; the type badge opens the editor. (#41)</p></div>
       <div class="card"><div class="ic">🛟</div><h3>A bad backup can&rsquo;t take the app down &mdash; 1.11.0</h3><p>Restore accepted any file with the right label, including an empty one, and wrote it over your data before checking it could be read &mdash; after which every screen failed and the Restore button itself was unreachable. Files are now opened and counted first, you see <strong>your current numbers beside the file&rsquo;s</strong> before confirming, and a backup made in the demo sandbox is refused in real data.</p></div>
       <div class="card"><div class="ic">🪟</div><h3>Two tabs, one writer &mdash; 1.11.0</h3><p>Open the app in two tabs and whichever saved last silently won. A second tab is now <strong>read-only</strong>, says so on every screen, and if the writing tab closes, the other reloads from the last save before taking over. An edit made in the moment before closing a tab is saved on the way out, and a failed save now says so and retries instead of staying quiet.</p></div>
       <div class="card"><div class="ic">🧾</div><h3>Money that means what it says &mdash; 1.11.0</h3><p>&ldquo;Billed Revenue&rdquo; was the raw per-line figure before discount, overhead and tax &mdash; so it never matched Total Cost for the same bookings. It is now <strong>&ldquo;Line Charges&rdquo;</strong>, with the note it always needed. A saved booking&rsquo;s cost no longer reprices when only its notes change, staff time on instrument-less consults counts in the matrix, Word and PDF reports round and zero waived charges like the spreadsheets do, and a negative discount can no longer add money.</p></div>
@@ -242,6 +245,42 @@
   <div class="wrap">
     <h2>In detail</h2>
     <p class="section-sub">The changes worth a screenshot.</p>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Which techniques actually get used <span class="tag">new</span></h3>
+        <p>A category is one value per booking and says what kind of session it was. Tags are as many as you like and say what was used &mdash; a super-resolution mode, an analysis package, a sample-prep route. The Booking Tags report counts bookings and booked hours per tag over the selected period, excludes cancelled bookings, and counts a booking under each of its tags (the card says so). It is also a custom-report entity and a sheet in the Reports spreadsheet, so the figure you show a purchasing committee is the same one on screen.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/70-booking-tags-report.png" alt="Reports screen showing the Booking Tags card with bookings and booked hours per tag" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/70-booking-tags-report.png</code></span></div>
+        <figcaption>Bookings and hours per tag &mdash; the case for buying more of one.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>One page per person <span class="tag">new</span></h3>
+        <p>The People list used to end at a row. Each person now has a profile: contact details with mobile and campus, the projects they belong to, their recent bookings with cancelled ones marked, and their instrument training. A training record names the instrument, the level, the date, the trainer and an optional expiry; an expired record drops out of the Trained Users count on the day it lapses. Retired people and instruments keep their history, and a retired instrument already on someone&rsquo;s record stays selectable when you edit it. The Activity Certificate export turns the page into a spreadsheet for another facility or a promotion file.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/71-person-profile-training.png" alt="Person profile page with details, projects, recent bookings and an instrument training card" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/71-person-profile-training.png</code></span></div>
+        <figcaption>Details, projects, bookings and training on one page.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>An output you can cite <span class="tag">new</span></h3>
+        <p>A publication needs a DOI and an author list; a dataset needs a repository link; a talk needs a venue. The Add and Edit Output dialogs now show the fields that fit the type and keep the others&rsquo; stored values untouched. Drop a PDF onto the Research Outputs card and it is stored as an attachment with the title read from the file&rsquo;s own metadata, falling back to the filename. Every row opens a read-only detail view with clickable DOI and URL links and a &ldquo;Facility acknowledged&rdquo; line; clicking the type badge opens the editor. The new fields appear in the project&rsquo;s spreadsheet, Word and PDF reports and in the facility-wide Research Outputs sheet.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/72-research-output-detail.png" alt="Read-only Research Output detail dialog with type, title, reference, authors, date and acknowledgement" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/72-research-output-detail.png</code></span></div>
+        <figcaption>The detail view: everything recorded about one output.</figcaption>
+      </figure>
+    </div>
 
     <div class="feature">
       <div class="txt">

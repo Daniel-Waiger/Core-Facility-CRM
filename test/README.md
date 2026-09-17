@@ -20,6 +20,7 @@ requirement for the first group.
 | File | Guards |
 |---|---|
 | `money.test.js` | The billing calculator: how each `cost_unit` prices, the 1-hour staff floor, a blank staff window meaning the whole booking, the discount applying **only** to time-billed instrument cost, the subtotal → discount → overhead → tax order, and the 490 / 546.25 / 589.95 figures a seeded booking must reproduce |
+| `training.test.js` | Issue #47 (Person Profile + Instrument Training): the migration (`people.mobile`/`campus`, `person_instrument_training`), the ref-counters (a training row counts for the trainee/instrument, never for a bare `trainer_id`), `retirePerson`/`retireInstrument` retiring rather than deleting a trained person/instrument (and `trainer_id` nulling on a real delete), the `ON DELETE CASCADE` this table relies on, `clearAllData()`, `DB.trainingActiveOn`'s date-boundary rule, `Reports.computeStewardshipRows`'s Trained Users column (distinct people, evaluated as of the range end), `Exports.exportActivityCertificate` and the Stewardship sheet/Notes wording, the Person Profile/Instruments/People screens, `removeTraining`, the demo seed, and a source lint of the dispatcher wiring |
 | `dates.test.js` | Dates are local calendar days. Pins the bug behind issue #14: at a UTC+ offset, converting through UTC reports the *previous* day |
 | `labels.test.js` | Display helpers that must never alter stored values — money, billing units, milestone statuses, retired names, escaping, and the link guard |
 | `schema.test.js` | Database invariants: the `foreign_keys` pragma `db.export()` silently clears, every cascade, the `projects.pi_id` gap cascade cannot cover, retire/archive, cancellation billing, and the denormalized attendee string staying in step with its join table |
@@ -41,7 +42,9 @@ database, has a demo tab perform a forced clear-and-reseed, and requires the fin
 unchanged — the demo sandbox guarantee, asserted on bytes rather than behaviour.
 `smoke.spec.js` renders every screen and fails on any JavaScript error; it is what caught the
 sandbox opening blank. `sanitize.spec.js` covers the note sanitizer, which can only run in a real
-browser because Node has no `DOMParser`.
+browser because Node has no `DOMParser`. `output-type-fields.spec.js` opens the Add Output dialog
+and checks that switching the type really hides and shows the fields in the rendered layout, since
+a `[hidden]` attribute the stylesheet overrides would pass any source-text check.
 
 Playwright is not a dependency of this repo. The suites find it from a local or global install, or
 from `PLAYWRIGHT_MODULE`; set `CHROMIUM_PATH` if a browser is present that Playwright did not
