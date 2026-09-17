@@ -2849,11 +2849,22 @@
       ['Dr. Elena Rostova', 'PI', 'Bio-Photonics Lab', 'Harvard Immunology', 'elena.rostova@harvard.edu', 'Specializes in deep-tissue intravital 2-photon imaging', 0, 0],
       ['Prof. Marcus Thorne', 'PI', 'Neural Dynamics Institute', 'MIT', 'mthorne@mit.edu', 'Synaptic plasticity & optogenetics grant leader', 0, 0],
       ['Dr. Sarah Lin', 'PI', 'Therapeutics & Onco-Therapy', 'Stanford', 'slin@stanford.edu', 'High-throughput 3D organoid drug screening', 0, 0],
-      ['Alex Chen', 'Researcher', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses', 0, 0],
-      ['Maya Patel', 'Researcher', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays', 0, 0],
+      ['Alex Chen', 'Postdoc', 'Bio-Photonics Lab', 'Harvard Immunology', 'achen@harvard.edu', 'Postdoc running resonant intravital time-lapses', 0, 0],
+      ['Maya Patel', 'PhD', 'Neural Dynamics Institute', 'MIT', 'mpatel@mit.edu', 'PhD candidate in STED super-resolution assays', 0, 0],
       ['David Kim', 'Facility Staff', 'Bioimaging Core Facility', '', 'dkim@corefacility.edu', 'Senior optical specialist & laser safety officer', 1, 95],
       ['Dr. Priya Anand', 'Facility Staff', 'Bioimaging Core Facility', '', 'panand@corefacility.edu', 'Cryo-EM specialist overseeing grid vitrification and Glacios operation', 1, 110],
-      ['Tom Alvarez', 'Facility Staff', 'Bioimaging Core Facility', '', 'talvarez@corefacility.edu', 'Image analysis specialist supporting the Imaris/Fiji quantification pipeline', 1, 80]
+      ['Tom Alvarez', 'Facility Staff', 'Bioimaging Core Facility', '', 'talvarez@corefacility.edu', 'Image analysis specialist supporting the Imaris/Fiji quantification pipeline', 1, 80],
+      // 9-17: additional lab members across the three seed labs, added so pickers/reports have a
+      // realistic roster depth beyond each lab's PI + one trainee + one staffer.
+      ['Dr. Lena Okafor', 'Postdoc', 'Bio-Photonics Lab', 'Harvard Immunology', 'lokafor@harvard.edu', 'Postdoc developing intravital acquisition protocols alongside Alex Chen', 0, 0],
+      ['Jonah Reyes', 'PhD', 'Bio-Photonics Lab', 'Harvard Immunology', 'jreyes@harvard.edu', 'PhD student analyzing CAR-T infiltration time-lapse datasets', 0, 0],
+      ['Ruth Adler', 'Technician', 'Bio-Photonics Lab', 'Harvard Immunology', 'radler@harvard.edu', 'Lab technician preparing intravital imaging chambers and animal prep', 0, 0],
+      ['Dr. Samir Haddad', 'Postdoc', 'Neural Dynamics Institute', 'MIT', 'shaddad@mit.edu', 'Postdoc running STED synaptic screening alongside Maya Patel', 0, 0],
+      ['Yuki Tanaka', 'MSc', 'Neural Dynamics Institute', 'MIT', 'ytanaka@mit.edu', 'MSc student culturing hippocampal preparations for synaptic assays', 0, 0],
+      ['Grace Mbeki', 'Technician', 'Neural Dynamics Institute', 'MIT', 'gmbeki@mit.edu', 'Lab technician maintaining culture plates and imaging consumables', 0, 0],
+      ['Dr. Ines Ferreira', 'Postdoc', 'Therapeutics & Onco-Therapy', 'Stanford', 'iferreira@stanford.edu', 'Postdoc leading organoid drug-screen imaging pipelines', 0, 0],
+      ['Noa Levi', 'PhD', 'Therapeutics & Onco-Therapy', 'Stanford', 'nlevi@stanford.edu', 'PhD student quantifying islet volume reconstructions', 0, 0],
+      ['Ben Carter', 'Undergrad', 'Therapeutics & Onco-Therapy', 'Stanford', 'bcarter@stanford.edu', 'Undergraduate assistant handling organoid plate prep and data logging', 0, 0]
     ];
     for (const p of peopleData) {
       run('INSERT INTO people (name, type, organization, department, email, note, is_staff, rate) VALUES (?,?,?,?,?,?,?,?)', p);
@@ -2904,8 +2915,11 @@
     }
     const grantUserPairs = [
       [1, 1], [1, 4], // CAR-T R01 — Elena Rostova, Alex Chen
+      [1, 9], [1, 10], // CAR-T R01 — Dr. Lena Okafor, Jonah Reyes
       [2, 2], [2, 5], // Brain Research Grant — Marcus Thorne, Maya Patel
-      [3, 3]          // Islet Imaging State Grant — Sarah Lin
+      [2, 12],        // Brain Research Grant — Dr. Samir Haddad
+      [3, 3],         // Islet Imaging State Grant — Sarah Lin
+      [3, 16]         // Islet Imaging State Grant — Noa Levi
     ];
     for (const [grantId, personId] of grantUserPairs) {
       run('INSERT OR IGNORE INTO grant_users (grant_id, person_id) VALUES (?,?)', [grantId, personId]);
@@ -2990,12 +3004,21 @@
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 1, "Principal Investigator")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 4, "Lead Operator & Image Analyst")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 6, "Core Optical Specialist")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 9, "Postdoc")');  // Dr. Lena Okafor
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 10, "Student")');  // Jonah Reyes
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (1, 11, "Technician")'); // Ruth Adler
 
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 2, "Principal Investigator")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 5, "Lead Researcher")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 12, "Postdoc")'); // Dr. Samir Haddad
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 13, "Student")'); // Yuki Tanaka
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (2, 14, "Technician")'); // Grace Mbeki
 
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 3, "Principal Investigator")');
     run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 6, "Core Facility Support")');
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 15, "Postdoc")'); // Dr. Ines Ferreira
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 16, "Student")'); // Noa Levi
+    run('INSERT INTO project_people (project_id, person_id, role) VALUES (3, 17, "Student")'); // Ben Carter
 
     // 5. Project Instruments Mappings
     run('INSERT INTO project_instruments (project_id, instrument_id) VALUES (1, 2)'); // Olympus FV3000
@@ -3382,10 +3405,15 @@
     run("UPDATE people SET campus='Cambridge' WHERE id IN (2,5)");
     run("UPDATE people SET campus='Main Campus' WHERE id IN (6,7,8)");
     run("UPDATE people SET campus='Palo Alto' WHERE id=3");
+    run("UPDATE people SET campus='Longwood' WHERE id IN (9,10,11)");
+    run("UPDATE people SET campus='Cambridge' WHERE id IN (12,13,14)");
+    run("UPDATE people SET campus='Palo Alto' WHERE id IN (15,16,17)");
     run("UPDATE people SET mobile='+1 617 555 0142' WHERE id=4");
     run("UPDATE people SET mobile='+1 617 555 0187' WHERE id=6");
     run("UPDATE people SET mobile='+1 617 555 0163' WHERE id=7");
     run("UPDATE people SET mobile='+1 617 555 0199' WHERE id=8");
+    run("UPDATE people SET mobile='+1 617 555 0211' WHERE id=9");
+    run("UPDATE people SET mobile='+1 617 555 0233' WHERE id=12");
     // --- #47 end ---
     // --- #41 begin ---
     // Backfill the roadmap #41 fields (doi/url/authors/acknowledges_facility/file_id) onto the
