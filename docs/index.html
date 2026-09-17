@@ -205,7 +205,7 @@
          stale twice, which is exactly the kind of thing not worth remembering by hand. -->
     <span class="eyebrow">Release <span id="hero-release">1.5.2 · 06 Sep 2026</span></span>
     <h1>Core Facility Tracker — what’s new</h1>
-    <p class="lede"><strong>1.12.0</strong> answers three requests from the issue tracker at once. Bookings can carry <strong>tags</strong> (SIM, TIRF, Fiji, Napari&hellip;) and a new report counts bookings and hours per tag, so &ldquo;which techniques actually get used?&rdquo; has a number behind it. Every person gets a <strong>profile page</strong> with their projects, recent bookings and <strong>instrument training records</strong>, feeding a Trained Users column on the stewardship scorecard and an Activity Certificate export. And the <strong>Research Outputs</strong> card grew up: type-specific fields, DOI and URL links, authors, a facility-acknowledged flag, a PDF you can drop straight onto the card, and a detail view per output.</p>
+    <p class="lede"><strong>1.13.0</strong> rounds off what 1.12.0 started. Picking a booking&rsquo;s tags is now a proper picker &mdash; search as you type, see how many past bookings used each one, or create a new one on the spot. Every instrument gets a <strong>profile page</strong> to match the one people got last release: utilization this month and this year, its details, the next 14 days, recent activity and its trained users, one click from a New Booking already pointed at it. The Dashboard&rsquo;s <strong>Today&rsquo;s Agenda</strong> is no longer only a dialog &mdash; it sits as a full-width card right on the screen, bookings and due milestones together. Training levels are now named <strong>Regular</strong> and <strong>Super User</strong> (older &ldquo;User&rdquo; records read as Regular), shown as a single coloured role pill. And the bundled demo data got fuller, so exploring the sample facility shows more of what a real one looks like.</p>
     <div class="cta">
       <a class="btn btn-primary" href="../index.html">▶ Open the app</a>
       <a class="btn btn-ghost" href="manual/">User Manual</a>
@@ -219,10 +219,13 @@
 <section>
   <div class="wrap">
     <h2>Highlights</h2>
-    <p class="section-sub">What changed in 1.12.0, and in 1.11.0, 1.10.x and 1.9.x before it.</p>
+    <p class="section-sub">What changed in 1.13.0, and in 1.12.0, 1.11.0, 1.10.x and 1.9.x before it.</p>
     <div class="cards">
+      <div class="card"><div class="ic">🏷️</div><h3>Pick a tag, see how often it was used &mdash; 1.13.0</h3><p>Typing tags into a text field meant no two people spelled &ldquo;super-resolution&rdquo; the same way. Both booking dialogs now use a proper picker: search as you type, every existing tag shown with how many past bookings carry it, and a <strong>Create</strong> option only when what you typed doesn&rsquo;t already exist. Removing a tag is one click on its chip.</p></div>
+      <div class="card"><div class="ic">🔬</div><h3>A profile for every instrument &mdash; 1.13.0</h3><p>Instruments get the page people got in 1.12.0: utilization tiles for this month and this year (cancelled bookings excluded, charges following the Project Costs rule), full details, the next 14 days booked, recent activity, its trained users and the projects that use it &mdash; with a New Booking button already pointed at that instrument.</p></div>
+      <div class="card"><div class="ic">🗓️</div><h3>Today&rsquo;s Agenda, on the Dashboard itself &mdash; 1.13.0</h3><p>The same agenda that used to live behind a button now sits as a full-width card on the Dashboard, under the milestone boxes: today&rsquo;s bookings with their time, project (or Facility-wide), instruments and staff, and today&rsquo;s due milestones. The button is still there for the fuller dialog.</p></div>
       <div class="card"><div class="ic">🏷️</div><h3>Tags on bookings, and a report that counts them &mdash; 1.12.0</h3><p>A booking&rsquo;s category says what kind of session it was; tags say what was actually used &mdash; SIM or TIRF, Fiji or Napari. Enter them in either booking dialog, see them as chips in the project&rsquo;s bookings list, the Project Costs table and the calendar, and read the new <strong>Booking Tags</strong> report card (bookings and hours per tag, cancelled bookings excluded). Tags travel into every export. Booking categories can also be renamed or removed from Settings now. (#39)</p></div>
-      <div class="card"><div class="ic">🪪</div><h3>A profile per person, with instrument training &mdash; 1.12.0</h3><p>Click a name in People and get their details, projects, recent bookings and a <strong>training card</strong>: which instruments they were trained on, at what level (User or Super User), when, by whom and until when. The Instruments list and the stewardship scorecard gain a <strong>Trained Users</strong> figure, and an <strong>Activity Certificate</strong> spreadsheet per person is one click away. (#47)</p></div>
+      <div class="card"><div class="ic">🪪</div><h3>A profile per person, with instrument training &mdash; 1.12.0</h3><p>Click a name in People and get their details, projects, recent bookings and a <strong>training card</strong>: which instruments they were trained on, at what level (Regular or Super User), when, by whom and until when. The Instruments list and the stewardship scorecard gain a <strong>Trained Users</strong> figure, and an <strong>Activity Certificate</strong> spreadsheet per person is one click away. (#47)</p></div>
       <div class="card"><div class="ic">📎</div><h3>Research outputs that carry their evidence &mdash; 1.12.0</h3><p>An output now records DOI, URL, authors, whether the facility was acknowledged, and an attached file. The dialog shows the fields that fit the chosen type (publication, thesis, dataset, software, talk, poster). <strong>Drop a PDF onto the card</strong> and the title is read from the file. Each row opens a read-only detail view; the type badge opens the editor. (#41)</p></div>
       <div class="card"><div class="ic">🛟</div><h3>A bad backup can&rsquo;t take the app down &mdash; 1.11.0</h3><p>Restore accepted any file with the right label, including an empty one, and wrote it over your data before checking it could be read &mdash; after which every screen failed and the Restore button itself was unreachable. Files are now opened and counted first, you see <strong>your current numbers beside the file&rsquo;s</strong> before confirming, and a backup made in the demo sandbox is refused in real data.</p></div>
       <div class="card"><div class="ic">🪟</div><h3>Two tabs, one writer &mdash; 1.11.0</h3><p>Open the app in two tabs and whichever saved last silently won. A second tab is now <strong>read-only</strong>, says so on every screen, and if the writing tab closes, the other reloads from the last save before taking over. An edit made in the moment before closing a tab is saved on the way out, and a failed save now says so and retries instead of staying quiet.</p></div>
@@ -245,6 +248,42 @@
   <div class="wrap">
     <h2>In detail</h2>
     <p class="section-sub">The changes worth a screenshot.</p>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>A profile for every instrument <span class="tag">new</span></h3>
+        <p>Open an instrument the same way you open a person: the chevron on its row, or the row itself. The profile leads with utilization &mdash; bookings, booked hours, distinct users and charges, for this month and this year &mdash; then its details, the next 14 days booked, a recent-activity table, who is trained on it, and every active project that relies on it. A New Booking button on the page is already pointed at this instrument.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/73-instrument-profile.png" alt="Instrument profile page showing utilization tiles, details, upcoming bookings and trained users" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/73-instrument-profile.png</code></span></div>
+        <figcaption>Utilization, details, upcoming bookings and trained users &mdash; one instrument, one page.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature reverse">
+      <div class="txt">
+        <h3>A tag picker that remembers what you&rsquo;ve used <span class="tag">new</span></h3>
+        <p>The Tags field in both booking dialogs is now a picker, not a text box: start typing and it searches every tag already in use, showing how many bookings carry each one. Nothing matches what you typed? A <strong>Create</strong> option appears so a new tag joins the list on the spot, ready to be reused and counted from then on.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/74-booking-tag-picker.png" alt="Booking dialog's Tags field showing a search dropdown with tag usage counts and a Create option" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/74-booking-tag-picker.png</code></span></div>
+        <figcaption>Search, see the counts, or create a new tag &mdash; right from the booking dialog.</figcaption>
+      </figure>
+    </div>
+
+    <div class="feature">
+      <div class="txt">
+        <h3>Today&rsquo;s Agenda, without a click <span class="tag">new</span></h3>
+        <p>The Dashboard used to require opening a dialog to see what&rsquo;s happening today. The same agenda &mdash; today&rsquo;s bookings with their time, project (or Facility-wide), instruments and staff, and today&rsquo;s due milestones &mdash; now sits as a full-width card under the milestone boxes, visible the moment the Dashboard loads. The button is still there for the fuller dialog view.</p>
+      </div>
+      <figure class="shot">
+        <img src="screenshots/75-dashboard-agenda.png" alt="Dashboard with a full-width Today's Agenda card showing today's bookings and due milestones" loading="lazy" onerror="this.closest('.shot').classList.add('pending')">
+        <div class="ph"><span class="badge">Snapshot pending</span><span>Save as <code>docs/screenshots/75-dashboard-agenda.png</code></span></div>
+        <figcaption>Today&rsquo;s bookings and due milestones, right on the Dashboard.</figcaption>
+      </figure>
+    </div>
 
     <div class="feature">
       <div class="txt">
