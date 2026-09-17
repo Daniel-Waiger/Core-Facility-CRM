@@ -89,28 +89,18 @@
   }
   function orgNames() { return unionNames(distinctPeopleCol('organization'), DB.vocabList('ORG')); }
   function deptNames() { return unionNames(distinctPeopleCol('department'), DB.vocabList('DEPT')); }
-  // Suggestions for the booking Tags field: every BOOKING_TAG vocab term merged with every tag
-  // already used on an existing booking (the comma-joined `meetings.tags` display column, split
-  // with UI.parseTags) — same unionNames-style merge as orgNames/deptNames above, so a tag typed
-  // once shows up as a suggestion on every booking dialog afterward, not only via the vocab table.
-  function bookingTagSuggestions() {
-    const used = DB.rows("SELECT tags FROM meetings WHERE TRIM(COALESCE(tags,''))<>''")
-      .flatMap((r) => UI.parseTags(r.tags));
-    return unionNames(DB.vocabList('BOOKING_TAG'), used);
-  }
-  // Free-text tags input with a <datalist> of suggestions (bookingTagSuggestions above) — unlike
+  // Free-text tags input backed by a picker (mountTagPicker, near mountTokenPicker) — unlike
   // vocabField/listPickerField this never forces a single selection, since a booking can carry
   // several comma-separated tags at once. Same label text as the project dialogs' Tags field.
   function tagsField(id, value) {
-    const suggestions = bookingTagSuggestions();
     return `
-    <div class="field">
-      <label>Tags (comma-separated)</label>
-      <input class="input" id="${id}" list="${id}-list" value="${esc(value)}" placeholder="e.g. SIM, TIRF, Fiji, Napari" />
-      <datalist id="${id}-list">
-        ${suggestions.map((t) => `<option value="${esc(t)}"></option>`).join('')}
-      </datalist>
-    </div>`;
+    <div class="field"><label>Tags</label>
+      <div class="tag-picker" data-for="${id}">
+        <div class="token-list"></div>
+        <input type="text" class="input tag-search" placeholder="Search or create a tag…" autocomplete="off" aria-label="Search or create a tag" />
+        <div class="tag-dropdown" hidden></div>
+        <input type="hidden" id="${id}" value="${esc(value)}" />
+      </div></div>`;
   }
 
   /* ---------------- Helper: Editable Vocabulary Dropdowns ----------------
@@ -3086,6 +3076,98 @@
     wrap._setFilter = (fn) => { filterFn = fn || null; render(); };
     render();
   }
+  /* Tag picker: free-text chips backed by DB.bookingTagCounts() suggestions, modeled on
+     mountTokenPicker above but simpler — string values (not numeric ids), no lock/filter/
+     onChange, and typing a tag that doesn't already exist creates it. State lives in the DOM
+     (chips in .token-list) with the hidden input as the single source of truth for save. */
+  function mountTagPicker(m, id) {
+    const hidden = m.querySelector('#' + id);
+    if (!hidden) return;
+    const wrap = hidden.closest('.tag-picker');
+    const list = wrap.querySelector('.token-list');
+    const search = wrap.querySelector('.tag-search');
+    const dropdown = wrap.querySelector('.tag-dropdown');
+    const known = DB.bookingTagCounts().slice(); // [{tag, count}], mutated in place as new tags are created
+    const selected = UI.parseTags(hidden.value); // existing chips render at mount (edit dialogs)
+
+    function sync() { hidden.value = UI.joinTags(selected); }
+
+    function render() {
+      list.innerHTML = selected.map((t) =>
+        `<span class="token" data-tag="${esc(t)}"><button type="button" class="token-x" aria-label="Remove ${esc(t)}">&times;</button>${esc(t)}</span>`
+      ).join('');
+      const term = (search.value || '').trim().toLowerCase();
+      const selectedLower = new Set(selected.map((t) => t.toLowerCase()));
+      let options = known.filter((k) => !selectedLower.has(k.tag.toLowerCase()));
+      if (term) options = options.filter((k) => k.tag.toLowerCase().includes(term));
+      let html = options.map((k) =>
+        `<button type="button" class="tag-option" data-tag="${esc(k.tag)}">${esc(k.tag)} <span class="tag-count">×${k.count}</span></button>`
+      ).join('');
+      const typed = search.value.trim();
+      if (typed) {
+        const existsKnown = known.some((k) => k.tag.toLowerCase() === typed.toLowerCase());
+        const existsSelected = selectedLower.has(typed.toLowerCase());
+        if (!existsKnown && !existsSelected) {
+          html += `<button type="button" class="tag-option tag-create" data-create="${esc(typed)}">Create “${esc(typed)}”</button>`;
+        }
+      }
+      dropdown.innerHTML = html;
+      const show = document.activeElement === search && dropdown.innerHTML !== '';
+      dropdown.hidden = !show;
+      sync();
+    }
+
+    function select(tag) {
+      if (!selected.some((t) => t.toLowerCase() === tag.toLowerCase())) selected.push(tag);
+      search.value = '';
+      render();
+    }
+    function create(tag) {
+      if (!known.some((k) => k.tag.toLowerCase() === tag.toLowerCase())) known.push({ tag, count: 0 });
+      select(tag);
+    }
+
+    search.addEventListener('input', render);
+    search.addEventListener('focus', render);
+    search.addEventListener('blur', () => { setTimeout(() => { dropdown.hidden = true; }, 150); });
+    dropdown.addEventListener('mousedown', (e) => e.preventDefault());
+    dropdown.addEventListener('click', (e) => {
+      const opt = e.target.closest('.tag-option');
+      if (!opt) return;
+      if (opt.dataset.create != null) create(opt.dataset.create);
+      else if (opt.dataset.tag != null) select(opt.dataset.tag);
+    });
+    list.addEventListener('click', (e) => {
+      const x = e.target.closest('.token-x');
+      if (!x) return;
+      const tag = x.parentElement.dataset.tag;
+      const idx = selected.findIndex((t) => t === tag);
+      if (idx >= 0) selected.splice(idx, 1);
+      render();
+    });
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (!search.value) return; // let it bubble — closes the modal
+        e.stopPropagation();
+        search.value = '';
+        render();
+        return;
+      }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const typed = search.value.trim();
+      const term = typed.toLowerCase();
+      const exactKnown = known.find((k) => k.tag.toLowerCase() === term);
+      if (typed && exactKnown) { select(exactKnown.tag); return; }
+      const selectedLower = new Set(selected.map((t) => t.toLowerCase()));
+      let visible = known.filter((k) => !selectedLower.has(k.tag.toLowerCase()));
+      if (term) visible = visible.filter((k) => k.tag.toLowerCase().includes(term));
+      if (typed && visible.length === 1) { select(visible[0].tag); return; }
+      if (typed) { create(typed); return; }
+    });
+    render();
+  }
   function readTokenIds(m, kind) {
     return [...m.querySelectorAll(`.token-picker[data-kind="${kind}"] .token-list .token`)].map((t) => Number(t.dataset.id));
   }
@@ -3593,6 +3675,7 @@
     mountTokenPicker(m, 'owner', bkPeopleItems());
     mountTokenPicker(m, 'inst', bkInstItems(), refreshBom);
     mountTokenPicker(m, 'staff', bkStaffItems(opts.staffIds), refreshBom);
+    mountTagPicker(m, ids.prefix + '-tags');
     mountRichText(m, opts.noteId);
     if (opts.owners) m.querySelector('.token-picker[data-kind="owner"]')._setSelected(opts.owners);
     if (opts.insts) m.querySelector('.token-picker[data-kind="inst"]')._setSelected(opts.insts);

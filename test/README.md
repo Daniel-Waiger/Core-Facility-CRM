@@ -45,6 +45,9 @@ sandbox opening blank. `sanitize.spec.js` covers the note sanitizer, which can o
 browser because Node has no `DOMParser`. `output-type-fields.spec.js` opens the Add Output dialog
 and checks that switching the type really hides and shows the fields in the rendered layout, since
 a `[hidden]` attribute the stylesheet overrides would pass any source-text check.
+`tag-picker.spec.js` opens the new-booking and edit-booking tag pickers and checks the dropdown
+becomes visible on focus, typing and Enter selects/creates chips, removing a chip updates the
+stored value, and an edit dialog seeds its chips from the booking's existing tags.
 
 Playwright is not a dependency of this repo. The suites find it from a local or global install, or
 from `PLAYWRIGHT_MODULE`; set `CHROMIUM_PATH` if a browser is present that Playwright did not

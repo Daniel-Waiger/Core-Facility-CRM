@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 - 'Facility Staff' is a real Role / Position option in the person dialog and People filter, not only demo text.
+- **A tag picker in both booking dialogs**: pick from every tag already used (with how many bookings carry it, cancelled ones included) or type to create a new one; stored tags are unchanged.
 
 ### Changed
 - Training levels are now **Regular** and **Super User**; records saved as 'User' are renamed automatically on load and on restore.
