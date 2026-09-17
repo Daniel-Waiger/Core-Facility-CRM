@@ -3,7 +3,7 @@
   'use strict';
   const Views = global.Views, UI = global.UI, DB = global.DB, Exports = global.Exports, Reports = global.Reports;
   const C = global.CONST, esc = UI.esc, ic = UI.icon;
-  const ctx = { route: 'dashboard', project: null, person: null };
+  const ctx = { route: 'dashboard', project: null, person: null, instrument: null };
 
   let _personSavedCallback = null;
   const autoBackupFolderStatus = { supported: false, name: null, granted: false };
@@ -67,6 +67,7 @@
     projects: 'Projects Registry',
     project: 'Project Details',
     person: 'Person Profile',
+    instrument: 'Instrument Profile',
     people: 'People, Labs &amp; Researchers',
     instruments: 'Core Instruments',
     calendar: 'Schedule &amp; Milestones',
@@ -325,6 +326,7 @@
   function hashFor(name, id) {
     if (name === 'project' && id) return '#/project/' + Number(id);
     if (name === 'person' && id) return '#/person/' + Number(id);
+    if (name === 'instrument' && id) return '#/instrument/' + Number(id);
     return HASH_ROUTES.includes(name) ? '#/' + name : '#/dashboard';
   }
 
@@ -341,6 +343,10 @@
       const id = Number(parts[1]);
       return id ? { name: 'person', id } : null;
     }
+    if (parts[0] === 'instrument') {
+      const id = Number(parts[1]);
+      return id ? { name: 'instrument', id } : null;
+    }
     return HASH_ROUTES.includes(parts[0]) ? { name: parts[0], id: null } : null;
   }
 
@@ -356,8 +362,9 @@
 
   function applyRoute(name, id) {
     ctx.route = name;
-    ctx.project = id ? Number(id) : null;
+    ctx.project = name === 'project' ? Number(id) : null;
     ctx.person = name === 'person' ? Number(id) : null;
+    ctx.instrument = name === 'instrument' ? Number(id) : null;
     document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('active', n.dataset.nav === name));
     document.getElementById('page-title').innerHTML = TITLES[name] || 'Dashboard';
     renderView();
@@ -397,6 +404,10 @@
       location.replace('#/people'); // stale/deleted person id — fall back, don't crash
       return;
     }
+    if (parsed.name === 'instrument' && !DB.row('SELECT id FROM instruments WHERE id=?', [parsed.id])) {
+      location.replace('#/instruments'); // stale/deleted instrument id — fall back, don't crash
+      return;
+    }
     applyRoute(parsed.name, parsed.id);
   }
 
@@ -406,7 +417,8 @@
     window.addEventListener('hashchange', onHashChange);
     const parsed = parseHash(location.hash);
     if (parsed && (parsed.name !== 'project' || DB.row('SELECT id FROM projects WHERE id=?', [parsed.id]))
-               && (parsed.name !== 'person' || DB.row('SELECT id FROM people WHERE id=?', [parsed.id]))) {
+               && (parsed.name !== 'person' || DB.row('SELECT id FROM people WHERE id=?', [parsed.id]))
+               && (parsed.name !== 'instrument' || DB.row('SELECT id FROM instruments WHERE id=?', [parsed.id]))) {
       applyRoute(parsed.name, parsed.id);
     } else {
       route('dashboard');
@@ -429,6 +441,7 @@
     v.innerHTML =
       name === 'project' ? Views.projectDetail(id) :
       name === 'person' ? Views.personDetail(ctx.person) :
+      name === 'instrument' ? Views.instrumentDetail(ctx.instrument) :
       name === 'projects' ? Views.projects() :
       name === 'dashboard' ? Views.dashboard() :
       name === 'people' ? Views.people() :
