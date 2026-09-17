@@ -23,8 +23,8 @@ window.CONST = {
   MODALITY: ['Confocal', 'SEM', 'TEM', 'AFM', 'Light-sheet', 'Super-res', 'Widefield', 'Other'],
   SAMPLE: ['Cells', 'Tissue', 'Biomaterial', 'Materials', 'Other'],
   FLAGS: ['At-risk', 'Blocked', 'Needs-review'],
-  PERSON_TYPES: ['Undergrad', 'MSc', 'PhD', 'Postdoc', 'Technician', 'PI', 'Other'],
-  TRAINING_LEVELS: ['User', 'Super User'],
+  PERSON_TYPES: ['Undergrad', 'MSc', 'PhD', 'Postdoc', 'Technician', 'PI', 'Facility Staff', 'Other'],
+  TRAINING_LEVELS: ['Regular', 'Super User'],
   INSTRUMENT_STATUS: ['Available', 'In-use', 'Maintenance', 'Down'],
   MS_STATUS: ['pending', 'in-progress', 'done'],
   // How an instrument's cost is priced: 'time' = price per hour (drives off booking start/end);

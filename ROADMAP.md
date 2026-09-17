@@ -105,6 +105,8 @@ configuration; building this requires real sample export files per system, and t
 need per-facility review (names, rate structures, and grant formats will not line up 1:1).
 [Unverified] Vendor export formats have not been inspected yet.
 
+Concept notes for the plugin registry and the per-vendor importers: [docs/plans/extensions-and-importers-concept.md](docs/plans/extensions-and-importers-concept.md).
+
 ## Tier 5 — University-wide server version (separate track)
 
 Nothing here ships in the local app, with one exception: 5.12 adds an "export for server" option

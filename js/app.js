@@ -2371,7 +2371,7 @@
         <div class="grid cols-2">
           <div class="field"><label>Level</label>
             <select class="input" id="tr-level">
-              ${C.TRAINING_LEVELS.map((lv) => `<option value="${lv}" ${(cur ? cur.level : 'User') === lv ? 'selected' : ''}>${lv}</option>`).join('')}
+              ${C.TRAINING_LEVELS.map((lv) => `<option value="${lv}" ${(cur ? cur.level : 'Regular') === lv ? 'selected' : ''}>${lv}</option>`).join('')}
             </select>
           </div>
           <div class="field"><label>Trained On *</label><input type="date" class="input" id="tr-trained-on" value="${cur ? esc(cur.trained_on) : UI.today()}" /></div>

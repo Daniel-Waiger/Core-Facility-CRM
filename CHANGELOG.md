@@ -3,6 +3,14 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- 'Facility Staff' is a real Role / Position option in the person dialog and People filter, not only demo text.
+
+### Changed
+- Training levels are now **Regular** and **Super User**; records saved as 'User' are renamed automatically on load and on restore.
+
 ## [1.12.1] — 2026-09-17
 
 ### Changed

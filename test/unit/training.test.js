@@ -84,7 +84,7 @@ describe('#47 ref-counters: a training row counts for the trainee and the instru
     const { DB } = await freshDb();
     const { alice, sam, scopeA } = seedFixture(DB);
     DB.run(
-      "INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id) VALUES (?,?,'User',?,?)",
+      "INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id) VALUES (?,?,'Regular',?,?)",
       [alice, scopeA, '2026-01-01', sam]
     );
 
@@ -99,7 +99,7 @@ describe('#47 retirePerson: training rows gate retire vs. real delete, and train
     const app = await freshApp({ confirm: true });
     const { DB, internals } = app;
     const { alice, scopeA } = seedFixture(DB);
-    DB.run("INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on) VALUES (?,?,'User',?)", [alice, scopeA, '2026-01-01']);
+    DB.run("INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on) VALUES (?,?,'Regular',?)", [alice, scopeA, '2026-01-01']);
     const trainingId = lastId(DB);
     assert.ok(DB.countPersonRefs(alice).total > 0, 'sanity check: the training row must make this person non-zero-ref');
 
@@ -119,7 +119,7 @@ describe('#47 retirePerson: training rows gate retire vs. real delete, and train
     DB.run("INSERT INTO instruments (name, status) VALUES ('Rig', 'Available')");
     const instId = lastId(DB);
     DB.run(
-      "INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id) VALUES (?,?,'User',?,?)",
+      "INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id) VALUES (?,?,'Regular',?,?)",
       [traineeId, instId, '2026-01-01', trainerId]
     );
     const trainingId = lastId(DB);
@@ -458,5 +458,83 @@ describe('#47 source lint', () => {
     const src = readSource('db');
     const matches = src.match(/\/\/ --- #47 begin ---/g) || [];
     assert.equal(matches.length, 2, 'exactly two #47 begin fences are expected: the migration block and the demo-seed block');
+  });
+});
+
+/* Pulls the exact UPDATE statement out of the migrate() block's own '1.13' fence, rather than
+   retyping it — a copy here could quietly drift from what db.js actually runs. Same fence-regex
+   technique as booking-tags.test.js's extractMigrateAlterSql(). */
+function extractTrainingRenameSql() {
+  const src = readSource('db');
+  const fenceRe = /\/\/ --- 1\.13 begin ---([\s\S]*?)\/\/ --- 1\.13 end ---/;
+  const m = src.match(fenceRe);
+  assert.ok(m, "expected a '1.13'-fenced block in js/db.js");
+  const sqlMatch = m[1].match(/db\.exec\(\s*"([^"]*)"\s*\)/);
+  assert.ok(sqlMatch, 'expected the fenced block to call db.exec("...") with the UPDATE statement');
+  return sqlMatch[1];
+}
+
+describe('1.13 training level rename', () => {
+  test("the migrate() block's own UPDATE statement renames 'User' to 'Regular', idempotently, on a raw sql.js table", async () => {
+    const sql = extractTrainingRenameSql();
+    assert.match(sql, /^UPDATE person_instrument_training SET level='Regular' WHERE level='User'$/, 'the extracted statement must be exactly the rename update');
+
+    const initSqlJs = require(path.join(REPO, 'libs', 'sql-asm.js'));
+    const SQL = await initSqlJs();
+    const raw = new SQL.Database();
+    raw.exec(`
+      CREATE TABLE IF NOT EXISTS person_instrument_training (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
+        level TEXT NOT NULL DEFAULT 'Regular',
+        trained_on TEXT DEFAULT '',
+        trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+        expires_on TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    raw.exec("INSERT INTO person_instrument_training (person_id, instrument_id, level) VALUES (1,1,'User')");
+    raw.exec("INSERT INTO person_instrument_training (person_id, instrument_id, level) VALUES (2,1,'Super User')");
+
+    raw.exec(sql);
+    const rowsAfterFirst = raw.exec('SELECT level FROM person_instrument_training ORDER BY id')[0].values.map((r) => r[0]);
+    assert.deepEqual(rowsAfterFirst, ['Regular', 'Super User'], 'the rename must run, and Super User must be untouched');
+
+    raw.exec(sql);
+    const rowsAfterSecond = raw.exec('SELECT level FROM person_instrument_training ORDER BY id')[0].values.map((r) => r[0]);
+    assert.deepEqual(rowsAfterSecond, ['Regular', 'Super User'], 'running the update a second time must be a no-op (idempotent)');
+
+    raw.close();
+  });
+
+  test("restoring a pre-1.13 backup with a 'User' training row renames it to 'Regular' on restore (migrate() runs on restore too)", async () => {
+    const { DB } = await freshDb();
+    seedFixture(DB);
+    DB.run("INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on) VALUES (1,1,'User','2026-01-01')");
+
+    if (typeof globalThis.FileReader === 'undefined') {
+      globalThis.FileReader = class FileReader {
+        readAsDataURL(blob) {
+          blob.arrayBuffer().then((buf) => {
+            this.result = `data:${blob.type || 'application/octet-stream'};base64,${Buffer.from(buf).toString('base64')}`;
+            if (this.onload) this.onload();
+          }).catch((e) => { this.error = e; if (this.onerror) this.onerror(); });
+        }
+      };
+    }
+
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup);
+
+    assert.equal(DB.row("SELECT COUNT(*) c FROM person_instrument_training WHERE level='User'").c, 0, 'no row may read the old level after restore');
+    assert.equal(DB.row("SELECT COUNT(*) c FROM person_instrument_training WHERE level='Regular'").c, 1, 'the renamed row must read the new level after restore');
+  });
+
+  test('js/consts.js: TRAINING_LEVELS is Regular/Super User, and Facility Staff sits immediately before Other in PERSON_TYPES', () => {
+    const { CONST } = loadApp(['consts']);
+    assert.deepEqual(CONST.TRAINING_LEVELS, ['Regular', 'Super User']);
+    assert.equal(CONST.PERSON_TYPES.indexOf('Facility Staff'), CONST.PERSON_TYPES.indexOf('Other') - 1, "'Facility Staff' must sit immediately before 'Other'");
   });
 });

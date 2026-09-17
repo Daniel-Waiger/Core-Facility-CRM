@@ -247,7 +247,7 @@
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
     instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
-    level TEXT NOT NULL DEFAULT 'User',
+    level TEXT NOT NULL DEFAULT 'Regular',
     trained_on TEXT DEFAULT '',
     trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
     expires_on TEXT DEFAULT '',
@@ -641,7 +641,7 @@
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
           instrument_id INTEGER NOT NULL REFERENCES instruments(id) ON DELETE CASCADE,
-          level TEXT NOT NULL DEFAULT 'User',
+          level TEXT NOT NULL DEFAULT 'Regular',
           trained_on TEXT DEFAULT '',
           trainer_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
           expires_on TEXT DEFAULT '',
@@ -663,6 +663,12 @@
     try { db.exec("ALTER TABLE project_outputs ADD COLUMN acknowledges_facility INTEGER DEFAULT 0"); } catch (_) {}
     try { db.exec("ALTER TABLE project_outputs ADD COLUMN file_id INTEGER REFERENCES files(id) ON DELETE SET NULL"); } catch (_) {}
     // --- #41 end ---
+    // --- 1.13 begin ---
+    // 1.13 renamed the entry training level from 'User' to 'Regular'. Idempotent; runs on boot
+    // and on restore (restoreBackup goes through this same migrate()), so a pre-1.13 backup
+    // reads back with the current vocabulary.
+    try { db.exec("UPDATE person_instrument_training SET level='Regular' WHERE level='User'"); } catch (_) {}
+    // --- 1.13 end ---
   }
 
   // Seeds the four built-in categories' default policies exactly once (idempotent: no-ops once
@@ -2255,7 +2261,7 @@
 
   /* ---------------- Instrument training (#47) ----------------
      person_instrument_training records who is cleared to run an instrument unsupervised
-     ('User') or to also train/supervise others on it ('Super User'), when they were signed
+     ('Regular') or to also train/supervise others on it ('Super User'), when they were signed
      off, who signed them off, and an optional expiry. A row is "active" — currently valid,
      for gating a booking or for counting toward an instrument's trained-user total — exactly
      when today (or whatever reference date the caller asks about) falls on or after
@@ -3329,20 +3335,20 @@
     // expired record (Rostova on the FV3000, so the FV3000's trained-user count excludes her and
     // counts only Chen), and a second expired-but-refresher-flagged record (Kim on the Leica).
     const trainingRows = [
-      [4, 2, 'User', day(-120), 6, '', 'Trained on the FV3000 for intravital time-lapses'],
-      [4, 4, 'User', day(-90), 6, day(275), ''],
+      [4, 2, 'Regular', day(-120), 6, '', 'Trained on the FV3000 for intravital time-lapses'],
+      [4, 4, 'Regular', day(-90), 6, day(275), ''],
       [5, 1, 'Super User', day(-200), 6, '', 'Independent after-hours use approved'],
-      [1, 2, 'User', day(-400), 6, day(-5), 'Refresher due'],
+      [1, 2, 'Regular', day(-400), 6, day(-5), 'Refresher due'],
       [7, 5, 'Super User', day(-300), null, '', ''],
-      [3, 3, 'User', day(-60), 6, day(305), ''],
+      [3, 3, 'Regular', day(-60), 6, day(305), ''],
       // Scheduled but not yet in force — reads "Not Yet Valid" on the profile and the certificate,
       // and is excluded from today's Trained Users count (Patel on the Lightsheet, trainer Kim).
-      [5, 3, 'User', day(14), 6, '', 'Onboarding session booked; independent use only after sign-off'],
+      [5, 3, 'Regular', day(14), 6, '', 'Onboarding session booked; independent use only after sign-off'],
       // A record carried over from the old paper sign-off sheet with no known date: NULL trained_on
       // means "no start restriction", so it counts as trained today (Alvarez on the Leica).
-      [8, 1, 'User', null, 6, '', 'Imported from the pre-2024 sign-off sheet — training date not recorded'],
+      [8, 1, 'Regular', null, 6, '', 'Imported from the pre-2024 sign-off sheet — training date not recorded'],
       // Valid today but expiring within the month, so a refresher shows up as due soon.
-      [4, 3, 'User', day(-350), 6, day(20), 'Annual refresher due']
+      [4, 3, 'Regular', day(-350), 6, day(20), 'Annual refresher due']
     ];
     trainingRows.forEach((r) => run('INSERT INTO person_instrument_training (person_id, instrument_id, level, trained_on, trainer_id, expires_on, note) VALUES (?,?,?,?,?,?,?)', r));
 
