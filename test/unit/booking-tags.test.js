@@ -280,6 +280,13 @@ describe('#39 (6): the demo seed leaves tagged bookings, and booking #1\'s regre
     const taggedCount = DB.row("SELECT COUNT(*) c FROM meetings WHERE TRIM(COALESCE(tags,'')) != ''").c;
     assert.ok(taggedCount >= 4, `expected at least 4 tagged bookings in the demo seed, got ${taggedCount}`);
 
+    // The seed adds one facility-defined category so Settings has a row with Rename/Remove
+    // controls: it must be listed in the vocabulary, priced by its own policy row, and in use.
+    assert.ok(DB.vocabList('BOOKING_CATEGORY').includes('workshop'), 'the demo seed must add the custom "workshop" category to the vocabulary');
+    assert.ok(DB.row("SELECT 1 x FROM category_policies WHERE category='workshop'"), 'the custom category must have its own billing policy row');
+    assert.equal(DB.countBookingCategoryRefs('workshop'), 1, 'exactly one seeded booking uses the custom category');
+    assert.equal(DB.renameBookingCategory('workshop', 'consult'), null, 'a protected name is still refused as a rename target for the seeded custom category');
+
     // db.js's own seed comment names this booking as "the regression check" for these three
     // figures — pinned here so a future change to seedBooking/computeBookingBOM/tier math that
     // silently shifts them gets caught.
