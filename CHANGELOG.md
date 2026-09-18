@@ -3,6 +3,24 @@
 All notable changes to Core Facility Tracker are documented here.
 This project uses [Semantic Versioning](https://semver.org/).
 
+## [1.13.1] — 2026-09-18
+
+### Changed
+- Internal cleanup only, nothing a user sees, does or exports changes — rendered screens, spreadsheets, documents and PDFs are byte-for-byte the same.
+- `UI.bookingStatusLabel` now supplies the 'Cancelled (charged)' / 'Cancelled (waived)' label used by the spreadsheet, Reports and custom-report paths, in place of eight separate copies of the rule.
+- `addSheet` in exports.js now builds all 36 sheets, in place of repeated per-sheet boilerplate.
+- `xlsxBlob` in exports.js now builds all 5 workbooks, in place of repeated per-workbook write tails.
+- The Word and PDF exports now build their prose (team line, instrument line, booking heading, cost line, entry line) from shared builders instead of duplicated formatting.
+- `moneyCounts` now covers the four remaining inline money-rule sites, matching the Project Costs rule everywhere it is applied.
+- `addCol` in db.js's `migrate()` now adds the additive columns, in place of repeated try/catch `ALTER TABLE` blocks.
+- Removed unused CSS rules, three duplicate/unused icons, and unreferenced db.js/reports.js functions and exports.
+
+### Added
+- `test/unit/labels.test.js`: the shared cancelled-status label and two-decimal rounding.
+- `test/unit/exports.test.js`: sheet inventory and shared prose builders.
+- `test/unit/wiring.test.js`: dead-icon assertion and CSS class lint.
+- `test/unit/schema.test.js`: migrated table/index parity.
+
 ## [1.13.0] — 2026-09-17
 
 ### Added
