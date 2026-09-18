@@ -542,7 +542,7 @@
     d.mtgs.forEach((m) => {
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
-      const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
+      const status = UI.bookingStatusLabel(m, 'Booked');
       const counts = !(m.is_cancelled && !m.billing_retained);
       mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', m.tags || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
@@ -553,7 +553,7 @@
     // Sheet 5b: Service Entries (roadmap 2.3) — standalone billable work outside any booking.
     const seRows = [['Description', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
     d.entries.forEach((e) => {
-      const status = e.is_cancelled ? (e.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active';
+      const status = UI.bookingStatusLabel(e, 'Active');
       const counts = !(e.is_cancelled && !e.billing_retained);
       seRows.push([
         e.description,
@@ -1149,7 +1149,7 @@
       LEFT JOIN grants g ON g.id = mt.grant_id
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
       mtRows.push([m.project_code || '—', m.project_title || 'Facility-wide', m.title, grantLabelFor(m), m.category || '—', m.tags || '—',
-        m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
+        UI.bookingStatusLabel(m, 'Booked'),
         m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
     const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
@@ -1204,7 +1204,7 @@
       const effectiveTaxPct = (counts && beforeTax > 0) ? round2((((m.total_cost || 0) / beforeTax) - 1) * 100) : '';
       bcRows.push([
         m.project_code || '—', m.project_title || 'Facility-wide', m.title, m.tags || '—', grantLabelFor(m), DB.tierLabel(m.tier_id, bcTierMap),
-        m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked',
+        UI.bookingStatusLabel(m, 'Booked'),
         m.date || '—', m.start_time || '—', m.end_time || '—',
         m.instruments || '—', m.staff || '—', m.subtotal || 0, m.group_discount_pct || 0, m.discount_pct || 0,
         overheadPct, beforeTax, effectiveTaxPct, counts ? (m.total_cost || 0) : 0
@@ -1235,7 +1235,7 @@
         e.person_name ? UI.retiredName(e.person_name, e.person_retired) : '—',
         e.instrument_name ? UI.retiredName(e.instrument_name, e.instrument_retired) : '—',
         grantLabelFor(e),
-        e.is_cancelled ? (e.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active',
+        UI.bookingStatusLabel(e, 'Active'),
         e.date || '—', e.qty || 0, e.unit || '—', e.rate || 0, counts ? (e.total_cost || 0) : 0
       ]);
     });
@@ -1456,7 +1456,7 @@
     // same Reports.computeServiceEntryRows the screen renders from.
     const svcRows = [['Description', 'Project', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
     svc.rows.forEach((r) => {
-      const status = r.is_cancelled ? (r.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active';
+      const status = UI.bookingStatusLabel(r, 'Active');
       svcRows.push([
         r.description, r.project_id == null ? 'Facility-wide' : (r.project_code ? r.project_code + ' — ' + r.project_title : r.project_title),
         r.person_name ? UI.retiredName(r.person_name, r.person_retired) : '—',

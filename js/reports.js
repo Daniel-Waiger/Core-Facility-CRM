@@ -1300,7 +1300,7 @@
       const mm = annotated.get(m.id);
       const insts = instrByMeeting.get(m.id) || [];
       const staffEntry = staffByMeeting.get(m.id) || { names: [], hours: 0 };
-      const status = m.is_cancelled ? (m.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Booked';
+      const status = UI.bookingStatusLabel(m, 'Booked');
       return {
         date: m.date || '',
         title: m.title || '',
@@ -1430,7 +1430,7 @@
         ccol('project', 'Project', 'text', (r) => r.project_id == null ? 'Facility-wide' : (r.project_code ? r.project_code + ' — ' + r.project_title : r.project_title)),
         ccol('staff', 'Staff', 'text', (r) => r.person_name ? UI.retiredName(r.person_name, r.person_retired) : '—'),
         ccol('instrument', 'Instrument', 'text', (r) => r.instrument_name ? UI.retiredName(r.instrument_name, r.instrument_retired) : '—'),
-        ccol('status', 'Status', 'text', (r) => r.is_cancelled ? (r.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : 'Active'),
+        ccol('status', 'Status', 'text', (r) => UI.bookingStatusLabel(r, 'Active')),
         ccol('date', 'Date', 'text', (r) => r.date || '—'),
         ccol('qty', 'Qty', 'number', (r) => r.qty || 0),
         ccol('unit', 'Unit', 'text', (r) => r.unit || '—'),

@@ -831,6 +831,12 @@
   function retiredName(name, isRetired) {
     return isRetired ? String(name == null ? '' : name) + ' (Retired)' : String(name == null ? '' : name);
   }
+  /* Single source of the cancelled-status label (CLAUDE.md "Bookings are cancelled, not
+     deleted"). The caller supplies its own active word because sheets legitimately differ
+     ('Booked' for bookings, 'Active' for service entries/stewardship rows). */
+  function bookingStatusLabel(row, activeWord) {
+    return row.is_cancelled ? (row.billing_retained ? 'Cancelled (charged)' : 'Cancelled (waived)') : activeWord;
+  }
   function isSafeUrl(u) { return /^https?:\/\//i.test(String(u || '').trim()); }
 
   /* ---------------- Output-record helpers: PDF /Title sniff, DOI, author list -----------------
@@ -1092,6 +1098,7 @@
     parseTags,
     joinTags,
     retiredName,
+    bookingStatusLabel,
     isSafeUrl,
     pdfTitleFromBytes,
     normalizeDoi,
