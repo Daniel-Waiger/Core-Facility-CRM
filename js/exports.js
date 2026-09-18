@@ -113,6 +113,18 @@
   // booking/entry showed its full original price here while the XLSX export (and the app's own
   // Project Costs view) already showed 0 for the same row — this closes that drift.
   function moneyCounts(row) { return !(row.is_cancelled && !row.billing_retained); }
+  // Shared XLSX sheet/workbook scaffolding — every exporter builds a sheet the same three ways
+  // and writes the workbook out the same way; keeping both in one place means a new sheet or a
+  // new export format can never drift from how the existing ones are built.
+  function addSheet(XLSX, wb, name, rows, cols) {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = cols;
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  }
+  function xlsxBlob(XLSX, wb) {
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
   // Shared prose builders for the DOCX and PDF paths below — each returns the exact line those
   // two formats used to build separately, so the two can never drift apart.
   function teamLine(pe) {
@@ -513,9 +525,7 @@
       summary.push(['(No custom fields)', '']);
     }
 
-    const ws1 = XLSX.utils.aoa_to_sheet(summary);
-    ws1['!cols'] = [{ wch: 25 }, { wch: 50 }];
-    XLSX.utils.book_append_sheet(wb, ws1, 'Overview');
+    addSheet(XLSX, wb, 'Overview', summary, [{ wch: 25 }, { wch: 50 }]);
 
     // Sheet 2: Milestones
     const msRows = [['Milestone Name', 'Status', 'Due Date', 'Assigned Owners', 'Instruments', 'Notes']];
@@ -529,18 +539,14 @@
         m.note || ''
       ]);
     });
-    const ws2 = XLSX.utils.aoa_to_sheet(msRows);
-    ws2['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, ws2, 'Milestones');
+    addSheet(XLSX, wb, 'Milestones', msRows, [{ wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 40 }]);
 
     // Sheet 3: Team
     const teamRows = [['Member Name', 'Role in Project', 'Position / Type', 'Lab / Group / Company', 'Department', 'Email', 'Facility Staff', `Rate/hr (${DB.getConfig('currency', '$')})`]];
     d.ppl.forEach((pe) => {
       teamRows.push([pe.name, pe.role || '—', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
-    const ws3 = XLSX.utils.aoa_to_sheet(teamRows);
-    ws3['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, ws3, 'Team');
+    addSheet(XLSX, wb, 'Team', teamRows, [{ wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 10 }]);
 
     // Sheet 4: Instruments
     // Cost stays a bare number (not fmtMoney) so spreadsheet users can sum/sort the column; the
@@ -549,9 +555,7 @@
     d.inst.forEach((i) => {
       instRows.push([i.name, i.kind || '—', i.status || '—', i.cost || 0, UI.unitLabel(i.cost_unit || 'time')]);
     });
-    const ws4 = XLSX.utils.aoa_to_sheet(instRows);
-    ws4['!cols'] = [{ wch: 30 }, { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, ws4, 'Instruments');
+    addSheet(XLSX, wb, 'Instruments', instRows, [{ wch: 30 }, { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 10 }]);
 
     // Sheet 5: Meetings
     // One tier-name lookup built up front rather than a SELECT per booking row (see
@@ -566,9 +570,7 @@
       const counts = moneyCounts(m);
       mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', m.tags || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
-    const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
-    ws5['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
-    XLSX.utils.book_append_sheet(wb, ws5, 'Meetings');
+    addSheet(XLSX, wb, 'Meetings', mtRows, [{ wch: 25 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }]);
 
     // Sheet 5b: Service Entries (roadmap 2.3) — standalone billable work outside any booking.
     const seRows = [['Description', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
@@ -583,18 +585,14 @@
         counts ? (e.total_cost || 0) : 0
       ]);
     });
-    const ws5b = XLSX.utils.aoa_to_sheet(seRows);
-    ws5b['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
-    XLSX.utils.book_append_sheet(wb, ws5b, 'Service Entries');
+    addSheet(XLSX, wb, 'Service Entries', seRows, [{ wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }]);
 
     // Sheet 6: Files
     const fRows = [['File Name', 'Kind', 'Path / Link', 'Logged At']];
     d.files.forEach((f) => {
       fRows.push([f.name, f.kind, f.path || '—', f.created_at]);
     });
-    const ws6 = XLSX.utils.aoa_to_sheet(fRows);
-    ws6['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 40 }, { wch: 20 }];
-    XLSX.utils.book_append_sheet(wb, ws6, 'Files');
+    addSheet(XLSX, wb, 'Files', fRows, [{ wch: 30 }, { wch: 15 }, { wch: 40 }, { wch: 20 }]);
 
     // Sheet 7: Research Outputs (roadmap 3.3) — the funnel's exit stage. The Date column is the
     // EFFECTIVE date (explicit date, else the record-creation day) — the same value the ordering
@@ -603,12 +601,9 @@
     d.outputs.forEach((o) => {
       outRows.push([o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
     });
-    const ws7 = XLSX.utils.aoa_to_sheet(outRows);
-    ws7['!cols'] = [{ wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 40 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, ws7, 'Research Outputs');
+    addSheet(XLSX, wb, 'Research Outputs', outRows, [{ wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 40 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }]);
 
-    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${d.p.code}_${d.p.title.replace(/[^a-z0-9_-]/gi, '_')}.xlsx`);
+    blobDownload(xlsxBlob(XLSX, wb), `${d.p.code}_${d.p.title.replace(/[^a-z0-9_-]/gi, '_')}.xlsx`);
     UI.toast('Exported XLSX report');
   }
 
@@ -1110,9 +1105,7 @@
         p.created_at, p.updated_at
       ]);
     });
-    const wsP = XLSX.utils.aoa_to_sheet(projRows);
-    wsP['!cols'] = [{ wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 20 }];
-    XLSX.utils.book_append_sheet(wb, wsP, 'Projects');
+    addSheet(XLSX, wb, 'Projects', projRows, [{ wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 20 }, { wch: 20 }]);
 
     // Sheet 2: All milestones (across every project)
     const msRows = [['Project Code', 'Project', 'Milestone', 'Status', 'Due Date', 'Owners', 'Instruments', 'Notes']];
@@ -1124,18 +1117,14 @@
       ORDER BY p.code ASC, m.due_date IS NULL, m.due_date ASC, m.id ASC`).forEach((m) => {
       msRows.push([m.project_code, m.project_title, m.name, m.status, m.due_date || '—', m.owners || '—', m.instruments || '—', m.note || '']);
     });
-    const wsM = XLSX.utils.aoa_to_sheet(msRows);
-    wsM['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 24 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsM, 'Milestones');
+    addSheet(XLSX, wb, 'Milestones', msRows, [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 24 }, { wch: 24 }, { wch: 40 }]);
 
     // Sheet 3: People
     const peopleRows = [['Name', 'Status', 'Type', 'Lab / Group / Company', 'Department', 'Email', 'Notes', 'Facility Staff', `Rate/hr (${DB.getConfig('currency', '$')})`]];
     DB.rows('SELECT name, type, organization, department, email, note, is_staff, rate, is_retired FROM people ORDER BY is_retired, name').forEach((pe) => {
       peopleRows.push([pe.name, pe.is_retired ? 'Retired' : 'Active', pe.type || '—', pe.organization || '—', pe.department || '—', pe.email || '—', pe.note || '', pe.is_staff ? 'Yes' : 'No', pe.is_staff ? (pe.rate || 0) : '—']);
     });
-    const wsPe = XLSX.utils.aoa_to_sheet(peopleRows);
-    wsPe['!cols'] = [{ wch: 25 }, { wch: 10 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, wsPe, 'People');
+    addSheet(XLSX, wb, 'People', peopleRows, [{ wch: 25 }, { wch: 10 }, { wch: 14 }, { wch: 30 }, { wch: 22 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 10 }]);
 
     // Sheet 4: Instruments
     // Cost stays a bare number (not fmtMoney) so spreadsheet users can sum/sort the column; the
@@ -1149,9 +1138,7 @@
       FROM instruments i ORDER BY i.is_retired, i.name`).forEach((i) => {
       instRows.push([i.name, i.is_retired ? 'Retired' : 'Active', i.kind || '—', i.status || '—', i.location || '—', i.note || '', i.supervisors || '—', i.cost || 0, UI.unitLabel(i.cost_unit || 'time')]);
     });
-    const wsI = XLSX.utils.aoa_to_sheet(instRows);
-    wsI['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 24 }, { wch: 10 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, wsI, 'Instruments');
+    addSheet(XLSX, wb, 'Instruments', instRows, [{ wch: 30 }, { wch: 11 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 40 }, { wch: 24 }, { wch: 10 }, { wch: 10 }]);
 
     // Sheet 5: All meetings/bookings (project-less "facility-wide" bookings included)
     const mtRows = [['Project Code', 'Project', 'Meeting', 'Grant', 'Category', 'Tags', 'Status', 'Date', 'Start', 'End', 'Attendees', 'Link', 'Notes', 'Action Items']];
@@ -1166,9 +1153,7 @@
         UI.bookingStatusLabel(m, 'Booked'),
         m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', m.link || '—', htmlToPlainText(m.note), m.actions || '']);
     });
-    const wsMt = XLSX.utils.aoa_to_sheet(mtRows);
-    wsMt['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsMt, 'Meetings'); // !cols is intentionally shorter than the header row — SheetJS just applies its default width past the end
+    addSheet(XLSX, wb, 'Meetings', mtRows, [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 40 }]); // !cols is intentionally shorter than the header row — SheetJS just applies its default width past the end
 
     // Sheet 6: Bookings & Costs — the invoice-oriented view: what was booked, who worked it,
     // and the stored cost snapshot for each booking (discount → overhead → tax, as computed by
@@ -1224,9 +1209,7 @@
         overheadPct, beforeTax, effectiveTaxPct, counts ? (m.total_cost || 0) : 0
       ]);
     });
-    const wsBc = XLSX.utils.aoa_to_sheet(bcRows);
-    wsBc['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
-    XLSX.utils.book_append_sheet(wb, wsBc, 'Bookings & Costs');
+    addSheet(XLSX, wb, 'Bookings & Costs', bcRows, [{ wch: 14 }, { wch: 30 }, { wch: 26 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }]);
 
     // Sheet 7: Service Entries (roadmap 2.3) — standalone billable work outside any booking,
     // across every project plus facility-wide (project-less) entries, same shape as the Meetings
@@ -1253,9 +1236,7 @@
         e.date || '—', e.qty || 0, e.unit || '—', e.rate || 0, counts ? (e.total_cost || 0) : 0
       ]);
     });
-    const wsSe = XLSX.utils.aoa_to_sheet(seRows);
-    wsSe['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
-    XLSX.utils.book_append_sheet(wb, wsSe, 'Service Entries');
+    addSheet(XLSX, wb, 'Service Entries', seRows, [{ wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }]);
 
     // Sheet 8: Research Outputs (roadmap 3.3) — across every project, same "Project Code /
     // Project" leading columns as the Meetings/Service Entries sheets above.
@@ -1274,9 +1255,7 @@
       .forEach((o) => {
         outRows.push([o.project_code || '—', o.project_title || '—', o.type, o.title, o.authors || '—', o.reference || '—', o.doi || '—', o.url || '—', o.acknowledges_facility ? 'Yes' : 'No', o.file_name || '—', o.date ? o.date : (o.eff_date + ' *'), o.note || '']);
       });
-    const wsOut = XLSX.utils.aoa_to_sheet(outRows);
-    wsOut['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsOut, 'Research Outputs');
+    addSheet(XLSX, wb, 'Research Outputs', outRows, [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 40 }, { wch: 24 }, { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 30 }, { wch: 40 }]);
 
     // Final sheet: Notes — mirrors the Reports & Utilization export's own Notes sheet (a plain,
     // one-column explanation) so the figures above can be read without this code open alongside
@@ -1295,12 +1274,9 @@
       ['"(Retired)" suffix'],
       ['A retired person or instrument, or a discontinued instrument shown elsewhere as "Retired", is never deleted or renamed — deleting it would erase real history (who attended, which instrument ran a session). This export marks it with a trailing "(Retired)" wherever its name appears, so historical rows stay attributed correctly without pretending the person or instrument is still active.']
     ];
-    const wsAllNotes = XLSX.utils.aoa_to_sheet(allNotes);
-    wsAllNotes['!cols'] = [{ wch: 100 }];
-    XLSX.utils.book_append_sheet(wb, wsAllNotes, 'Notes');
+    addSheet(XLSX, wb, 'Notes', allNotes, [{ wch: 100 }]);
 
-    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    return { blob: new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), count: projects.length };
+    return { blob: xlsxBlob(XLSX, wb), count: projects.length };
   }
 
   function exportAllXlsx() {
@@ -1392,31 +1368,25 @@
       [''],
       ['Retired people and instruments are shown with a "(Retired)" suffix rather than removed, per this app’s history-preservation rule. Archived projects are included too, under their ordinary name — nothing marks a project as archived here.']
     ];
-    const wsNotes = XLSX.utils.aoa_to_sheet(notes);
-    wsNotes['!cols'] = [{ wch: 100 }];
-    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
+    addSheet(XLSX, wb, 'Notes', notes, [{ wch: 100 }]);
 
     // Sheet 2: Instrument utilization
     const instrRows = [['Instrument', 'Bookings', 'Booked Hours', 'Line Charges', 'Share of Total Hours %']];
     instr.rows.forEach((r) => {
       instrRows.push([UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), round2(r.sharePct)]);
     });
-    const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
-    wsInstr['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
     // Sheet NAME, i.e. data — deliberately kept as the British spelling. docs/manual/reports.html
     // quotes this exact string to the user, so "fixing" the spelling here would desync the manual
     // (see CLAUDE.md: user-visible strings that are also data must not be recapitalized/respelled
     // without grepping every place they're compared or quoted).
-    XLSX.utils.book_append_sheet(wb, wsInstr, 'Instrument Utilisation');
+    addSheet(XLSX, wb, 'Instrument Utilisation', instrRows, [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 18 }]);
 
     // Sheet 3: Facility staff time
     const staffRows = [['Staff Member', 'Sessions', 'Raw Hours', 'Billed Hours', 'Line Charges']];
     staff.rows.forEach((r) => {
       staffRows.push([UI.retiredName(r.name, r.retired), r.sessions, round2(r.rawHours), round2(r.billHours), round2(r.revenue)]);
     });
-    const wsStaff = XLSX.utils.aoa_to_sheet(staffRows);
-    wsStaff['!cols'] = [{ wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, wsStaff, 'Facility Staff Time');
+    addSheet(XLSX, wb, 'Facility Staff Time', staffRows, [{ wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }]);
 
     // Sheet 4: Staff x instrument matrix — one row per non-empty (staff, instrument) pair rather
     // than a wide grid, so the sheet reads cleanly regardless of how many instruments there are.
@@ -1427,17 +1397,13 @@
       const s = staffById.get(cell.personId), i = instById.get(cell.instrumentId);
       matrixRows.push([UI.retiredName(s.name, s.retired), UI.retiredName(i.name, i.retired), cell.sessions, round2(cell.attributedHours)]);
     });
-    const wsMatrix = XLSX.utils.aoa_to_sheet(matrixRows);
-    wsMatrix['!cols'] = [{ wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 16 }];
-    XLSX.utils.book_append_sheet(wb, wsMatrix, 'Staff x Instrument');
+    addSheet(XLSX, wb, 'Staff x Instrument', matrixRows, [{ wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 16 }]);
 
     // Sheet 5: Projects & groups
     const pgRows = [['Scope', 'Name', 'Bookings', 'Hours', 'Total Cost']];
     proj.projects.forEach((r) => pgRows.push(['Project', r.label, r.bookings, round2(r.hours), round2(r.cost)]));
     proj.groups.forEach((r) => pgRows.push(['Lab / Group', r.label, r.bookings, round2(r.hours), round2(r.cost)]));
-    const wsPg = XLSX.utils.aoa_to_sheet(pgRows);
-    wsPg['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, wsPg, 'Projects & Groups');
+    addSheet(XLSX, wb, 'Projects & Groups', pgRows, [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }]);
 
     // Sheet 6: Instrument stewardship scorecard — flat row per supervisor x instrument, same
     // pattern as the Staff x Instrument sheet above (a wide grid would grow unboundedly with
@@ -1451,9 +1417,7 @@
         stewardRows.push([supLabel, UI.retiredName(r.name, r.retired), r.bookings, round2(r.hours), round2(r.revenue), r.distinctUsers, r.trainedUsers, r.newUsers, r.projectsServed, r.facilityWideSessions, r.consultCount]);
       });
     });
-    const wsSteward = XLSX.utils.aoa_to_sheet(stewardRows);
-    wsSteward['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, wsSteward, 'Stewardship');
+    addSheet(XLSX, wb, 'Stewardship', stewardRows, [{ wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 10 }]);
 
     // Sheet 7: Consults — bookings tagged Category = "consult", counted per instrument and per
     // calendar-month period. Fed from the exact same Reports.computeConsultRows the screen
@@ -1462,9 +1426,7 @@
     consultRows.push(['Total', 'All', consult.totalConsults]);
     consult.instrumentRows.forEach((r) => consultRows.push(['By Instrument', UI.retiredName(r.name, r.retired), r.count]));
     consult.periodRows.forEach((r) => consultRows.push(['By Period', r.period, r.count]));
-    const wsConsult = XLSX.utils.aoa_to_sheet(consultRows);
-    wsConsult['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 12 }];
-    XLSX.utils.book_append_sheet(wb, wsConsult, 'Consults');
+    addSheet(XLSX, wb, 'Consults', consultRows, [{ wch: 14 }, { wch: 26 }, { wch: 12 }]);
 
     // Sheet 8: Service Entries — standalone billable work outside any booking, fed from the exact
     // same Reports.computeServiceEntryRows the screen renders from.
@@ -1478,18 +1440,14 @@
         grantLabelFor(r), status, r.date || '—', r.qty || 0, r.unit || '—', r.rate || 0, round2(r.countedCost)
       ]);
     });
-    const wsSvc = XLSX.utils.aoa_to_sheet(svcRows);
-    wsSvc['!cols'] = [{ wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
-    XLSX.utils.book_append_sheet(wb, wsSvc, 'Service Entries');
+    addSheet(XLSX, wb, 'Service Entries', svcRows, [{ wch: 30 }, { wch: 30 }, { wch: 22 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 12 }]);
 
     // Sheet 9: Breadth — distinct labs/people per period and per instrument, plus new-labs-onboarded
     // per period. Fed from the exact same Reports.computeBreadthRows the screen renders from.
     const breadthRows = [['Breakdown', 'Period / Instrument', 'Distinct Labs', 'Distinct People', 'New Labs']];
     breadth.periodRows.forEach((r) => breadthRows.push(['By Period', r.period, r.distinctLabs, r.distinctPeople, r.newLabs]));
     breadth.instrumentRows.forEach((r) => breadthRows.push(['By Instrument', UI.retiredName(r.name, r.retired), r.distinctLabs, r.distinctPeople, '']));
-    const wsBreadth = XLSX.utils.aoa_to_sheet(breadthRows);
-    wsBreadth['!cols'] = [{ wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 16 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, wsBreadth, 'Breadth');
+    addSheet(XLSX, wb, 'Breadth', breadthRows, [{ wch: 14 }, { wch: 26 }, { wch: 14 }, { wch: 16 }, { wch: 10 }]);
 
     // Sheet 10: Activity Mix — period x category hours matrix, fed from the exact same
     // Reports.computeActivityMixRows the screen renders from. Wide (one column per category value
@@ -1498,26 +1456,20 @@
     const mixHeader = ['Month', ...mix.categories];
     const mixRows = [mixHeader];
     mix.rows.forEach((r) => mixRows.push([r.period, ...mix.categories.map((c) => round2(r.hours[c]))]));
-    const wsMix = XLSX.utils.aoa_to_sheet(mixRows);
-    wsMix['!cols'] = [{ wch: 10 }, ...mix.categories.map(() => ({ wch: 16 }))];
-    XLSX.utils.book_append_sheet(wb, wsMix, 'Activity Mix');
+    addSheet(XLSX, wb, 'Activity Mix', mixRows, [{ wch: 10 }, ...mix.categories.map(() => ({ wch: 16 }))]);
 
     // Sheet 10b: Booking Tags — fed from the exact same Reports.computeBookingTagRows the
     // Booking Tags card renders from; see the Notes-sheet entry above for the counting rule.
     const tagSheetRows = [['Tag', 'Bookings', 'Booked Hours']];
     tagRows.rows.forEach((r) => tagSheetRows.push([r.tag, r.bookings, round2(r.hours)]));
-    const wsTags = XLSX.utils.aoa_to_sheet(tagSheetRows);
-    wsTags['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, wsTags, 'Booking Tags');
+    addSheet(XLSX, wb, 'Booking Tags', tagSheetRows, [{ wch: 24 }, { wch: 12 }, { wch: 14 }]);
 
     // Sheet 11 (opt-in only): Per-Lab Consults — mirrors the Breadth card's opt-in checkbox exactly;
     // the sheet is omitted entirely when the toggle is off, same as the on-screen table.
     if (labConsultsOn) {
       const labConsultRows = [['Lab / Group', 'Consults']];
       breadth.consultLabRows.forEach((r) => labConsultRows.push([r.lab, r.count]));
-      const wsLabConsult = XLSX.utils.aoa_to_sheet(labConsultRows);
-      wsLabConsult['!cols'] = [{ wch: 30 }, { wch: 12 }];
-      XLSX.utils.book_append_sheet(wb, wsLabConsult, 'Per-Lab Consults');
+      addSheet(XLSX, wb, 'Per-Lab Consults', labConsultRows, [{ wch: 30 }, { wch: 12 }]);
     }
 
     // Sheet 12: Funnel: Consult to Output — fed from the exact same Reports.computeFunnelRows
@@ -1528,12 +1480,9 @@
     funnelRows.push(['', '', '']);
     funnelRows.push(['Median: created -> first booking (days)', funnel.medians.createdToActive.days == null ? '' : round2(funnel.medians.createdToActive.days), `n=${funnel.medians.createdToActive.sampleSize}, excluded (negative delta)=${funnel.medians.createdToActive.excludedNegative}`]);
     funnelRows.push(['Median: first booking -> first output (days)', funnel.medians.activeToOutput.days == null ? '' : round2(funnel.medians.activeToOutput.days), `n=${funnel.medians.activeToOutput.sampleSize}, excluded (negative delta)=${funnel.medians.activeToOutput.excludedNegative}`]);
-    const wsFunnel = XLSX.utils.aoa_to_sheet(funnelRows);
-    wsFunnel['!cols'] = [{ wch: 36 }, { wch: 12 }, { wch: 50 }];
-    XLSX.utils.book_append_sheet(wb, wsFunnel, 'Funnel');
+    addSheet(XLSX, wb, 'Funnel', funnelRows, [{ wch: 36 }, { wch: 12 }, { wch: 50 }]);
 
-    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
+    blobDownload(xlsxBlob(XLSX, wb), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
     UI.toast('Exported Reports & Utilization to XLSX');
   }
   // Two-decimal rounding for exported hour/money figures — UI.round2 is the shared 2-dp rounding (ui.js).
@@ -1571,9 +1520,7 @@
       ['Range To', to || 'Latest'],
       ['Exported', new Date().toLocaleString()],
     ];
-    const wsDetails = XLSX.utils.aoa_to_sheet(details);
-    wsDetails['!cols'] = [{ wch: 22 }, { wch: 40 }];
-    XLSX.utils.book_append_sheet(wb, wsDetails, 'Details');
+    addSheet(XLSX, wb, 'Details', details, [{ wch: 22 }, { wch: 40 }]);
 
     // Sheet 2: Training — every sign-off this person holds, evaluated as of `asOf` (never "now"
     // live, so a certificate exported for a past range reads the same way years later).
@@ -1593,9 +1540,7 @@
         t.note || ''
       ]);
     });
-    const wsTraining = XLSX.utils.aoa_to_sheet(trainingRows);
-    wsTraining['!cols'] = [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 10 }, { wch: 30 }];
-    XLSX.utils.book_append_sheet(wb, wsTraining, 'Training');
+    addSheet(XLSX, wb, 'Training', trainingRows, [{ wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 10 }, { wch: 30 }]);
 
     // Sheet 3: Bookings — every meeting this person attended (meeting_people) or ran as facility
     // staff (meeting_staff); a person in both roles on one booking still gets one row. Real joins,
@@ -1626,9 +1571,7 @@
         b.is_cancelled ? (b.billing_retained ? 'Cancelled (charge retained)' : 'Cancelled') : 'Held'
       ]);
     });
-    const wsBookings = XLSX.utils.aoa_to_sheet(bookingRows);
-    wsBookings['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 22 }];
-    XLSX.utils.book_append_sheet(wb, wsBookings, 'Bookings');
+    addSheet(XLSX, wb, 'Bookings', bookingRows, [{ wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 20 }, { wch: 22 }]);
 
     // Sheet 4: Projects — same PI-or-team query as Views.personDetail, so this sheet can never
     // disagree with what the person's own detail screen shows.
@@ -1645,13 +1588,10 @@
     projects.forEach((r) => {
       projectRows.push([r.code, r.title, r.role || '—', r.status, r.is_archived ? 'Yes' : 'No']);
     });
-    const wsProjects = XLSX.utils.aoa_to_sheet(projectRows);
-    wsProjects['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, wsProjects, 'Projects');
+    addSheet(XLSX, wb, 'Projects', projectRows, [{ wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }]);
 
-    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     blobDownload(
-      new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      xlsxBlob(XLSX, wb),
       `Activity-Certificate-${p.name.replace(/[^A-Za-z0-9]+/g, '_')}-${from || 'earliest'}_to_${to || 'latest'}.xlsx`
     );
     UI.toast('Exported activity certificate to XLSX');
@@ -1701,9 +1641,7 @@
       notes.push(['']);
     }
     notes.push(['Retired people and instruments are shown with a "(Retired)" suffix rather than removed, per this app’s history-preservation rule. Archived projects are included too, under their ordinary name — nothing marks a project as archived here.']);
-    const wsNotes = XLSX.utils.aoa_to_sheet(notes);
-    wsNotes['!cols'] = [{ wch: 100 }];
-    XLSX.utils.book_append_sheet(wb, wsNotes, 'Notes');
+    addSheet(XLSX, wb, 'Notes', notes, [{ wch: 100 }]);
 
     // Data sheet: header from the selected columns' labels, cells via the exact same
     // Reports.formatCustomCellXlsx the modal's own export button triggers — no second formatting
@@ -1713,12 +1651,9 @@
     result.rows.forEach((r) => {
       dataRows.push(result.columns.map((c) => Reports.formatCustomCellXlsx(c, r[c.key])));
     });
-    const ws = XLSX.utils.aoa_to_sheet(dataRows);
-    ws['!cols'] = result.columns.map(() => ({ wch: 20 }));
-    XLSX.utils.book_append_sheet(wb, ws, 'Custom Report');
+    addSheet(XLSX, wb, 'Custom Report', dataRows, result.columns.map(() => ({ wch: 20 })));
 
-    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Custom-Report-${spec.entity}-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
+    blobDownload(xlsxBlob(XLSX, wb), `Custom-Report-${spec.entity}-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
     UI.toast('Exported custom report to XLSX');
   }
 
