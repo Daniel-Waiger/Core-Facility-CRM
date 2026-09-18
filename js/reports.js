@@ -1000,12 +1000,7 @@
   // local time to force local parsing): reparse the stored string as an explicit UTC instant by
   // appending 'Z', then read that instant's LOCAL calendar fields via UI.ymd (never toISOString,
   // which would just undo the fix by re-describing the instant in UTC again).
-  // Delegates to UI.utcTimestampToLocalDay — the single shared implementation of this rule
-  // (also used by DB.outputEffectiveDate for the same fallback outside reports.js, e.g. the
-  // Project Detail research-outputs ordering and the XLSX/DOCX/PDF exports).
-  function utcTimestampToLocalDay(ts) {
-    return UI.utcTimestampToLocalDay(ts);
-  }
+  const utcTimestampToLocalDay = UI.utcTimestampToLocalDay;
   // 'YYYY-MM-DD' (or a longer datetime string, sliced) in-range check — '' on either bound means
   // unbounded, mirroring RANGE_SQL's own '' = unbounded convention above, just in plain JS for
   // per-project date facts that aren't worth a round-trip to SQL. Callers pass a UTC timestamp
@@ -1143,14 +1138,7 @@
   // otherwise decide whether 2.5 hours reads as "2.5" or "2,5", and a report should not change
   // shape depending on who opened it.
   function fmtHours(h) { return (Math.round((h || 0) * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }); }
-  // The single copy of this now lives in ui.js (UI.fmtMoney) so every screen that prints money —
-  // the booking modal, Project Costs, and this report — reads the same configured currency symbol
-  // (Settings -> Billing Rates) and rounds the same way. Per CLAUDE.md: "a report that disagrees
-  // with the booking modal about money is worse than no report." Kept as a local alias so the
-  // ~8 call sites below don't all need renaming.
-  function fmtMoney(n) {
-    return UI.fmtMoney(n);
-  }
+  const fmtMoney = UI.fmtMoney;
   function nameCell(name, retired) { return esc(UI.retiredName(name, retired)); }
   function bar(pct) {
     return `<div class="row" style="gap:8px"><div class="progress seg grow" style="height:8px"><i style="width:${Math.max(0, Math.min(100, pct)).toFixed(1)}%"></i></div><span class="mono small" style="width:42px;text-align:right">${pct.toFixed(1)}%</span></div>`;
@@ -1564,16 +1552,6 @@
   function getCustomReportColumns(entityKey) {
     const def = ENTITY_DEFS[entityKey];
     return def ? def.columns.map((c) => ({ key: c.key, label: c.label, type: c.type, required: !!c.required })) : [];
-  }
-  // Notes for one entity, over an explicit (from,to) — most entities' notes are a fixed
-  // structural string, but an entity can instead define `buildNotes(from,to)` when its
-  // disclosure text is data-dependent (see the funnel entity's excludedNegative/
-  // completedNoDateCount counts above); both app.js's preview and Exports.exportCustomXlsx call
-  // this the same way, so the two can never disagree about what gets disclosed.
-  function getCustomReportNotes(entityKey, from, to) {
-    const def = ENTITY_DEFS[entityKey];
-    if (!def) return [];
-    return def.buildNotes ? def.buildNotes(from, to) : (def.notes || []);
   }
   function getCustomReportLabel(entityKey) {
     const def = ENTITY_DEFS[entityKey];
@@ -2032,7 +2010,6 @@
     // Custom report generator (roadmap 3.6)
     getCustomReportEntities,
     getCustomReportColumns,
-    getCustomReportNotes,
     getCustomReportLabel,
     computeCustomRows,
     formatCustomCellDisplay,

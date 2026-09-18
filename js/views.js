@@ -1337,7 +1337,7 @@
           <button class="btn ${calMode === 'timeline' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-act="cal-mode" data-mode="timeline">Timeline</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-prev" data-tooltip="Previous ${unitLabel}">${ic('chevron-left')} Prev</button>
           <button class="btn btn-secondary btn-sm" data-act="cal-today" data-tooltip="Jump back to the current ${unitLabel}">Today</button>
-          <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next ${unitLabel}">Next ${ic('chevron-right')}</button>
+          <button class="btn btn-secondary btn-sm" data-act="cal-next" data-tooltip="Next ${unitLabel}">Next ${ic('chevron')}</button>
           <button class="btn btn-secondary btn-sm" data-act="open-today-modal" data-tooltip="Expand Today's Agenda &amp; Milestones">${ic('clock')} Agenda</button>
         </div>
       </div>`;

@@ -1894,17 +1894,6 @@
     return list.length ? list[0] : null;
   }
 
-  // Array-based backwards compatible helpers
-  function q(sql, params = []) {
-    const stmt = db.prepare(sql);
-    if (params && params.length) stmt.bind(params);
-    const list = [];
-    while (stmt.step()) list.push(stmt.getArray());
-    stmt.free();
-    return list;
-  }
-  function q1(sql, params = []) { return q(sql, params)[0] || null; }
-
   // Parameterized mutation helper
   function run(sql, params = []) {
     assertWritable();
@@ -1977,20 +1966,6 @@
     const c = (r && r.c) || 0;
     const d = (r && r.d) || 0;
     return { total: c, done: d, pct: c ? Math.round((d / c) * 100) : 0 };
-  }
-
-  function projectFlags(pid) {
-    const flags = [];
-    // global.UI is defined by the time this runs (called at render time, after all scripts have
-    // loaded), even though db.js itself loads before ui.js — see CLAUDE.md module load order.
-    const now = global.UI.today();
-    const ms = rows('SELECT status, due_date FROM milestones WHERE project_id=? AND status!="done"', [pid]);
-    for (const m of ms) {
-      if (m.due_date && m.due_date < now) {
-        flags.push('overdue');
-      }
-    }
-    return flags;
   }
 
   /* ---------------- Vocab (user-extensible dropdown terms) ----------------
@@ -2091,10 +2066,6 @@
     const clamped = Math.min(100, Math.max(0, Number(percent) || 0));
     run('INSERT INTO group_discounts (org, percent) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET percent=excluded.percent', [org, clamped]);
   }
-  function listGroupDiscounts() {
-    return rows('SELECT org, percent FROM group_discounts ORDER BY org');
-  }
-
   /* ---------------- Pricing tiers (named overhead, replacing the internal/external pair) ----------------
      A pricing tier is just {name, overhead_pct}, retired (not deleted) once anything references it —
      same is_retired/retired_at pattern as people/instruments/grants (see setRetired below, which
@@ -2134,9 +2105,6 @@
     if (!org) return;
     if (!tierId) { run('DELETE FROM group_tiers WHERE org=?', [org]); return; }
     run('INSERT INTO group_tiers (org, tier_id) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET tier_id=excluded.tier_id', [org, Number(tierId)]);
-  }
-  function listGroupTiers() {
-    return rows('SELECT org, tier_id FROM group_tiers ORDER BY org');
   }
   // Seed-only idempotent upsert by name (pricing_tiers.name is not itself a key — id is a real
   // surrogate key, unlike group_discounts/group_tiers' org PK — so this does a plain check-then-
@@ -3743,10 +3711,8 @@
 
   global.DB = {
     boot,
-    get memoryMode() { return memoryMode; },
     get isDemo() { return !!global.IS_DEMO; },
     currentBytes,
-    markDirty,
     flushNow,
     get isReadOnly() { return multiTabGuard.isReadOnly(); },
     buildBackup,
@@ -3763,12 +3729,9 @@
     rows,
     outputEffectiveDate,
     row,
-    q,
-    q1,
     run,
     transaction,
     projectProgress,
-    projectFlags,
     vocabList,
     addVocab,
     bookingTagCounts,
@@ -3777,17 +3740,13 @@
     setConfig,
     getGroupDiscount,
     setGroupDiscount,
-    listGroupDiscounts,
     getTierForOrg,
     resolveOverheadForOrg,
     getGroupTierId,
     setGroupTier,
-    listGroupTiers,
-    upsertPricingTierByName,
     countTierRefs,
     tierLabel,
     buildTierLabelMap,
-    getInstrumentTierRate,
     resolveInstrumentCost,
     setInstrumentTierRate,
     deleteInstrumentTierRate,
@@ -3807,7 +3766,6 @@
     grantLabel,
     setProjectArchived,
     countBookingRefs,
-    refreshAttendeesForMeeting,
     refreshAttendeesForPerson,
     setBookingCancelled,
     setServiceEntryCancelled,
@@ -3815,7 +3773,6 @@
     listAllOrgNames,
     countOrgRefs,
     renameOrganization,
-    hiddenVocab,
     countBookingCategoryRefs,
     protectedBookingCategories,
     renameBookingCategory,
