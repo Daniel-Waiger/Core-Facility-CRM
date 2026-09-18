@@ -418,6 +418,72 @@ describe('exports (T9): research-output fields (authors/DOI/URL/acknowledgement/
   });
 });
 
+describe('exports (T10): facility-wide sheet inventory and DOCX/PDF shared prose builders', () => {
+  test('buildAllXlsxBlob sheet inventory', async () => {
+    const app = await freshApp();
+    XLSX = app.XLSX;
+    const { DB, Exports } = app;
+    seedFixture(DB);
+
+    const result = await Exports.buildAllXlsxBlob();
+    assert.ok(result && result.blob, 'buildAllXlsxBlob must return { blob, count }');
+    const wb = app.captured[app.captured.length - 1];
+
+    assert.deepEqual(wb.SheetNames, [
+      'Projects', 'Milestones', 'People', 'Instruments', 'Meetings',
+      'Bookings & Costs', 'Service Entries', 'Research Outputs', 'Notes',
+    ], 'the sheet list and its order must match buildAllXlsxBlob exactly');
+    assert.equal(wb.SheetNames[wb.SheetNames.length - 1], 'Notes', 'Notes must be the last sheet');
+
+    for (const name of wb.SheetNames) {
+      const cols = wb.Sheets[name]['!cols'];
+      assert.ok(Array.isArray(cols), `sheet "${name}" must have an array !cols`);
+      assert.ok(cols.length > 0, `sheet "${name}"'s !cols must be non-empty`);
+      for (const c of cols) {
+        assert.equal(typeof c, 'object', `every !cols entry on "${name}" must be an object`);
+        assert.equal(typeof c.wch, 'number', `every !cols entry on "${name}" must carry a numeric wch`);
+      }
+    }
+  });
+
+  test('DOCX and PDF share one prose builder per line, pinned on exact strings', async () => {
+    const app = await freshApp();
+    const { UI, Exports } = app;
+
+    // _teamLine: every field present vs. only name+type (blank org/role/email, not staff).
+    const full = { name: 'Ada Lovelace', type: 'Postdoc', organization: 'HUJI', department: 'Bio', role: 'Lead', email: 'ada@x.org', is_staff: 1, rate: 120 };
+    assert.equal(Exports._teamLine(full), '• Ada Lovelace (Postdoc • HUJI • Bio) — Role: Lead <ada@x.org> — Facility Staff, 120/hr');
+    const bare = { name: 'Bob', type: 'Student' };
+    assert.equal(Exports._teamLine(bare), '• Bob (Student)  ');
+
+    // _instrumentLine: blank kind falls back to "Facility Instrument"; cost unit via UI.unitLabel.
+    const inst = { name: 'Scope A', kind: '', status: 'Active', cost: 50 };
+    assert.equal(
+      Exports._instrumentLine(inst),
+      `• Scope A (Facility Instrument) — Status: Active — Cost: ${UI.fmtMoney(50)} ${UI.unitLabel('time')}`,
+    );
+
+    // _bookingHeading: plain row, and a cancelled row's exact [CANCELLED — charge kept] suffix.
+    const booking = { date: '2026-03-05', start_time: '09:00', end_time: '11:00', title: 'SIM run', category: 'Assisted', is_cancelled: 0 };
+    assert.equal(Exports._bookingHeading(booking), `${UI.fmtDate('2026-03-05')} 09:00–11:00: SIM run [Assisted]`);
+    const cancelledKept = { ...booking, is_cancelled: 1, billing_retained: 1 };
+    assert.equal(
+      Exports._bookingHeading(cancelledKept),
+      `${UI.fmtDate('2026-03-05')} 09:00–11:00: SIM run [Assisted]  [CANCELLED — charge kept]`,
+    );
+
+    // _costLine: waived-cancelled zeroes Total; the same row with billing_retained:1 does not.
+    const waived = { is_cancelled: 1, billing_retained: 0, subtotal: 100, total_before_tax: 110, total_cost: 121 };
+    assert.equal(Exports._costLine(waived), 'Cost: Subtotal $100.00, Before Tax $110.00, Total $0.00');
+    const retained = { ...waived, billing_retained: 1 };
+    assert.equal(Exports._costLine(retained), 'Cost: Subtotal $100.00, Before Tax $110.00, Total $121.00');
+
+    // _entryQtyLine: qty/unit, rate and total via the shared money rule.
+    const entry = { qty: 3, unit: 'samples', rate: 10, total_cost: 30 };
+    assert.equal(Exports._entryQtyLine(entry), 'Qty: 3 samples   |   Rate: $10.00   |   Total: $30.00');
+  });
+});
+
 // A tiny stand-in for the `docx` UMD global (Document/Packer/Paragraph/TextRun/HeadingLevel/...) —
 // just enough for exportDocx to run to completion without throwing. Paragraph is reassigned per
 // test (see above) to capture the text passed to it; everything else only needs to exist.

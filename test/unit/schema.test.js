@@ -470,4 +470,32 @@ describe('schema: migrations are idempotent', () => {
     assert.equal(DB.row('SELECT COUNT(*) c FROM people').c, 2);
     assert.equal(DB.row('SELECT COUNT(*) c FROM projects').c, 2);
   });
+
+  test('the migrated table/index name set matches a fresh schema', async () => {
+    function masterNames(db) {
+      return db.rows(
+        "SELECT type, name FROM sqlite_master WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+      ).map((r) => r.type + ':' + r.name);
+    }
+
+    const { DB } = await freshDb();
+    const beforeNames = masterNames(DB);
+
+    seedFixture(DB);
+    const backup = await DB.buildBackup();
+    await DB.restoreBackup(backup);
+    const afterNames = masterNames(DB);
+
+    assert.deepEqual(afterNames, beforeNames,
+      'the set of tables/indexes on a fresh schema and after a migrate()-re-running backup/restore must be identical');
+
+    // Guard against a vacuously-passing empty-list comparison: assert the objects migrate()
+    // creates with IF NOT EXISTS are actually present in that set.
+    for (const name of [
+      'table:project_outputs', 'table:person_instrument_training', 'table:category_policies',
+      'index:ix_project_outputs_project', 'index:ix_pit_person', 'index:ix_pit_instrument',
+    ]) {
+      assert.ok(afterNames.includes(name), `${name} should be present in sqlite_master`);
+    }
+  });
 });

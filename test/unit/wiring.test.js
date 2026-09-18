@@ -17,7 +17,7 @@ const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { readSource, sourcePath, JS_DIR } = require('./helpers/load-module');
+const { readSource, sourcePath, JS_DIR, REPO } = require('./helpers/load-module');
 
 const JS_FILES = fs.readdirSync(JS_DIR).filter((f) => f.endsWith('.js')).sort();
 const SOURCES = Object.fromEntries(JS_FILES.map((f) => [f, readSource(f)]));
@@ -225,14 +225,9 @@ describe('icon names: ic()/UI.icon() calls all resolve in ICONS', () => {
     assert.deepEqual(missing, [], `icon names used but not defined in ICONS: ${missing.join(', ')}`);
   });
 
-  // Informational only, per the task brief ("report ... as a separate, non-failing informational
-  // test") — an unused icon is dead weight, not a bug, so this never fails the suite.
-  test('(informational) report ICONS keys defined but never referenced', () => {
+  test('every ICONS key is referenced by some ic()/icon()/emptyState() call — a dead icon is dead weight', () => {
     const unused = [...defined].filter((n) => !used.has(n));
-    if (unused.length) {
-      console.log(`[info] ICONS keys defined but not used anywhere: ${unused.join(', ')}`);
-    }
-    assert.ok(true);
+    assert.deepEqual(unused, [], `ICONS keys defined but never used: ${unused.join(', ')}`);
   });
 });
 
@@ -350,4 +345,53 @@ describe('every js/*.js file parses (node --check)', () => {
       });
     });
   }
+});
+
+/* ---------------------------------------------------------------------------------------------
+ * 6. Every class selector in css/app.css has an emitter somewhere in js/*.js or index.html.
+ *
+ * A class that only exists in the stylesheet, with nothing in the app ever putting it on an
+ * element, is dead CSS — the mirror image of the dead-data-act and dead-icon checks above. We
+ * scrape class TOKENS out of app.css's selectors (stripping comments and declaration bodies, so
+ * property values like `background: #fff` never masquerade as selectors) and check each one is
+ * "emitted": present as a whole token (word-boundary on both sides, via `[^a-zA-Z0-9_-]` rather
+ * than `\b`, since `-` is a word character in class names but not in regex `\w`) somewhere in the
+ * app's own source or in index.html's static markup.
+ * ------------------------------------------------------------------------------------------- */
+
+describe('css: every class selector in css/app.css has an emitter', () => {
+  // Class names built dynamically (e.g. `'foo-' + kind`) rather than appearing as a literal
+  // string anywhere — each entry names the emitting expression and file, verified by reading it.
+  // Empty at the time this test was written: nothing in css/app.css is emitted only dynamically.
+  const CSS_CLASS_ALLOW = {};
+
+  test('every class in css/app.css is referenced somewhere in js/*.js or index.html', () => {
+    const cssSrc = fs.readFileSync(path.join(REPO, 'css', 'app.css'), 'utf8');
+    const indexSrc = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+
+    // Strip /* */ comments, then strip declaration bodies (twice, to unwrap one level of
+    // @media { selector { ... } } nesting) so only selector text remains.
+    const selectorsOnly = cssSrc
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\{[^{}]*\}/g, '{}')
+      .replace(/\{[^{}]*\}/g, '{}');
+
+    const tokens = new Set();
+    const classRe = /\.(-?[a-zA-Z_][a-zA-Z0-9_-]*)/g;
+    let m;
+    while ((m = classRe.exec(selectorsOnly))) tokens.add(m[1]);
+    assert.ok(tokens.size > 0, 'scraper found zero class tokens in css/app.css — regex is broken');
+
+    const haystack = ALL_SOURCE + indexSrc;
+    const missing = [...tokens].filter((token) => {
+      const wordRe = new RegExp('(^|[^a-zA-Z0-9_-])' + token.replace(/-/g, '\\-') + '(?![a-zA-Z0-9_-])');
+      return !wordRe.test(haystack);
+    });
+
+    const unexplained = missing.filter((t) => !(t in CSS_CLASS_ALLOW));
+    assert.deepEqual(unexplained, [], `css/app.css classes with no emitter in js/*.js or index.html: ${unexplained.join(', ')}`);
+
+    const superfluousAllow = Object.keys(CSS_CLASS_ALLOW).filter((t) => !missing.includes(t));
+    assert.deepEqual(superfluousAllow, [], `CSS_CLASS_ALLOW entries that are actually emitted literally (remove from allow-list): ${superfluousAllow.join(', ')}`);
+  });
 });
