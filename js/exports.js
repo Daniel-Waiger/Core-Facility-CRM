@@ -113,6 +113,26 @@
   // booking/entry showed its full original price here while the XLSX export (and the app's own
   // Project Costs view) already showed 0 for the same row — this closes that drift.
   function moneyCounts(row) { return !(row.is_cancelled && !row.billing_retained); }
+  // Shared prose builders for the DOCX and PDF paths below — each returns the exact line those
+  // two formats used to build separately, so the two can never drift apart.
+  function teamLine(pe) {
+    const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
+    return `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`;
+  }
+  function instrumentLine(i) {
+    return `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}`;
+  }
+  function bookingHeading(m) {
+    const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
+    const catStr = m.category ? ` [${m.category}]` : '';
+    return `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`;
+  }
+  function costLine(m) {
+    return `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`;
+  }
+  function entryQtyLine(e) {
+    return `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`;
+  }
   function htmlToPlainText(html) {
     let s = '';
     (function walk(node) {
@@ -543,7 +563,7 @@
       // A cancelled booking stays in the report — it is part of the record — with its status and
       // whether its charge still counts, so a total can be reconciled against the rows.
       const status = UI.bookingStatusLabel(m, 'Booked');
-      const counts = !(m.is_cancelled && !m.billing_retained);
+      const counts = moneyCounts(m);
       mtRows.push([m.title, grantLabelFor(m), DB.tierLabel(m.tier_id, tierMap), m.category || '—', m.tags || '—', status, m.date || '—', m.start_time || '—', m.end_time || '—', m.attendees || '—', htmlToPlainText(m.note), m.actions || '', m.subtotal || 0, m.total_before_tax || 0, counts ? (m.total_cost || 0) : 0]);
     });
     const ws5 = XLSX.utils.aoa_to_sheet(mtRows);
@@ -554,7 +574,7 @@
     const seRows = [['Description', 'Staff', 'Instrument', 'Grant', 'Status', 'Date', 'Qty', 'Unit', 'Rate', 'Total Cost']];
     d.entries.forEach((e) => {
       const status = UI.bookingStatusLabel(e, 'Active');
-      const counts = !(e.is_cancelled && !e.billing_retained);
+      const counts = moneyCounts(e);
       seRows.push([
         e.description,
         e.person_name ? UI.retiredName(e.person_name, e.person_retired) : '—',
@@ -646,8 +666,7 @@
     children.push(new Paragraph({ text: 'Team & Collaborators', heading: HeadingLevel.HEADING_2 }));
     if (d.ppl.length) {
       d.ppl.forEach((pe) => {
-        const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        children.push(new Paragraph({ text: `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}` }));
+        children.push(new Paragraph({ text: teamLine(pe) }));
       });
     } else {
       children.push(new Paragraph({ text: 'No team members assigned.' }));
@@ -657,7 +676,7 @@
     children.push(new Paragraph({ text: 'Assigned Instruments', heading: HeadingLevel.HEADING_2 }));
     if (d.inst.length) {
       d.inst.forEach((i) => {
-        children.push(new Paragraph({ text: `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}` }));
+        children.push(new Paragraph({ text: instrumentLine(i) }));
       });
     } else {
       children.push(new Paragraph({ text: 'No instruments assigned.' }));
@@ -667,9 +686,7 @@
     children.push(new Paragraph({ text: 'Meetings & Discussions', heading: HeadingLevel.HEADING_2 }));
     if (d.mtgs.length) {
       d.mtgs.forEach((m) => {
-        const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        const catStr = m.category ? ` [${m.category}]` : '';
-        children.push(new Paragraph({ text: `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, heading: HeadingLevel.HEADING_3 }));
+        children.push(new Paragraph({ text: bookingHeading(m), heading: HeadingLevel.HEADING_3 }));
         if (m.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(m)}`, italics: true }));
         if (m.attendees) children.push(new Paragraph({ text: `Attendees: ${m.attendees}`, italics: true }));
         if (m.tags) children.push(new Paragraph({ text: 'Tags: ' + m.tags, italics: true }));
@@ -677,7 +694,7 @@
         if (m.actions) children.push(new Paragraph({ text: `Actions: ${m.actions}`, bold: true }));
         if (m.total_cost) {
           if (m.tier_id) children.push(new Paragraph({ text: `Tier: ${DB.tierLabel(m.tier_id, tierMap)}`, italics: true }));
-          children.push(new Paragraph({ text: `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, bold: true }));
+          children.push(new Paragraph({ text: costLine(m), bold: true }));
         }
       });
     } else {
@@ -692,7 +709,7 @@
         if (e.person_name) children.push(new Paragraph({ text: `Staff: ${UI.retiredName(e.person_name, e.person_retired)}`, italics: true }));
         if (e.instrument_name) children.push(new Paragraph({ text: `Instrument: ${UI.retiredName(e.instrument_name, e.instrument_retired)}`, italics: true }));
         if (e.grant_id) children.push(new Paragraph({ text: `Grant: ${grantLabelFor(e)}`, italics: true }));
-        children.push(new Paragraph({ text: `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, bold: true }));
+        children.push(new Paragraph({ text: entryQtyLine(e), bold: true }));
       });
     } else {
       children.push(new Paragraph({ text: 'No service entries recorded.' }));
@@ -868,8 +885,7 @@
       pdf.setFontSize(9);
       d.ppl.forEach((pe) => {
         checkPage(6);
-        const orgStr = [pe.organization, pe.department].filter(Boolean).join(' • ');
-        pdfText(pdf, `• ${pe.name} (${pe.type}${orgStr ? ' • ' + orgStr : ''}) ${pe.role ? '— Role: ' + pe.role : ''} ${pe.email ? '<' + pe.email + '>' : ''}${pe.is_staff ? ' — Facility Staff, ' + (pe.rate || 0) + '/hr' : ''}`, margin, y);
+        pdfText(pdf, teamLine(pe), margin, y);
         y += 5;
       });
     } else {
@@ -884,7 +900,7 @@
       pdf.setFontSize(9);
       d.inst.forEach((i) => {
         checkPage(6);
-        pdfText(pdf, `• ${i.name} (${i.kind || 'Facility Instrument'}) — Status: ${i.status} — Cost: ${UI.fmtMoney(i.cost || 0)} ${UI.unitLabel(i.cost_unit || 'time')}`, margin, y);
+        pdfText(pdf, instrumentLine(i), margin, y);
         y += 5;
       });
     } else {
@@ -900,9 +916,7 @@
       d.mtgs.forEach((m) => {
         checkPage(14);
         pdf.setFont('helvetica', 'bold');
-        const timeStr = m.start_time ? ` ${m.start_time}${m.end_time ? '–' + m.end_time : ''}` : '';
-        const catStr = m.category ? ` [${m.category}]` : '';
-        pdfText(pdf, `${UI.fmtDate(m.date)}${timeStr}: ${m.title}${catStr}${bookingStatusSuffix(m)}`, margin, y);
+        pdfText(pdf, bookingHeading(m), margin, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         if (m.grant_id) {
@@ -954,7 +968,7 @@
           }
           checkPage(6);
           pdf.setFont('helvetica', 'bold');
-          pdfText(pdf, `Cost: Subtotal ${UI.fmtMoney(m.subtotal || 0)}, Before Tax ${UI.fmtMoney(m.total_before_tax || 0)}, Total ${UI.fmtMoney(moneyCounts(m) ? m.total_cost : 0)}`, margin + 4, y);
+          pdfText(pdf, costLine(m), margin + 4, y);
           pdf.setFont('helvetica', 'normal');
           y += 5;
         }
@@ -986,7 +1000,7 @@
         }
         checkPage(6);
         pdf.setFont('helvetica', 'bold');
-        pdfText(pdf, `Qty: ${e.qty || 0} ${e.unit || ''}   |   Rate: ${UI.fmtMoney(e.rate || 0)}   |   Total: ${UI.fmtMoney(moneyCounts(e) ? (e.total_cost || 0) : 0)}`, margin + 4, y);
+        pdfText(pdf, entryQtyLine(e), margin + 4, y);
         pdf.setFont('helvetica', 'normal');
         y += 5;
         y += 2;
@@ -1198,7 +1212,7 @@
       ORDER BY mt.date DESC, mt.id DESC`).forEach((m) => {
       // A waived cancellation contributes 0 to the Charged Total column so the column sums to what
       // the facility actually bills; the Status column says why.
-      const counts = !(m.is_cancelled && !m.billing_retained);
+      const counts = moneyCounts(m);
       const beforeTax = m.total_before_tax || 0;
       const overheadPct = m.tier_overhead_pct == null ? '' : round2(m.tier_overhead_pct);
       const effectiveTaxPct = (counts && beforeTax > 0) ? round2((((m.total_cost || 0) / beforeTax) - 1) * 100) : '';
@@ -1229,7 +1243,7 @@
       LEFT JOIN instruments i ON i.id = se.instrument_id
       LEFT JOIN grants g ON g.id = se.grant_id
       ORDER BY se.date DESC, se.id DESC`).forEach((e) => {
-      const counts = !(e.is_cancelled && !e.billing_retained);
+      const counts = moneyCounts(e);
       seRows.push([
         e.project_code || '—', e.project_title || 'Facility-wide', e.description,
         e.person_name ? UI.retiredName(e.person_name, e.person_retired) : '—',
@@ -1522,9 +1536,8 @@
     blobDownload(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `Facility-Reports-${(from || 'earliest')}_to_${(to || 'latest')}.xlsx`);
     UI.toast('Exported Reports & Utilization to XLSX');
   }
-  // Two-decimal rounding for exported hour/money figures — avoids floating-point noise (e.g.
-  // 1.9999999999998) showing up in a spreadsheet cell.
-  function round2(n) { return Math.round((n || 0) * 100) / 100; }
+  // Two-decimal rounding for exported hour/money figures — UI.round2 is the shared 2-dp rounding (ui.js).
+  const round2 = UI.round2;
 
   /* Activity certificate (#47): a single person's training + booking + project history as one
      workbook — the thing a lab head or auditor asks for as proof of what someone is cleared for
@@ -1715,6 +1728,7 @@
     // Exposed for test/unit/exports.test.js only (the RTL bidi helper and the lazy font loader) —
     // no other file in the app reads these directly.
     _pdfBidiReverse: pdfBidiReverse, _preparePdfFont: preparePdfFont,
+    _teamLine: teamLine, _instrumentLine: instrumentLine, _bookingHeading: bookingHeading, _costLine: costLine, _entryQtyLine: entryQtyLine,
   };
 
 })(window);
