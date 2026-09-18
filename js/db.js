@@ -1962,7 +1962,7 @@
     }
   }
 
-  /* ---------------- Compute: progress + flags ---------------- */
+  /* ---------------- Compute: progress ---------------- */
   function projectProgress(pid) {
     const r = row('SELECT COUNT(*) as c, COALESCE(SUM(CASE WHEN status="done" THEN 1 ELSE 0 END),0) as d FROM milestones WHERE project_id=?', [pid]);
     const c = (r && r.c) || 0;

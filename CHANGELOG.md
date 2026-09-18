@@ -6,7 +6,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 ## [1.13.1] — 2026-09-18
 
 ### Changed
-- Internal cleanup only, nothing a user sees, does or exports changes — rendered screens, spreadsheets, documents and PDFs are byte-for-byte the same.
+- Internal cleanup only. Apart from the version number shown in Settings, nothing a user sees, does or exports changes — rendered screens, spreadsheets, documents and PDFs are byte-for-byte the same.
 - `UI.bookingStatusLabel` now supplies the 'Cancelled (charged)' / 'Cancelled (waived)' label used by the spreadsheet, Reports and custom-report paths, in place of eight separate copies of the rule.
 - `addSheet` in exports.js now builds all 36 sheets, in place of repeated per-sheet boilerplate.
 - `xlsxBlob` in exports.js now builds all 5 workbooks, in place of repeated per-workbook write tails.

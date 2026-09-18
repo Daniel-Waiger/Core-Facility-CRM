@@ -37,6 +37,25 @@ A lesson that just restates an architecture rule should be deleted — point at
 
 ## Verification
 
+- **For a zero-behaviour-change refactor, a fingerprint harness is the only
+  real proof — and its clock must be frozen.** _(2026-09-18, 1.13.1: 12/12
+  first-try.)_ A scratchpad `golden.js` boots the real app on the demo seed via
+  `test/unit/helpers/load-module`, freezes `Date` with a subclass, renders every
+  `Views` screen (including retired/archived toggles and all three calendar
+  modes), runs `Reports.render` for four presets plus a wide range and every
+  `compute*`, captures every XLSX workbook through a patched `XLSX.write`, the
+  DOCX constructor calls through a recording `docx` stub and the jsPDF call
+  sequence through a recording stub, then sha256s each — 101 fingerprints diffed
+  against a HEAD baseline. It was the decisive evidence on every task of the
+  run, and it sees what greps cannot (sheet names, `!cols` widths, every cell,
+  every rendered screen). Two gotchas: the first two runs differed purely on
+  generated-at timestamps and today-relative ranges, so freeze the clock before
+  capturing the baseline; and it **never loads `js/app.js`** — it fingerprints
+  `Views`/`Reports`/`Exports` only, so an `app.js` claim needs the unit harness
+  (`test/unit/helpers/app-harness.js`, which does evaluate `app.js`'s IIFE) or a
+  browser run. T2's plan rationale said the sidebar was "fingerprinted"; it is
+  not, and the verifier caught it.
+
 - **"The code looks correct" is not verification in this repo (seen 4×).**
   `node --check js/<file>.js` proves the file parses and nothing more. A verifier
   must run the test suite AND, for anything touching the UI, actually load the
@@ -65,7 +84,17 @@ A lesson that just restates an architecture rule should be deleted — point at
   to dim a cancelled booking, but the only rule is `.row-retired > td` — a table
   rule — and the agenda row is a `div`, so nothing dimmed. Before reusing an
   existing class on a new element shape, grep the selector and check it isn't
-  `table`/child-scoped.)_
+  `table`/child-scoped. 2026-09-18, the mirror image: `.progress .seg` and
+  `.progress .seg i` had sat in `css/app.css` as pure dead weight, because every
+  emitter writes `class="progress seg"` on the **same** element — the descendant
+  selectors could never match, and the bar was always painted by `.progress > i`.
+  Descendant vs same-element is the thing to check on any compound class string.
+  Note also that the new dead-CSS lint in `wiring.test.js` greps raw source, so a
+  class named after an ordinary English word counts as "emitted" when a code
+  comment or seed string contains it — `.segment` passes because `reports.js` and
+  `db.js` prose mention segments. Harmless today (no live class depends on a
+  comment-only match, measured), but strip comments from the JS side of that
+  haystack before trusting it on a new name.)_
 
 - **There is a test suite now — run it, and add to it.** `node --test
   'test/unit/*.test.js'` needs nothing installed; the browser group
@@ -139,6 +168,18 @@ A lesson that just restates an architecture rule should be deleted — point at
   function's own body or a fenced block, grep case-sensitively for a string that
   only the new code can contain, and express suite growth as "0 failures and
   ≥ the measured baseline", never as a predicted total.)_
+  _(2026-09-18, seen 3×: 4 of 12 tasks again carried one, and three shared a
+  single new shape — a `grep -c` whose pattern also matches the helper's own
+  **definition line**, so every expected count was low by one (`addSheet` 37 vs
+  36, `xlsxBlob` 6 vs 5, `addCol` 42 vs 43 because `const addCol = (` does *not*
+  contain `addCol(`). Write the pattern so it can only match a call
+  (`grep -c "addSheet(XLSX, wb, '"`), or state the count including the
+  definition. The other two: an added-line count of 1 for deleting a selector
+  from the middle of a comma list, where 2 is the arithmetic minimum; and a "net
+  shrink" check run as `git diff --shortstat HEAD` over the whole tree, which a
+  plan that also mandates 179 lines of new tests can never satisfy — scope a
+  shrink claim to shipped code (`git diff --shortstat <base> -- css js
+  index.html sw.js`, which printed 175+/317− here).)_
 
 - **When only a faulty criterion is unmet, the outcome is `done` with a noted
   discrepancy — not `blocked`.** _(2026-09-17, T13)_ The release task's work
@@ -162,6 +203,16 @@ A lesson that just restates an architecture rule should be deleted — point at
   for every rule a test claims to pin, delete that rule in a scratch copy
   (`git archive HEAD | tar -x` into the scratchpad) and prove the test goes red;
   fixtures must contain two rows that differ *only* in the pinned dimension.
+  _(2026-09-18, seen 2×: all three test-writing tasks shipped mutation proofs as
+  a matter of course — swapping the two cancelled-status strings, dropping the
+  `Number()` coercion in `round2`, deleting a `CREATE INDEX` from the SCHEMA
+  string, re-adding a dead `ICONS` key — and each verifier re-ran them itself on
+  its own scratch copy rather than relaying them. Also worth copying: when a
+  probe refuses to go red, say why instead of widening the test. The dead-CSS
+  lint's `.segment` probe stayed green because English prose contains the word,
+  so the executor proved the intended word-boundary property with three
+  non-colliding probes (`.segz`, `.btnz`, `.btn-primar`) and reported the
+  sub-case as faulty.)_
 
 - **Harvest the "accepted with nits" list into a fix pass before release.**
   _(2026-09-17)_ All 13 tasks passed, yet re-reading the verifiers' non-gating
@@ -170,7 +221,13 @@ A lesson that just restates an architecture rule should be deleted — point at
   seeded training date falling *after* the session it authorised, and three
   manual sentences wrong on inspection. A `pass: true` verdict with populated
   `problems` is a work item, not a footnote — scan the whole run's `problems`
-  arrays once the batch is green.
+  arrays once the batch is green. _(2026-09-18, seen 2×: the 12/12 run's nits
+  are mostly plan-quality — a `js/db.js` section comment left over-promising
+  after `projectFlags` was deleted, a CHANGELOG lead sentence claiming "nothing
+  a user sees changes" when the Settings `Version:` line does, and
+  `docs/index.html`'s eyebrow auto-advancing to the new release while its
+  hand-written hero and cards still describe the previous one. None gate a
+  release; all three are one-line follow-ups worth batching.)_
 
 ## The trap that makes work look like it did nothing
 
@@ -186,7 +243,13 @@ A lesson that just restates an architecture rule should be deleted — point at
   of an intervening `js/`/`css/` task flagged the still-pending bump in its
   problems list while passing the task. That pairing — own task, plus a standing
   verifier reminder — is the pattern to repeat; the flag is what stops the
-  release task being dropped when a run ends early.)_
+  release task being dropped when a run ends early. 2026-09-18 repeated it, with
+  one refinement: the release task **must** break a byte-identical-output
+  criterion, because `Views.settings` renders `APP_VERSION` and so exactly one
+  golden fingerprint (`views.settings`) changes. Exempt that single fingerprint
+  in the release task's criteria rather than demanding an empty diff; the
+  verifier established intent by reverting only `APP_VERSION` on a scratch copy
+  and getting GOLDEN-CLEAN on all 101.)_
 
 - **`docs/` changes need no version bump and no changelog entry.**
   The versioning rules exist to cache-bust the app shell; the docs page and the
@@ -329,6 +392,21 @@ A lesson that just restates an architecture rule should be deleted — point at
   instrument-less bookings) were independently reproducible in the shipped demo seed with no setup
   — before writing a fixture, try the claim against the demo dataset first.
 
+- **Collapsing a wrapper into an alias (`const f = UI.f;`) is safe here, but
+  only for four reasons — check them, don't assume them.** _(2026-09-18)_ 1.13.1
+  replaced `function fmtMoney(n) { return UI.fmtMoney(n); }`-style wrappers in
+  `app.js`, `reports.js` and `exports.js` (and `round2`,
+  `utcTimestampToLocalDay`) with aliases. An alias captures the value at
+  IIFE-evaluation time and a `const` does not hoist like a `function`, so it
+  needs: `ui.js` loaded first (true in `index.html`, in every test
+  `loadApp([...])` and in `app-harness.js`'s `MODULE_ORDER`), no `this` in the
+  implementation, no later `UI.x = …` reassignment anywhere, and no top-level
+  call before the declaration. All four held; miss one and you get a TDZ
+  `ReferenceError` or a silent unbinding on a path no test visits. Same
+  discipline applies to de-duplicating the `ICONS` map: prove the two SVG strings
+  are byte-identical at HEAD before repointing callers, rather than reading them
+  as "the same icon".
+
 ## Rendering claims (2026-09-12)
 
 - **A rendered page image is not evidence for right-to-left text.** The bundled `libs/jspdf.umd.min.js`
@@ -362,7 +440,12 @@ A lesson that just restates an architecture rule should be deleted — point at
   and verifier in every accepted verdict, e.g. `31 2 0 true 490 546.25 589.95 1
   16 1 0 true`. Long composite one-liners that print one line of many fields
   work well: they pin a dozen invariants, including untouched money figures,
-  without a dozen criteria.)_
+  without a dozen criteria. 2026-09-18, seen 3×: 12/12 first-try on the same
+  shape. The one thing that plan failed to pin was *form* rather than fact — it
+  said "replace the inline ALTER lines" with an `addCol` helper, and the
+  executor kept one call per column, so `js/db.js` shrank in bytes but grew by
+  two lines. If a plan cares about line count, grouping or ordering it has to
+  say so; a criterion binds only what it measures.)_
 
 - **A planner must not ban vocabulary its own scope statement uses.** T10's
   brief forbade the word "column" in changelog prose while the brief itself (and
@@ -392,26 +475,14 @@ A lesson that just restates an architecture rule should be deleted — point at
 
 <!-- cma:append-here -->
 
-## Hard rules for the 2026-09 parallel runs (orchestrator, 2026-09-16)
+## Hard rules for concurrent work in one tree (orchestrator)
 
-Three issues are being built at once in sibling checkouts (`C:\Users\Owner\repos\cfc-39`, `cfc-47`, `cfc-41`). They were first set up as **git worktrees of one clone, which share a single stash stack** — a verifier's `git stash` in one worktree swapped #39's and #47's uncommitted work and cost an hour; #41 escaped only by luck, its verifiers used `git stash` too. Fixed by rebuilding as independent clones. **Parallel issues get independent clones, never worktrees.** For every executor and verifier:
+Batched runs put several tasks in one working tree with no commits between them; the 2026-09-16 issues additionally ran in sibling checkouts that, set up as **git worktrees of one clone, shared a single stash stack** — a verifier's `git stash` swapped two runs' uncommitted work and cost an hour. **Parallel issues get independent clones, never worktrees.** For every executor and verifier:
 
-- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Tasks run back to back with no commits in between; every one of these commands destroys a sibling task's work. _(Violated again 2026-09-17: T12's executor ran `git stash` / `git stash pop` to establish a pre-task baseline for a grep count. Nothing was lost this time, but the need was entirely served by `git show HEAD:<path>` — a prohibition lands only when the brief names the read-only substitute next to it.)_
-- **To compare against the base commit**, use read-only forms only: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, `git log`. `git stash` is *not* one of them. To test "does this fail on unmodified HEAD too?", extract the file with `git show HEAD:<path> > <scratchpad>/<name>` and run the check on that copy, or clone `C:\Users\Owner\repos\cfc-main` into the scratchpad.
-- **Stay inside your own checkout.** The repo path in your brief is the only directory you may edit. If `git status` shows changes that clearly belong to another issue (#39 tags, #47 training, #41 outputs), stop and report `blocked` with what you saw; do not "clean up".
-- **Line endings are LF** in these clones (`core.autocrlf=false`). Do not introduce CRLF. `test/unit/wiring.test.js` and `boot-ready-signal.test.js` scrape `js/app.js` with LF-anchored patterns: the first #41 clone was made on Windows with `core.autocrlf=true`, so those two tests failed on *every* task until the clones were recreated — burning verifier time on each. Before a run, confirm `git config core.autocrlf` is `false` in the checkout; when a scraper test fails, check line endings before the diff.
-- **Timezone:** inline `TZ='Asia/Jerusalem' node ...` was a Windows-shell artefact that did not reach `process.env.TZ` (a test asserting the literal env value then fails for environment reasons — say so plainly rather than chasing it). _(Revised 2026-09-17: on the Linux container the inline form works normally and every suite in the 1.13.0 run was exercised at UTC+ with it. Check `node -e "console.log(process.env.TZ)"` once per environment instead of assuming either behaviour.)_
-- **Reporting `blocked` on a polluted tree is the best possible outcome, not a
-  failure.** _(2026-09-16, #47 T7)_ The shared stash stack swapped #39 and #47
-  work; the verifier noticed `js/db.js` held a `#39` fence instead of `#47` and
-  refused to pass, and the retry executor made zero edits and reported
-  `blocked` with `git status` / reflog evidence. That pair of refusals is why
-  nothing was silently overwritten and the run was recoverable. An executor that
-  had "helpfully" cleaned the tree would have destroyed the sibling issue's
-  work. Detection rule: check that *your* task's marker (fence, symbol, column)
-  is what the file actually contains before trusting the tree.
-
-- **No version bumps, ever, on these branches.** `index.html ?v=`, `sw.js CACHE_VERSION/PRECACHE_URLS`, `js/consts.js APP_VERSION` stay untouched; CHANGELOG bullets go under `## [Unreleased]`.
+- **Never change working-tree state with git.** No `git stash`, `git reset`, `git checkout -- <path>`, `git switch`, `git clean`, `git worktree`, `git commit`, `git pull`. Read-only forms only: `git diff`, `git diff --stat`, `git show HEAD:js/app.js`, `git log`, `git status`. To test "does this fail on unmodified HEAD too?", or to run a mutation proof, extract with `git show HEAD:<path> > $SP/<name>` or `git archive HEAD | tar -x` into the scratchpad and work there. _(A prohibition lands only when the brief names the read-only substitute next to it: 2026-09-17's T12 stashed for want of `git show HEAD:`; with the substitute spelled out, every 2026-09-18 executor and verifier ran its mutation proofs on scratchpad copies — preserving the tree layout so `load-module.js`'s `REPO = resolve(__dirname,'..','..','..')` still resolves — and the tree was provably untouched.)_
+- **Expect your neighbours' files in `git status`, and attribute them.** In a batched run every concurrent task's edits are visible. Each executor scopes its own diffstat (`git diff --stat HEAD -- <its files>`) and names which other modified files belong to siblings; each verifier confirms the out-of-scope set matches the batch. A file changed by no task in the batch means stop and report `blocked` with what you saw — do not "clean up". Detection rule: check that *your* task's marker (fence, symbol, column) is what the file actually contains before trusting the tree. _(2026-09-16 #47 T7: that refusal is why nothing was silently overwritten and the run was recoverable. 2026-09-18: all three multi-task batches attributed correctly and no verdict was confused by a sibling's diff.)_
+- **Line endings are LF** (`core.autocrlf=false`). `test/unit/wiring.test.js` and `boot-ready-signal.test.js` scrape `js/*.js` with LF-anchored patterns and throw on every task in a CRLF clone. Confirm `git config core.autocrlf` before a run; when a scraper test fails, check line endings before the diff.
+- **Timezone:** check `node -e "console.log(process.env.TZ)"` once per environment. The inline `TZ='Asia/Jerusalem' node ...` form works on the Linux container and did not reach `process.env.TZ` in the Windows shell.
 
 ## Orchestrator mechanics
 
