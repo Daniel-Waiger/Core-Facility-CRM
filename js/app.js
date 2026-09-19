@@ -284,7 +284,7 @@
             <button class="btn btn-primary btn-sm" data-act="new-project" title="Initiate Project">${ic('plus')}<span class="lbl">New Project</span></button>
             <button class="btn btn-tour btn-sm" data-act="tour" title="Interactive Guided Tour">${ic('play')}<span class="lbl">Tour</span></button>
             <button class="btn btn-secondary btn-sm sidebar-theme-btn" data-act="theme-toggle" title="Switch Appearance"></button>
-            <button class="btn btn-secondary btn-sm sidebar-settings-btn" data-nav="settings" title="Backups &amp; Settings">${ic('gear')}<span class="lbl">Settings</span></button>
+            <button class="btn btn-secondary btn-sm sidebar-settings-btn" data-nav="settings" title="Backups &amp; Settings">${ic('settings')}<span class="lbl">Settings</span></button>
             <a class="btn btn-secondary btn-sm sidebar-manual-btn" href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/manual/" target="_blank" rel="noopener noreferrer" title="User manual — how to use every feature">${ic('book')}<span class="lbl">Manual</span></a>
             <a class="btn btn-mango btn-sm sidebar-relnotes-btn" href="https://daniel-waiger.github.io/Core-Facility-CRM/docs/" target="_blank" rel="noopener noreferrer" title="What&#39;s new — release notes">${ic('sparkles')}<span class="lbl">Release Notes</span></a>
           </div>
@@ -2873,13 +2873,7 @@
     }));
   }
 
-  // Delegates to the single shared implementation (ui.js) so the booking modal and Reports can
-  // never disagree about money (CLAUDE.md: "exactly one copy"). Kept as a local wrapper so the
-  // ~20 existing call sites in this file don't all need renaming to UI.fmtMoney. Note this
-  // changes displayed output from e.g. $1250.00 to $1,250.00 (thousands separators) — intended.
-  function fmtMoney(n) {
-    return UI.fmtMoney(n);
-  }
+  const fmtMoney = UI.fmtMoney;
 
   // Every rate/cost/quantity/duration form field carries a `min="0"` HTML hint, but nothing
   // actually enforced it — `Number(x) || 0` lets a typed "-5" straight through to every saver

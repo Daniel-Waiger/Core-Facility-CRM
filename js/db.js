@@ -285,40 +285,42 @@
   }
 
   function migrate() {
+    // Additive column helper: no-op when the column already exists.
+    const addCol = (t, d) => { try { db.exec(`ALTER TABLE ${t} ADD COLUMN ${d}`); } catch (_) {} };
     // Graceful column migrations for existing databases
-    try { db.exec("ALTER TABLE projects ADD COLUMN sample TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE projects ADD COLUMN flags TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE people ADD COLUMN organization TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE people ADD COLUMN department TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE instruments ADD COLUMN location TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN link TEXT DEFAULT ''"); } catch (_) {}
+    addCol('projects', "sample TEXT DEFAULT ''");
+    addCol('projects', "flags TEXT DEFAULT ''");
+    addCol('people', "organization TEXT DEFAULT ''");
+    addCol('people', "department TEXT DEFAULT ''");
+    addCol('instruments', "location TEXT DEFAULT ''");
+    addCol('meetings', "link TEXT DEFAULT ''");
     // Instrument/staff booking + billing (cost, rates, times, discounts) — additive columns.
-    try { db.exec("ALTER TABLE instruments ADD COLUMN cost REAL DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE instruments ADD COLUMN cost_unit TEXT DEFAULT 'time'"); } catch (_) {}
-    try { db.exec("ALTER TABLE people ADD COLUMN is_staff INTEGER DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE people ADD COLUMN rate REAL DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE people ADD COLUMN rate_unit TEXT DEFAULT 'hour'"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN start_time TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN end_time TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN discount_pct REAL DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN group_org TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN group_discount_pct REAL DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN subtotal REAL DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN total_before_tax REAL DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN total_cost REAL DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN amount REAL DEFAULT 0"); } catch (_) {}
+    addCol('instruments', "cost REAL DEFAULT 0");
+    addCol('instruments', "cost_unit TEXT DEFAULT 'time'");
+    addCol('people', "is_staff INTEGER DEFAULT 0");
+    addCol('people', "rate REAL DEFAULT 0");
+    addCol('people', "rate_unit TEXT DEFAULT 'hour'");
+    addCol('meetings', "start_time TEXT DEFAULT ''");
+    addCol('meetings', "end_time TEXT DEFAULT ''");
+    addCol('meetings', "discount_pct REAL DEFAULT 0");
+    addCol('meetings', "group_org TEXT DEFAULT ''");
+    addCol('meetings', "group_discount_pct REAL DEFAULT 0");
+    addCol('meetings', "subtotal REAL DEFAULT 0");
+    addCol('meetings', "total_before_tax REAL DEFAULT 0");
+    addCol('meetings', "total_cost REAL DEFAULT 0");
+    addCol('meeting_instruments', "amount REAL DEFAULT 0");
     // Retirement: a person or instrument that leaves the facility is retired, never deleted, so
     // every historical record that references them (bookings, milestones, projects) stays intact.
-    try { db.exec("ALTER TABLE people ADD COLUMN is_retired INTEGER DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE people ADD COLUMN retired_at TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE instruments ADD COLUMN is_retired INTEGER DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE instruments ADD COLUMN retired_at TEXT DEFAULT ''"); } catch (_) {}
+    addCol('people', "is_retired INTEGER DEFAULT 0");
+    addCol('people', "retired_at TEXT DEFAULT ''");
+    addCol('instruments', "is_retired INTEGER DEFAULT 0");
+    addCol('instruments', "retired_at TEXT DEFAULT ''");
     // A project is archived rather than deleted, for the same reason: its bookings, their cost
     // snapshots, and the team and instruments that worked on it are the facility's record of
     // what was actually done and billed.
-    try { db.exec("ALTER TABLE projects ADD COLUMN is_archived INTEGER DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE projects ADD COLUMN archived_at TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE meeting_instruments ADD COLUMN line_cost REAL DEFAULT 0"); } catch (_) {}
+    addCol('projects', "is_archived INTEGER DEFAULT 0");
+    addCol('projects', "archived_at TEXT DEFAULT ''");
+    addCol('meeting_instruments', "line_cost REAL DEFAULT 0");
     try {
       db.exec(`
         CREATE TABLE IF NOT EXISTS vocab (
@@ -405,12 +407,12 @@
 
     // Cancellation. Runs AFTER the meetings rebuild above on purpose: that rebuild copies an
     // explicit column list into a fresh table, so anything added before it would be dropped.
-    try { db.exec("ALTER TABLE meetings ADD COLUMN is_cancelled INTEGER DEFAULT 0"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN cancelled_at TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE meetings ADD COLUMN billing_retained INTEGER DEFAULT 0"); } catch (_) {}
+    addCol('meetings', "is_cancelled INTEGER DEFAULT 0");
+    addCol('meetings', "cancelled_at TEXT DEFAULT ''");
+    addCol('meetings', "billing_retained INTEGER DEFAULT 0");
     // Consult-type tag (sync / consult / training / assisted session, extensible via the vocab
     // table like every other dropdown) so Reports can count consults per instrument and period.
-    try { db.exec("ALTER TABLE meetings ADD COLUMN category TEXT DEFAULT ''"); } catch (_) {}
+    addCol('meetings', "category TEXT DEFAULT ''");
 
     // Grants: a name/number entity, pickable on bookings and projects, with an allowed-users join
     // table — retired (not deleted) via the same is_retired pattern as people/instruments once
@@ -438,17 +440,17 @@
         );
       `);
     } catch (_) {}
-    try { db.exec('ALTER TABLE meetings ADD COLUMN grant_id INTEGER'); } catch (_) {}
-    try { db.exec('ALTER TABLE projects ADD COLUMN grant_id INTEGER'); } catch (_) {}
+    addCol('meetings', "grant_id INTEGER");
+    addCol('projects', "grant_id INTEGER");
 
     // Per-instrument booking constraints (min/max session duration, minimum gap between bookings
     // on the same instrument, minimum advance notice before a booking's start). Zero = unconstrained,
     // so an existing instrument with no configured constraints behaves exactly as before. Enforced
     // in app.js's findBookingConflicts.
-    try { db.exec('ALTER TABLE instruments ADD COLUMN min_duration_mins INTEGER DEFAULT 0'); } catch (_) {}
-    try { db.exec('ALTER TABLE instruments ADD COLUMN max_duration_mins INTEGER DEFAULT 0'); } catch (_) {}
-    try { db.exec('ALTER TABLE instruments ADD COLUMN min_gap_mins INTEGER DEFAULT 0'); } catch (_) {}
-    try { db.exec('ALTER TABLE instruments ADD COLUMN min_notice_hours REAL DEFAULT 0'); } catch (_) {}
+    addCol('instruments', "min_duration_mins INTEGER DEFAULT 0");
+    addCol('instruments', "max_duration_mins INTEGER DEFAULT 0");
+    addCol('instruments', "min_gap_mins INTEGER DEFAULT 0");
+    addCol('instruments', "min_notice_hours REAL DEFAULT 0");
 
     // Pricing tiers (roadmap 2.2): named overhead tiers replacing the binary internal/external
     // overhead pair. A group/lab is assigned a tier (group_tiers, soft link like grant_id — org is
@@ -479,8 +481,8 @@
         );
       `);
     } catch (_) {}
-    try { db.exec('ALTER TABLE meetings ADD COLUMN tier_id INTEGER'); } catch (_) {}
-    try { db.exec('ALTER TABLE meetings ADD COLUMN tier_overhead_pct REAL'); } catch (_) {}
+    addCol('meetings', "tier_id INTEGER");
+    addCol('meetings', "tier_overhead_pct REAL");
 
     // Standalone service entries (roadmap 2.3): billable work logged outside any booking —
     // technician time, sample prep, per-unit items. project_id carries ON DELETE SET NULL, same
@@ -605,7 +607,7 @@
       `);
     } catch (_) {}
     seedDefaultCategoryPolicies();
-    try { db.exec('ALTER TABLE meetings ADD COLUMN category_staff_pct REAL'); } catch (_) {}
+    addCol('meetings', "category_staff_pct REAL");
 
     // Project outputs (roadmap 3.3) — the funnel's exit stage (publication/acknowledgement/
     // dataset/other). A data table, not a settings table, so it belongs in clearAllData() and
@@ -633,8 +635,8 @@
     try { db.exec("ALTER TABLE meetings ADD COLUMN tags TEXT DEFAULT ''"); } catch (_) {}
     // --- #39 end ---
     // --- #47 begin ---
-    try { db.exec("ALTER TABLE people ADD COLUMN mobile TEXT DEFAULT ''"); } catch (_) {}
-    try { db.exec("ALTER TABLE people ADD COLUMN campus TEXT DEFAULT ''"); } catch (_) {}
+    addCol('people', "mobile TEXT DEFAULT ''");
+    addCol('people', "campus TEXT DEFAULT ''");
     try {
       db.exec(`
         CREATE TABLE IF NOT EXISTS person_instrument_training (
@@ -1894,17 +1896,6 @@
     return list.length ? list[0] : null;
   }
 
-  // Array-based backwards compatible helpers
-  function q(sql, params = []) {
-    const stmt = db.prepare(sql);
-    if (params && params.length) stmt.bind(params);
-    const list = [];
-    while (stmt.step()) list.push(stmt.getArray());
-    stmt.free();
-    return list;
-  }
-  function q1(sql, params = []) { return q(sql, params)[0] || null; }
-
   // Parameterized mutation helper
   function run(sql, params = []) {
     assertWritable();
@@ -1971,26 +1962,12 @@
     }
   }
 
-  /* ---------------- Compute: progress + flags ---------------- */
+  /* ---------------- Compute: progress ---------------- */
   function projectProgress(pid) {
     const r = row('SELECT COUNT(*) as c, COALESCE(SUM(CASE WHEN status="done" THEN 1 ELSE 0 END),0) as d FROM milestones WHERE project_id=?', [pid]);
     const c = (r && r.c) || 0;
     const d = (r && r.d) || 0;
     return { total: c, done: d, pct: c ? Math.round((d / c) * 100) : 0 };
-  }
-
-  function projectFlags(pid) {
-    const flags = [];
-    // global.UI is defined by the time this runs (called at render time, after all scripts have
-    // loaded), even though db.js itself loads before ui.js — see CLAUDE.md module load order.
-    const now = global.UI.today();
-    const ms = rows('SELECT status, due_date FROM milestones WHERE project_id=? AND status!="done"', [pid]);
-    for (const m of ms) {
-      if (m.due_date && m.due_date < now) {
-        flags.push('overdue');
-      }
-    }
-    return flags;
   }
 
   /* ---------------- Vocab (user-extensible dropdown terms) ----------------
@@ -2091,10 +2068,6 @@
     const clamped = Math.min(100, Math.max(0, Number(percent) || 0));
     run('INSERT INTO group_discounts (org, percent) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET percent=excluded.percent', [org, clamped]);
   }
-  function listGroupDiscounts() {
-    return rows('SELECT org, percent FROM group_discounts ORDER BY org');
-  }
-
   /* ---------------- Pricing tiers (named overhead, replacing the internal/external pair) ----------------
      A pricing tier is just {name, overhead_pct}, retired (not deleted) once anything references it —
      same is_retired/retired_at pattern as people/instruments/grants (see setRetired below, which
@@ -2134,9 +2107,6 @@
     if (!org) return;
     if (!tierId) { run('DELETE FROM group_tiers WHERE org=?', [org]); return; }
     run('INSERT INTO group_tiers (org, tier_id) VALUES (?,?) ON CONFLICT(org) DO UPDATE SET tier_id=excluded.tier_id', [org, Number(tierId)]);
-  }
-  function listGroupTiers() {
-    return rows('SELECT org, tier_id FROM group_tiers ORDER BY org');
   }
   // Seed-only idempotent upsert by name (pricing_tiers.name is not itself a key — id is a real
   // surrogate key, unlike group_discounts/group_tiers' org PK — so this does a plain check-then-
@@ -3743,10 +3713,8 @@
 
   global.DB = {
     boot,
-    get memoryMode() { return memoryMode; },
     get isDemo() { return !!global.IS_DEMO; },
     currentBytes,
-    markDirty,
     flushNow,
     get isReadOnly() { return multiTabGuard.isReadOnly(); },
     buildBackup,
@@ -3763,12 +3731,9 @@
     rows,
     outputEffectiveDate,
     row,
-    q,
-    q1,
     run,
     transaction,
     projectProgress,
-    projectFlags,
     vocabList,
     addVocab,
     bookingTagCounts,
@@ -3777,17 +3742,13 @@
     setConfig,
     getGroupDiscount,
     setGroupDiscount,
-    listGroupDiscounts,
     getTierForOrg,
     resolveOverheadForOrg,
     getGroupTierId,
     setGroupTier,
-    listGroupTiers,
-    upsertPricingTierByName,
     countTierRefs,
     tierLabel,
     buildTierLabelMap,
-    getInstrumentTierRate,
     resolveInstrumentCost,
     setInstrumentTierRate,
     deleteInstrumentTierRate,
@@ -3807,7 +3768,6 @@
     grantLabel,
     setProjectArchived,
     countBookingRefs,
-    refreshAttendeesForMeeting,
     refreshAttendeesForPerson,
     setBookingCancelled,
     setServiceEntryCancelled,
@@ -3815,7 +3775,6 @@
     listAllOrgNames,
     countOrgRefs,
     renameOrganization,
-    hiddenVocab,
     countBookingCategoryRefs,
     protectedBookingCategories,
     renameBookingCategory,

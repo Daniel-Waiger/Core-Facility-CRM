@@ -109,8 +109,7 @@ body {
 .sidebar.collapsed .brand .name,
 .sidebar.collapsed .brand .sub,
 .sidebar.collapsed .nav-item .lbl,
-.sidebar.collapsed .sidebar-foot .lbl,
-.sidebar.collapsed .nav-section {
+.sidebar.collapsed .sidebar-foot .lbl {
   display: none;
 }
 .sidebar.collapsed .nav-item {
@@ -215,7 +214,6 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .topbar .title { font-size: 16px; font-weight: 600; }
-.topbar .crumb { color: var(--text-muted); font-size: 13px; }
 .topbar .grow { flex: 1; }
 .saved-dot { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 7px; }
 .saved-dot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
@@ -412,19 +410,6 @@ body {
   stroke: #17272b;
 }
 
-/* ---------- Theme Switch Knob ---------- */
-.theme-toggle {
-  width: 44px; height: 24px; border-radius: 999px;
-  background: var(--border-strong); position: relative;
-  cursor: pointer; transition: background 0.2s;
-}
-[data-theme="dark"] .theme-toggle { background: var(--primary); }
-.theme-toggle .knob {
-  width: 20px; height: 20px; border-radius: 50%;
-  background: #fff; position: absolute; top: 2px; left: 2px;
-  transition: left 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
-}
-
 /* ---------- Forms ---------- */
 .field { display: flex; flex-direction: column; gap: 5px; }
 /* The `display: flex` above overrides the UA default `[hidden] { display: none }` — without
@@ -474,8 +459,6 @@ textarea.input { resize: vertical; min-height: 74px; }
 /* ---------- Progress ---------- */
 .progress { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .progress > i { display: block; height: 100%; background: var(--primary); border-radius: 999px; }
-.progress .seg { position: relative; }
-.progress .seg i { background: linear-gradient(90deg, var(--primary), #8a4ccf); }
 .progress.seg + span, .row .progress + span { white-space: nowrap; flex: none; }
 
 /* ---------- KVS (key-value table) ---------- */
@@ -655,10 +638,9 @@ textarea.input { resize: vertical; min-height: 74px; }
 .clickable { cursor: pointer; user-select: none; }
 .clickable:hover { opacity: 0.85; }
 .font-medium { font-weight: 500; }
-.whitespace-pre { white-space: pre-wrap; }
 .mb-8 { margin-bottom: 8px; }
 .mb-16 { margin-bottom: 16px; }
-.mt-0 { margin-top: 0; } .mt-8 { margin-top: 8px; } .mt-12 { margin-top: 12px; } .mt-16 { margin-top: 16px; }
+.mt-0 { margin-top: 0; } .mt-8 { margin-top: 8px; } .mt-16 { margin-top: 16px; }
 .muted { color: var(--text-muted); }
 .faint { color: var(--text-faint); }
 .small { font-size: 12px; }
@@ -686,8 +668,6 @@ textarea.input { resize: vertical; min-height: 74px; }
 .action-items { background: var(--warning-soft); padding: 6px 10px; border-radius: 6px; font-size: 12.5px; }
 .modal-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .modal-title svg { width: 18px; height: 18px; color: var(--primary); }
-.link-btn { color: var(--primary); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
-.link-btn:hover { text-decoration: underline; }
 .file-link {
   display: inline-flex; align-items: center; gap: 8px; font-weight: 600;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
@@ -1018,7 +998,6 @@ textarea.input { resize: vertical; min-height: 74px; }
     gap: 16px;
   }
   .topbar .title { font-size: 21px; }
-  .topbar .crumb { font-size: 16px; }
   .saved-dot { font-size: 15px; }
   .saved-dot .dot { width: 9px; height: 9px; }
 

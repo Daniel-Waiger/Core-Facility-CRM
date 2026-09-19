@@ -116,6 +116,31 @@ describe('labels: UI.retiredName', () => {
   });
 });
 
+describe('labels: UI.bookingStatusLabel', () => {
+  test('pins the three cancelled-status strings and the active pass-through', async () => {
+    const { UI } = await freshDb();
+    assert.equal(UI.bookingStatusLabel({ is_cancelled: 1, billing_retained: 1 }, 'Booked'), 'Cancelled (charged)');
+    assert.equal(UI.bookingStatusLabel({ is_cancelled: 1, billing_retained: 0 }, 'Booked'), 'Cancelled (waived)');
+    // Not cancelled: the caller's own active word comes back verbatim, and billing_retained is
+    // ignored entirely — it only means anything once is_cancelled is true.
+    assert.equal(UI.bookingStatusLabel({ is_cancelled: 0, billing_retained: 0 }, 'Booked'), 'Booked');
+    assert.equal(UI.bookingStatusLabel({ is_cancelled: 0, billing_retained: 1 }, 'Active'), 'Active');
+  });
+});
+
+describe('labels: UI.round2', () => {
+  test('rounds to 2 decimal places and treats non-numeric input as zero', async () => {
+    const { UI } = await freshDb();
+    assert.equal(UI.round2(null), 0);
+    assert.equal(UI.round2(undefined), 0);
+    assert.equal(UI.round2(NaN), 0);
+    assert.equal(UI.round2(1.9999999999998), 2);
+    assert.equal(UI.round2(3.14159), 3.14);
+    assert.equal(UI.round2('2.5'), 2.5);
+    assert.equal(UI.round2(0), 0);
+  });
+});
+
 describe('labels: UI.esc', () => {
   const { UI } = require('./helpers/load-module').loadApp(['consts', 'db', 'ui']);
 
